@@ -10,11 +10,13 @@ static constexpr int32_t HARVEST_ENERGY = 2;
 static constexpr int32_t HARVEST_ALLOY = 1;
 
 // Unit costs (energy, alloy) — v1 placeholders
-static constexpr int32_t INTERCEPTOR_COST_E = 20, INTERCEPTOR_COST_A = 0;
-static constexpr int32_t FRIGATE_COST_E = 30, FRIGATE_COST_A = 5;
-static constexpr int32_t ARTILLERY_COST_E = 40, ARTILLERY_COST_A = 10;
-static constexpr int32_t FACTORY_COST_E = 0, FACTORY_COST_A = 50;
-static constexpr int32_t CLAIM_COST_E = 0, CLAIM_COST_A = 20;
+static constexpr int32_t DRONE_COST_E = 5,         DRONE_COST_A = 0;
+static constexpr int32_t INTERCEPTOR_COST_E = 10,  INTERCEPTOR_COST_A = 5;
+static constexpr int32_t FRIGATE_COST_E = 40,      FRIGATE_COST_A = 5;
+static constexpr int32_t ARTILLERY_COST_E = 10,    ARTILLERY_COST_A = 25;
+static constexpr int32_t BATTLESHIP_COST_E = 120,  BATTLESHIP_COST_A = 15;
+static constexpr int32_t FACTORY_COST_E = 0,       FACTORY_COST_A = 50;
+static constexpr int32_t CLAIM_COST_E = 0,         CLAIM_COST_A = 20;
 
 static void harvest(World& world) {
   for (const auto& [uid, unit] : world.units) {
@@ -60,6 +62,10 @@ static void spend(World& world, const ValidatedCommands& cmds_a, const Validated
       auto utype = static_cast<UnitType>(cmd.aux);
       int32_t cost_e = 0, cost_a = 0;
       switch (utype) {
+      case UnitType::Drone:
+        cost_e = DRONE_COST_E;
+        cost_a = DRONE_COST_A;
+        break;
       case UnitType::Interceptor:
         cost_e = INTERCEPTOR_COST_E;
         cost_a = INTERCEPTOR_COST_A;
@@ -71,6 +77,10 @@ static void spend(World& world, const ValidatedCommands& cmds_a, const Validated
       case UnitType::Artillery:
         cost_e = ARTILLERY_COST_E;
         cost_a = ARTILLERY_COST_A;
+        break;
+      case UnitType::Battleship:
+        cost_e = BATTLESHIP_COST_E;
+        cost_a = BATTLESHIP_COST_A;
         break;
       default:
         continue;

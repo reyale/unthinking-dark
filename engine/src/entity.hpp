@@ -15,6 +15,7 @@ enum class UnitType : uint8_t {
   Interceptor = 1,
   Frigate = 2,
   Artillery = 3,
+  Battleship = 4,
 };
 static_assert(std::is_same_v<std::underlying_type_t<UnitType>, uint8_t>,
               "UnitType underlying type changed — update Command::aux consumers");

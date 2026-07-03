@@ -18,8 +18,11 @@ static const UnitStats UNIT_STATS[] = {
   // Artillery
   {cfg::ARTILLERY_HP, cfg::ARTILLERY_DMG, cfg::ARTILLERY_RANGE, cfg::ARTILLERY_SIGHT,
    cfg::ARTILLERY_SPEED, false, /*splash*/ true, cfg::ARTILLERY_SPLASH_RADIUS, /*priority*/ 1},
+  // Battleship
+  {cfg::BATTLESHIP_HP, cfg::BATTLESHIP_DMG, cfg::BATTLESHIP_RANGE, cfg::BATTLESHIP_SIGHT,
+   cfg::BATTLESHIP_SPEED, false, false, 0, /*priority*/ 2},
 };
-static_assert(std::size(UNIT_STATS) == static_cast<std::size_t>(UnitType::Artillery) + 1,
+static_assert(std::size(UNIT_STATS) == static_cast<std::size_t>(UnitType::Battleship) + 1,
               "UNIT_STATS out of sync with UnitType enum — add a row for the new type");
 
 const UnitStats& stats_for(UnitType t) {

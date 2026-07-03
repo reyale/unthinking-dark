@@ -115,7 +115,8 @@ static CellData make_cell(const game::Map& map, const game::FrameState& fr,
   if (top) {
     char g = top->type == game::UnitType::Drone       ? 'd' :
              top->type == game::UnitType::Interceptor  ? 'i' :
-             top->type == game::UnitType::Frigate       ? 'f' : 'a';
+             top->type == game::UnitType::Frigate       ? 'f' :
+             top->type == game::UnitType::Artillery     ? 'a' : 'b';
     ImVec4 fg = top->faction.value == 0 ? kFactionA : kFactionB;
     return {bg, g, fg, top->hp, top->max_hp};
   }

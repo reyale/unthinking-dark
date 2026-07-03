@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <cstdio>
 #include <fstream>
+#include <string>
 #include "config.hpp"
 #include "frame.hpp"
 #include "match.hpp"
@@ -20,7 +21,7 @@ static constexpr std::string_view IDLE_WAT = R"wat(
   (memory (export "memory") 6)
   (global (export "SNAPSHOT_ADDR") i32 (i32.const 0))
   (global (export "COMMAND_ADDR")  i32 (i32.const 327680))
-  (func   (export "abi_version") (result i32) i32.const 6)
+  (func   (export "abi_version") (result i32) i32.const @ABI@)
   (func   (export "init")    (param i32))
   (func   (export "on_tick") (result i32) i32.const 0)
 )
@@ -33,7 +34,7 @@ static constexpr std::string_view TOO_SMALL_WAT = R"wat(
   (memory (export "memory") 1)
   (global (export "SNAPSHOT_ADDR") i32 (i32.const 0))
   (global (export "COMMAND_ADDR")  i32 (i32.const 60000))
-  (func   (export "abi_version") (result i32) i32.const 6)
+  (func   (export "abi_version") (result i32) i32.const @ABI@)
   (func   (export "init")    (param i32))
   (func   (export "on_tick") (result i32) i32.const 0)
 )
@@ -45,7 +46,7 @@ static constexpr std::string_view FUEL_HOG_INIT_WAT = R"wat(
   (memory (export "memory") 6)
   (global (export "SNAPSHOT_ADDR") i32 (i32.const 0))
   (global (export "COMMAND_ADDR")  i32 (i32.const 327680))
-  (func (export "abi_version") (result i32) i32.const 6)
+  (func (export "abi_version") (result i32) i32.const @ABI@)
   (func (export "init") (param i32)
     (block $break
       (loop $loop
@@ -61,7 +62,7 @@ static constexpr std::string_view TICK_ECHO_WAT = R"wat(
   (memory (export "memory") 6)
   (global (export "SNAPSHOT_ADDR") i32 (i32.const 0))
   (global (export "COMMAND_ADDR")  i32 (i32.const 327680))
-  (func (export "abi_version") (result i32) i32.const 6)
+  (func (export "abi_version") (result i32) i32.const @ABI@)
   (func (export "init") (param i32))
   (func (export "on_tick") (result i32)
     (i32.store
@@ -78,7 +79,7 @@ static constexpr std::string_view COMMAND_WRITER_WAT = R"wat(
   (memory (export "memory") 6)
   (global (export "SNAPSHOT_ADDR") i32 (i32.const 0))
   (global (export "COMMAND_ADDR")  i32 (i32.const 327680))
-  (func (export "abi_version") (result i32) i32.const 6)
+  (func (export "abi_version") (result i32) i32.const @ABI@)
   (func (export "init") (param i32))
   (func (export "on_tick") (result i32)
     (i32.store (i32.const 327680) (i32.const 57005))
@@ -95,7 +96,7 @@ static constexpr std::string_view UNIT_COUNT_WAT = R"wat(
   (memory (export "memory") 6)
   (global (export "SNAPSHOT_ADDR") i32 (i32.const 0))
   (global (export "COMMAND_ADDR")  i32 (i32.const 327680))
-  (func (export "abi_version") (result i32) i32.const 6)
+  (func (export "abi_version") (result i32) i32.const @ABI@)
   (func (export "init") (param i32))
   (func (export "on_tick") (result i32)
     (i32.load (i32.const 32)))
@@ -110,7 +111,7 @@ static constexpr std::string_view UNIT_ID_ROUNDTRIP_WAT = R"wat(
   (memory (export "memory") 6)
   (global (export "SNAPSHOT_ADDR") i32 (i32.const 0))
   (global (export "COMMAND_ADDR")  i32 (i32.const 327680))
-  (func (export "abi_version") (result i32) i32.const 6)
+  (func (export "abi_version") (result i32) i32.const @ABI@)
   (func (export "init") (param i32))
   (func (export "on_tick") (result i32)
     (local $units_off i32)
@@ -128,7 +129,7 @@ static constexpr std::string_view TICK_FUEL_HOG_WAT = R"wat(
   (memory (export "memory") 6)
   (global (export "SNAPSHOT_ADDR") i32 (i32.const 0))
   (global (export "COMMAND_ADDR")  i32 (i32.const 327680))
-  (func (export "abi_version") (result i32) i32.const 6)
+  (func (export "abi_version") (result i32) i32.const @ABI@)
   (func (export "init") (param i32))
   (func (export "on_tick") (result i32)
     (block $break
@@ -144,7 +145,7 @@ static constexpr std::string_view TRAP_WAT = R"wat(
   (memory (export "memory") 6)
   (global (export "SNAPSHOT_ADDR") i32 (i32.const 0))
   (global (export "COMMAND_ADDR")  i32 (i32.const 327680))
-  (func (export "abi_version") (result i32) i32.const 6)
+  (func (export "abi_version") (result i32) i32.const @ABI@)
   (func (export "init") (param i32))
   (func (export "on_tick") (result i32)
     unreachable)
@@ -163,7 +164,20 @@ static constexpr std::string_view ABI_MISMATCH_WAT = R"wat(
 )
 )wat";
 
-// ---- Helper -----------------------------------------------------------------
+// ---- Helpers ----------------------------------------------------------------
+
+static std::string fill_abi(std::string_view wat) {
+  std::string s(wat);
+  const std::string tok = "@ABI@";
+  const std::string ver = std::to_string(game::cfg::ABI_VERSION);
+  for (size_t p; (p = s.find(tok)) != std::string::npos; )
+    s.replace(p, tok.size(), ver);
+  return s;
+}
+
+static std::vector<uint8_t> to_wasm(std::string_view wat) {
+  return runner::wat_to_wasm(fill_abi(wat));
+}
 
 static game::World make_world(uint64_t seed = 42) {
   game::World w;
@@ -180,16 +194,16 @@ static game::World make_world(uint64_t seed = 42) {
 // ---- Tests ------------------------------------------------------------------
 
 TEST(WasmBot, IdleBotLoads) {
-  auto wasm = runner::wat_to_wasm(IDLE_WAT);
+  auto wasm = to_wasm(IDLE_WAT);
   runner::WasmBot bot(wasm);
   EXPECT_TRUE(bot.healthy());
   EXPECT_TRUE(bot.last_error().empty());
 }
 
 TEST(WasmBot, IdleBotRunsFullMatch) {
-  auto wasm = runner::wat_to_wasm(IDLE_WAT);
+  auto wasm = to_wasm(IDLE_WAT);
   runner::WasmBot bot_a(wasm);
-  runner::WasmBot bot_b(runner::wat_to_wasm(IDLE_WAT));
+  runner::WasmBot bot_b(to_wasm(IDLE_WAT));
 
   auto w = make_world(7);
   auto rec = game::run_match(w, bot_a, 0, bot_b, 1, 200);
@@ -201,10 +215,10 @@ TEST(WasmBot, IdleBotRunsFullMatch) {
 }
 
 TEST(WasmBot, WasmMatchReproducesHash) {
-  auto wasm = runner::wat_to_wasm(IDLE_WAT);
+  auto wasm = to_wasm(IDLE_WAT);
   auto w = make_world(99);
   runner::WasmBot bot_a(wasm);
-  runner::WasmBot bot_b(runner::wat_to_wasm(IDLE_WAT));
+  runner::WasmBot bot_b(to_wasm(IDLE_WAT));
   auto rec = game::run_match(w, bot_a, 0, bot_b, 1, 200);
 
   uint64_t replayed = game::replay(rec.replay);
@@ -214,11 +228,11 @@ TEST(WasmBot, WasmMatchReproducesHash) {
 TEST(WasmBot, WasmAndScriptedBotProduceSameHash) {
   // An idle WASM bot and our C++ IdleBot are semantically identical.
   // Running the same seed through both should produce the same final hash.
-  auto wasm = runner::wat_to_wasm(IDLE_WAT);
+  auto wasm = to_wasm(IDLE_WAT);
 
   auto run_wasm = [&](uint64_t seed) {
     auto w = make_world(seed);
-    runner::WasmBot a(wasm), b(runner::wat_to_wasm(IDLE_WAT));
+    runner::WasmBot a(wasm), b(to_wasm(IDLE_WAT));
     return game::run_match(w, a, 0, b, 1, 200).replay.expected_hash;
   };
 
@@ -235,7 +249,7 @@ TEST(WasmBot, WasmAndScriptedBotProduceSameHash) {
 }
 
 TEST(WasmBot, TooSmallMemoryRejectedAtLoad) {
-  auto wasm = runner::wat_to_wasm(TOO_SMALL_WAT);
+  auto wasm = to_wasm(TOO_SMALL_WAT);
   runner::WasmBot bot(wasm);
   EXPECT_FALSE(bot.healthy());
   EXPECT_FALSE(bot.last_error().empty());
@@ -243,20 +257,20 @@ TEST(WasmBot, TooSmallMemoryRejectedAtLoad) {
 
 TEST(WasmBot, MissingExportRejectedAtLoad) {
   // A module with no exports at all.
-  auto wasm = runner::wat_to_wasm("(module (memory 6))");
+  auto wasm = to_wasm("(module (memory 6))");
   runner::WasmBot bot(wasm);
   EXPECT_FALSE(bot.healthy());
 }
 
 TEST(WasmBot, AbiMismatchRejectedAtLoad) {
-  auto wasm = runner::wat_to_wasm(ABI_MISMATCH_WAT);
+  auto wasm = to_wasm(ABI_MISMATCH_WAT);
   runner::WasmBot bot(wasm);
   EXPECT_FALSE(bot.healthy());
   EXPECT_NE(bot.last_error().find("mismatch"), std::string::npos);
 }
 
 TEST(WasmBot, InitFuelExhaustionMarksUnhealthy) {
-  auto wasm = runner::wat_to_wasm(FUEL_HOG_INIT_WAT);
+  auto wasm = to_wasm(FUEL_HOG_INIT_WAT);
   runner::WasmBot bot(wasm);
   ASSERT_TRUE(bot.healthy()); // loads fine
 
@@ -268,11 +282,11 @@ TEST(WasmBot, InitFuelExhaustionMarksUnhealthy) {
 }
 
 TEST(WasmBot, DeterministicAcrossRuns) {
-  auto wasm = runner::wat_to_wasm(IDLE_WAT);
+  auto wasm = to_wasm(IDLE_WAT);
 
   auto run = [&](uint64_t seed) {
     auto w = make_world(seed);
-    runner::WasmBot a(wasm), b(runner::wat_to_wasm(IDLE_WAT));
+    runner::WasmBot a(wasm), b(to_wasm(IDLE_WAT));
     return game::run_match(w, a, 0, b, 1, 100).replay.expected_hash;
   };
 
@@ -292,7 +306,7 @@ static game::Snapshot make_snap(uint32_t tick = 0) {
 
 TEST(WasmBot, SnapshotTickDeliveredToBot) {
   // TICK_ECHO_WAT reads SnapshotHeader.tick and writes it to Command[0].ax.
-  runner::WasmBot bot(runner::wat_to_wasm(TICK_ECHO_WAT));
+  runner::WasmBot bot(to_wasm(TICK_ECHO_WAT));
   ASSERT_TRUE(bot.healthy());
 
   auto snap = make_snap(42);
@@ -304,7 +318,7 @@ TEST(WasmBot, SnapshotTickDeliveredToBot) {
 
 TEST(WasmBot, CommandWrittenByBotIsDelivered) {
   // COMMAND_WRITER_WAT stores known values to COMMAND_ADDR and returns 1.
-  runner::WasmBot bot(runner::wat_to_wasm(COMMAND_WRITER_WAT));
+  runner::WasmBot bot(to_wasm(COMMAND_WRITER_WAT));
   ASSERT_TRUE(bot.healthy());
 
   auto cmds = bot.on_tick(make_snap());
@@ -317,7 +331,7 @@ TEST(WasmBot, CommandWrittenByBotIsDelivered) {
 
 TEST(WasmBot, SnapshotUnitCountReadByBot) {
   // UNIT_COUNT_WAT returns my_unit_count from the header as the command count.
-  runner::WasmBot bot(runner::wat_to_wasm(UNIT_COUNT_WAT));
+  runner::WasmBot bot(to_wasm(UNIT_COUNT_WAT));
   ASSERT_TRUE(bot.healthy());
 
   game::Snapshot snap;
@@ -331,7 +345,7 @@ TEST(WasmBot, SnapshotUnitCountReadByBot) {
 TEST(WasmBot, UnitIdRoundTripThroughSnapshot) {
   // UNIT_ID_ROUNDTRIP_WAT reads my_units_off from the header, loads UnitView[0].id
   // from that offset, and writes it as Command[0].unit_id.
-  runner::WasmBot bot(runner::wat_to_wasm(UNIT_ID_ROUNDTRIP_WAT));
+  runner::WasmBot bot(to_wasm(UNIT_ID_ROUNDTRIP_WAT));
   ASSERT_TRUE(bot.healthy());
 
   game::Snapshot snap;
@@ -349,7 +363,7 @@ TEST(WasmBot, UnitIdRoundTripThroughSnapshot) {
 TEST(WasmBot, TickFuelExhaustionReturnsEmptyAndStaysHealthy) {
   // TICK_FUEL_HOG_WAT infinite-loops in on_tick, burning all per-tick fuel.
   // The engine should treat this as a tick forfeit: empty commands, bot stays healthy.
-  runner::WasmBot bot(runner::wat_to_wasm(TICK_FUEL_HOG_WAT));
+  runner::WasmBot bot(to_wasm(TICK_FUEL_HOG_WAT));
   ASSERT_TRUE(bot.healthy());
   bot.on_init(make_world().map, 0);
   ASSERT_TRUE(bot.healthy());
@@ -368,7 +382,7 @@ TEST(WasmBot, TickFuelExhaustionReturnsEmptyAndStaysHealthy) {
 TEST(WasmBot, TrapInTickReturnsEmptyAndStaysHealthy) {
   // TRAP_WAT hits unreachable in on_tick.
   // Same semantics as fuel exhaustion: empty commands, bot stays healthy.
-  runner::WasmBot bot(runner::wat_to_wasm(TRAP_WAT));
+  runner::WasmBot bot(to_wasm(TRAP_WAT));
   ASSERT_TRUE(bot.healthy());
   bot.on_init(make_world().map, 0);
   ASSERT_TRUE(bot.healthy());

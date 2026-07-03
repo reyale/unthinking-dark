@@ -104,7 +104,7 @@ TEST(Combat, InterceptorDamagesCommandCore) {
 
 TEST(Combat, FrigateDestroysWeakStructure) {
   auto w = make_combat_world();
-  auto& frigate = w.spawn_unit({0}, game::UnitType::Frigate, {5, 5});
+  auto& frigate = w.spawn_unit({0}, game::UnitType::Frigate, {6, 5});
   auto& fac     = w.spawn_structure({1}, game::StructureType::Factory, {9, 5});
   game::StructureId fac_id = fac.id;
   fac.hp = 1; // one hit kill
@@ -182,19 +182,23 @@ TEST(Combat, BaseDestructionEndsMatch) {
 TEST(Combat, ArtillerySplashHitsFriendly) {
   auto w = make_combat_world();
   // Artillery (faction 0) fires at an enemy; a friendly unit is also in splash radius
-  auto& arty = w.spawn_unit({0}, game::UnitType::Artillery, {5, 5});
-  w.spawn_unit({1}, game::UnitType::Interceptor, {7, 5}); // range 3, in range
-  auto& friendly =
-    w.spawn_unit({0}, game::UnitType::Drone, {7, 6}); // adjacent to enemy (splash r=1)
+  auto& arty     = w.spawn_unit({0}, game::UnitType::Artillery, {5, 5});
+  w.spawn_unit({1}, game::UnitType::Interceptor, {7, 5}); // range 6, in range
+  auto& friendly = w.spawn_unit({0}, game::UnitType::Drone, {7, 6}); // adjacent to enemy (splash r=1)
+  game::UnitId friendly_id = friendly.id;
+  int32_t friendly_hp_before = friendly.hp;
 
   auto cmds_a = attack_cmd(arty.id);
   game::ValidatedCommands empty_b;
-
-  int32_t friendly_hp_before = friendly.hp;
   game::run_combat(w, cmds_a, empty_b);
 
-  // Friendly drone should have taken splash damage
-  EXPECT_LT(friendly.hp, friendly_hp_before);
+  // Friendly drone should have taken splash damage (may be dead if dmg > hp)
+  const game::Unit* f = w.find_unit(friendly_id);
+  if (f) {
+    EXPECT_LT(f->hp, friendly_hp_before);
+  } else {
+    SUCCEED(); // killed by splash — damage was certainly applied
+  }
 }
 
 // ---- pick_target edge cases ---------------------------------------------

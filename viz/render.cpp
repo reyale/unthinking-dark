@@ -21,6 +21,7 @@ char unit_glyph(game::UnitType t) {
     case game::UnitType::Interceptor: return 'i';
     case game::UnitType::Frigate:     return 'f';
     case game::UnitType::Artillery:   return 'a';
+    case game::UnitType::Battleship:  return 'b';
   }
   return '?';
 }

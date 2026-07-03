@@ -265,6 +265,7 @@ TEST(Economy, ProduceInterceptorDeductsEnergy) {
   auto w = make_world();
   auto& fac = w.spawn_structure({0}, game::StructureType::Factory, {5, 5});
   w.res({0}).energy = 100;
+  w.res({0}).alloy  = 100;
   game::Command c{};
   c.unit_id   = 1; // issuing unit id (not checked for Produce)
   c.kind      = static_cast<uint16_t>(game::CommandKind::Produce);
