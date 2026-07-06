@@ -14,6 +14,7 @@
 #include "wincheck.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -70,10 +71,106 @@ static ImU32 u32(const ImVec4& c) { return ImGui::ColorConvertFloat4ToU32(c); }
 
 struct CellData {
   ImVec4  bg;
-  char    glyph{'\0'};
+  char    glyph{'\0'};               // non-null → structure text label
+  bool    is_unit{false};
+  game::UnitType unit_type{game::UnitType::Drone};
   ImVec4  fg{};
   int32_t hp{-1}, max_hp{-1};
 };
+
+// ---- Helpers --------------------------------------------------------------
+
+static const char* structure_type_name(game::StructureType t) {
+  switch (t) {
+  case game::StructureType::CommandCore: return "Command Core";
+  case game::StructureType::Factory:     return "Factory";
+  case game::StructureType::ClaimNode:   return "Claim Node";
+  }
+  return "?";
+}
+
+static const char* unit_type_name(game::UnitType t) {
+  switch (t) {
+  case game::UnitType::Drone:       return "Drone";
+  case game::UnitType::Interceptor: return "Interceptor";
+  case game::UnitType::Frigate:     return "Frigate";
+  case game::UnitType::Artillery:   return "Artillery";
+  case game::UnitType::Battleship:  return "Battleship";
+  }
+  return "?";
+}
+
+// ---- Unit shape drawing ---------------------------------------------------
+
+static ImU32 dim_col(ImU32 col, float f) {
+  ImVec4 c = ImGui::ColorConvertU32ToFloat4(col);
+  return ImGui::ColorConvertFloat4ToU32({c.x*f, c.y*f, c.z*f, c.w});
+}
+
+// Draws one isometric box.  fs = footprint scale [0..1], h = pixel height above tile.
+static void draw_iso_box(ImDrawList* dl, ImVec2 ctr, float cw2, float ch2,
+                          float fs, float h, ImU32 col) {
+  const float s = fs;
+  ImVec2 tt = {ctr.x,       ctr.y - s*ch2 - h};
+  ImVec2 tr = {ctr.x + s*cw2, ctr.y - h};
+  ImVec2 tb = {ctr.x,       ctr.y + s*ch2 - h};
+  ImVec2 tl = {ctr.x - s*cw2, ctr.y - h};
+  ImVec2 br = {ctr.x + s*cw2, ctr.y};
+  ImVec2 bb = {ctr.x,       ctr.y + s*ch2};
+  ImVec2 bl = {ctr.x - s*cw2, ctr.y};
+
+  ImU32 top_c   = col;
+  ImU32 left_c  = dim_col(col, 0.58f);
+  ImU32 right_c = dim_col(col, 0.38f);
+  ImU32 edge    = IM_COL32(0, 0, 0, 110);
+  const float lw = 0.8f;
+
+  // Top face (two triangles)
+  dl->AddTriangleFilled(tt, tr, tl, top_c);
+  dl->AddTriangleFilled(tr, tb, tl, top_c);
+  // Left face
+  ImVec2 lf[] = {tl, tb, bb, bl};
+  dl->AddConvexPolyFilled(lf, 4, left_c);
+  // Right face
+  ImVec2 rf[] = {tb, tr, br, bb};
+  dl->AddConvexPolyFilled(rf, 4, right_c);
+  // Outline edges
+  dl->AddQuad(tt, tr, tb, tl, edge, lw);
+  dl->AddLine(tl, bl, edge, lw);
+  dl->AddLine(tb, bb, edge, lw);
+  dl->AddLine(tr, br, edge, lw);
+  dl->AddLine(bl, bb, edge, lw);
+  dl->AddLine(bb, br, edge, lw);
+}
+
+static void draw_unit(ImDrawList* dl, ImVec2 ctr, float cw2, float ch2,
+                       game::UnitType type, ImU32 col) {
+  switch (type) {
+  case game::UnitType::Drone:
+    // Flat saucer
+    draw_iso_box(dl, ctr, cw2, ch2, 0.42f, ch2 * 0.30f, col);
+    dl->AddCircleFilled({ctr.x, ctr.y - ch2 * 0.30f}, cw2 * 0.16f, col);
+    break;
+  case game::UnitType::Interceptor:
+    // Slim, medium-tall prism
+    draw_iso_box(dl, ctr, cw2, ch2, 0.44f, ch2 * 1.05f, col);
+    break;
+  case game::UnitType::Frigate:
+    // Wide, low ship hull
+    draw_iso_box(dl, ctr, cw2, ch2, 0.76f, ch2 * 0.80f, col);
+    break;
+  case game::UnitType::Artillery:
+    // Narrow pedestal + tall barrel
+    draw_iso_box(dl, ctr, cw2, ch2, 0.46f, ch2 * 0.75f, col);
+    draw_iso_box(dl, {ctr.x, ctr.y - ch2 * 0.75f}, cw2, ch2,
+                 0.20f, ch2 * 1.20f, dim_col(col, 0.85f));
+    break;
+  case game::UnitType::Battleship:
+    // Massive wide block
+    draw_iso_box(dl, ctr, cw2, ch2, 0.84f, ch2 * 1.30f, col);
+    break;
+  }
+}
 
 static CellData make_cell(const game::Map& map, const game::FrameState& fr,
                            int view, int32_t x, int32_t y) {
@@ -106,19 +203,15 @@ static CellData make_cell(const game::Map& map, const game::FrameState& fr,
     char g = s.type == game::StructureType::CommandCore ? 'C' :
              s.type == game::StructureType::Factory     ? 'T' : 'N';
     ImVec4 fg = s.faction.value == 0 ? kFactionA : kFactionB;
-    return {bg, g, fg, s.hp, s.max_hp};
+    return {bg, g, false, game::UnitType::Drone, fg, s.hp, s.max_hp};
   }
 
   const game::UnitFrame* top = nullptr;
   for (const auto& u : fr.units)
     if (u.pos.x == x && u.pos.y == y) top = &u;
   if (top) {
-    char g = top->type == game::UnitType::Drone       ? 'd' :
-             top->type == game::UnitType::Interceptor  ? 'i' :
-             top->type == game::UnitType::Frigate       ? 'f' :
-             top->type == game::UnitType::Artillery     ? 'a' : 'b';
     ImVec4 fg = top->faction.value == 0 ? kFactionA : kFactionB;
-    return {bg, g, fg, top->hp, top->max_hp};
+    return {bg, '\0', true, top->type, fg, top->hp, top->max_hp};
   }
 
   return {bg};
@@ -139,6 +232,10 @@ struct App {
   float  cs      = 48.0f;
   double last_t  = 0.0;
   char   path_buf[512] = {};
+  bool              has_sel    = false;
+  bool              sel_is_unit = true;
+  game::UnitId      sel_id{};
+  game::StructureId sel_struct_id{};
 } g;
 
 static void try_load(const char* path) {
@@ -365,17 +462,54 @@ int main(int argc, char** argv) {
             ImVec2 tsz    = ImGui::CalcTextSize(buf);
             dl->AddText({ctr.x - tsz.x * 0.5f, ctr.y - tsz.y * 0.5f},
                         u32(cd.fg), buf);
+            if (g.has_sel && !g.sel_is_unit)
+              for (const auto& s : fr.structures)
+                if (s.id == g.sel_struct_id && s.pos.x == x && s.pos.y == y)
+                  dl->AddQuad(top, right, bottom, left, IM_COL32(255,255,80,220), 2.0f);
+          } else if (cd.is_unit) {
+            draw_unit(dl, ctr, cw2, ch2, cd.unit_type, u32(cd.fg));
+            if (g.has_sel) {
+              for (const auto& u : fr.units)
+                if (u.id == g.sel_id && u.pos.x == x && u.pos.y == y)
+                  dl->AddQuad(top, right, bottom, left, IM_COL32(255,255,80,220), 2.0f);
+            }
+          }
 
-            if (cd.hp >= 0 && cd.max_hp > 0 && g.cs >= 32.0f) {
-              float  ratio  = static_cast<float>(cd.hp) / static_cast<float>(cd.max_hp);
-              ImVec2 hp_end = {right.x + ratio * (bottom.x - right.x),
-                               right.y + ratio * (bottom.y - right.y)};
-              float  bw     = std::max(2.0f, ch2 * 0.3f);
-              ImVec4 hc     = ratio > 0.5f
-                  ? ImVec4{0.2f + (1.0f - ratio) * 1.6f, 0.85f, 0.2f, 1.0f}
-                  : ImVec4{1.0f, ratio * 1.7f, 0.1f, 1.0f};
-              dl->AddLine(right, bottom, u32({0.08f, 0.08f, 0.08f, 1.0f}), bw);
-              dl->AddLine(right, hp_end, u32(hc), bw);
+          if ((cd.glyph || cd.is_unit) && cd.hp >= 0 && cd.max_hp > 0 && g.cs >= 32.0f) {
+            float  ratio  = static_cast<float>(cd.hp) / static_cast<float>(cd.max_hp);
+            ImVec2 hp_end = {right.x + ratio * (bottom.x - right.x),
+                             right.y + ratio * (bottom.y - right.y)};
+            float  bw     = std::max(2.0f, ch2 * 0.3f);
+            ImVec4 hc     = ratio > 0.5f
+                ? ImVec4{0.2f + (1.0f - ratio) * 1.6f, 0.85f, 0.2f, 1.0f}
+                : ImVec4{1.0f, ratio * 1.7f, 0.1f, 1.0f};
+            dl->AddLine(right, bottom, u32({0.08f, 0.08f, 0.08f, 1.0f}), bw);
+            dl->AddLine(right, hp_end, u32(hc), bw);
+          }
+        }
+      }
+
+      // Left-click: select unit on that tile (only acts within grid bounds)
+      if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+        ImVec2 mp  = ImGui::GetMousePos();
+        float  fdx = (mp.x - iso_org.x) / cw2;
+        float  fdy = (mp.y - iso_org.y) / ch2;
+        int32_t tx = static_cast<int32_t>(std::round((fdx + fdy) * 0.5f));
+        int32_t ty = static_cast<int32_t>(std::round((fdy - fdx) * 0.5f));
+        if (tx >= 0 && tx < g.map.width && ty >= 0 && ty < g.map.height) {
+          g.has_sel = false;
+          for (const auto& u : fr.units) {
+            if (u.pos.x == tx && u.pos.y == ty) {
+              g.has_sel = true; g.sel_is_unit = true; g.sel_id = u.id;
+              break;
+            }
+          }
+          if (!g.has_sel) {
+            for (const auto& s : fr.structures) {
+              if (s.pos.x == tx && s.pos.y == ty) {
+                g.has_sel = true; g.sel_is_unit = false; g.sel_struct_id = s.id;
+                break;
+              }
             }
           }
         }
@@ -393,7 +527,83 @@ int main(int argc, char** argv) {
       ImGui::TextDisabled("Enter a path above, or drag and drop a .ud file here.");
     }
 
-    ImGui::End();
+    ImGui::End(); // ##ud
+
+    // ---- Selected unit panel (top-level so it renders above ##ud) ----------
+    if (g.loaded && g.has_sel) {
+      const auto& fr2 = g.frames[static_cast<size_t>(g.cur)];
+
+      ImGui::SetNextWindowPos(
+          {io.DisplaySize.x - 10.0f, 55.0f}, ImGuiCond_Always, {1.0f, 0.0f});
+      ImGui::SetNextWindowBgAlpha(0.88f);
+      ImGui::Begin("##sel", nullptr,
+          ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+          ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize);
+
+      if (g.sel_is_unit) {
+        const game::UnitFrame* sel = nullptr;
+        for (const auto& u : fr2.units)
+          if (u.id == g.sel_id) { sel = &u; break; }
+
+        if (!sel) {
+          g.has_sel = false;
+        } else {
+          ImVec4 fc = sel->faction.value == 0 ? kFactionA : kFactionB;
+          ImGui::TextColored(fc, "%s", unit_type_name(sel->type));
+          ImGui::SameLine();
+          ImGui::TextColored(fc, "[%s]", sel->faction.value == 0 ? "A" : "B");
+          ImGui::Separator();
+
+          float  ratio = sel->max_hp > 0 ? (float)sel->hp / (float)sel->max_hp : 0.0f;
+          ImVec4 hc    = ratio > 0.5f
+              ? ImVec4{0.2f + (1.0f - ratio) * 1.6f, 0.85f, 0.2f, 1.0f}
+              : ImVec4{1.0f, ratio * 1.7f, 0.1f, 1.0f};
+          ImGui::Text("HP   ");
+          ImGui::SameLine();
+          ImGui::TextColored(hc, "%d / %d", sel->hp, sel->max_hp);
+          ImGui::Text("Pos  %d, %d", sel->pos.x, sel->pos.y);
+          ImGui::Separator();
+
+          const game::UnitStats& st = game::stats_for(sel->type);
+          ImGui::Text("Damage  %d", st.dmg);
+          ImGui::Text("Range   %d", st.range);
+          ImGui::Text("Sight   %d", st.sight);
+          ImGui::Text("Speed   %d", st.speed);
+          if (st.first_strike)
+            ImGui::TextColored({0.9f, 0.85f, 0.3f, 1.0f}, "* First Strike");
+          if (st.splash)
+            ImGui::TextColored({0.9f, 0.6f, 0.2f, 1.0f}, "* Splash  r=%d", st.splash_radius);
+        }
+      } else {
+        const game::StructureFrame* sel = nullptr;
+        for (const auto& s : fr2.structures)
+          if (s.id == g.sel_struct_id) { sel = &s; break; }
+
+        if (!sel) {
+          g.has_sel = false;
+        } else {
+          ImVec4 fc = sel->faction.value == 0 ? kFactionA : kFactionB;
+          ImGui::TextColored(fc, "%s", structure_type_name(sel->type));
+          ImGui::SameLine();
+          ImGui::TextColored(fc, "[%s]", sel->faction.value == 0 ? "A" : "B");
+          ImGui::Separator();
+
+          float  ratio = sel->max_hp > 0 ? (float)sel->hp / (float)sel->max_hp : 0.0f;
+          ImVec4 hc    = ratio > 0.5f
+              ? ImVec4{0.2f + (1.0f - ratio) * 1.6f, 0.85f, 0.2f, 1.0f}
+              : ImVec4{1.0f, ratio * 1.7f, 0.1f, 1.0f};
+          ImGui::Text("HP   ");
+          ImGui::SameLine();
+          ImGui::TextColored(hc, "%d / %d", sel->hp, sel->max_hp);
+          ImGui::Text("Pos  %d, %d", sel->pos.x, sel->pos.y);
+        }
+      }
+
+      ImGui::Separator();
+      if (ImGui::SmallButton("x")) g.has_sel = false;
+
+      ImGui::End();
+    }
 
     ImGui::Render();
     int fb_w, fb_h;
