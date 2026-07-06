@@ -28,6 +28,26 @@ enum class StructureType : uint8_t {
 static_assert(std::is_same_v<std::underlying_type_t<StructureType>, uint8_t>,
               "StructureType underlying type changed — update Command::aux consumers");
 
+inline const char* unit_type_name(UnitType t) {
+  switch (t) {
+  case UnitType::Drone:       return "Drone";
+  case UnitType::Interceptor: return "Interceptor";
+  case UnitType::Frigate:     return "Frigate";
+  case UnitType::Artillery:   return "Artillery";
+  case UnitType::Battleship:  return "Battleship";
+  }
+  return "?";
+}
+
+inline const char* structure_type_name(StructureType t) {
+  switch (t) {
+  case StructureType::CommandCore: return "Command Core";
+  case StructureType::Factory:     return "Factory";
+  case StructureType::ClaimNode:   return "Claim Node";
+  }
+  return "?";
+}
+
 enum class OrderType : uint8_t {
   Idle = 0,
   Move = 1,

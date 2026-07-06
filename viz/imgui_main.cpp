@@ -84,28 +84,6 @@ struct CellData {
   int32_t hp{-1}, max_hp{-1};
 };
 
-// ---- Name helpers ---------------------------------------------------------
-
-static const char* structure_type_name(game::StructureType t) {
-  switch (t) {
-  case game::StructureType::CommandCore: return "Command Core";
-  case game::StructureType::Factory:     return "Factory";
-  case game::StructureType::ClaimNode:   return "Claim Node";
-  }
-  return "?";
-}
-
-static const char* unit_type_name(game::UnitType t) {
-  switch (t) {
-  case game::UnitType::Drone:       return "Drone";
-  case game::UnitType::Interceptor: return "Interceptor";
-  case game::UnitType::Frigate:     return "Frigate";
-  case game::UnitType::Artillery:   return "Artillery";
-  case game::UnitType::Battleship:  return "Battleship";
-  }
-  return "?";
-}
-
 // ---- Unit shape drawing ---------------------------------------------------
 
 static ImU32 dim_col(ImU32 col, float f) {
