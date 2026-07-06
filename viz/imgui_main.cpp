@@ -65,7 +65,13 @@ static constexpr ImVec4 kResource = {0.15f, 0.32f, 0.15f, 1.0f};
 static constexpr ImVec4 kFactionA = {0.40f, 0.70f, 1.00f, 1.0f};  // blue
 static constexpr ImVec4 kFactionB = {1.00f, 0.42f, 0.32f, 1.0f};  // red
 
-static ImU32 u32(const ImVec4& c) { return ImGui::ColorConvertFloat4ToU32(c); }
+static ImU32  u32(const ImVec4& c) { return ImGui::ColorConvertFloat4ToU32(c); }
+static ImVec4 dim_vec(ImVec4 c, float f) { return {c.x*f, c.y*f, c.z*f, c.w}; }
+static ImVec4 hp_color(float ratio) {
+  return ratio > 0.5f
+      ? ImVec4{0.2f + (1.0f - ratio) * 1.6f, 0.85f, 0.2f, 1.0f}
+      : ImVec4{1.0f, ratio * 1.7f, 0.1f, 1.0f};
+}
 
 // ---- Per-cell rendering data ----------------------------------------------
 
@@ -78,7 +84,7 @@ struct CellData {
   int32_t hp{-1}, max_hp{-1};
 };
 
-// ---- Helpers --------------------------------------------------------------
+// ---- Name helpers ---------------------------------------------------------
 
 static const char* structure_type_name(game::StructureType t) {
   switch (t) {
@@ -111,12 +117,12 @@ static ImU32 dim_col(ImU32 col, float f) {
 static void draw_iso_box(ImDrawList* dl, ImVec2 ctr, float cw2, float ch2,
                           float fs, float h, ImU32 col) {
   const float s = fs;
-  ImVec2 tt = {ctr.x,       ctr.y - s*ch2 - h};
+  ImVec2 tt = {ctr.x,         ctr.y - s*ch2 - h};
   ImVec2 tr = {ctr.x + s*cw2, ctr.y - h};
-  ImVec2 tb = {ctr.x,       ctr.y + s*ch2 - h};
+  ImVec2 tb = {ctr.x,         ctr.y + s*ch2 - h};
   ImVec2 tl = {ctr.x - s*cw2, ctr.y - h};
   ImVec2 br = {ctr.x + s*cw2, ctr.y};
-  ImVec2 bb = {ctr.x,       ctr.y + s*ch2};
+  ImVec2 bb = {ctr.x,         ctr.y + s*ch2};
   ImVec2 bl = {ctr.x - s*cw2, ctr.y};
 
   ImU32 top_c   = col;
@@ -125,16 +131,12 @@ static void draw_iso_box(ImDrawList* dl, ImVec2 ctr, float cw2, float ch2,
   ImU32 edge    = IM_COL32(0, 0, 0, 110);
   const float lw = 0.8f;
 
-  // Top face (two triangles)
   dl->AddTriangleFilled(tt, tr, tl, top_c);
   dl->AddTriangleFilled(tr, tb, tl, top_c);
-  // Left face
   ImVec2 lf[] = {tl, tb, bb, bl};
   dl->AddConvexPolyFilled(lf, 4, left_c);
-  // Right face
   ImVec2 rf[] = {tb, tr, br, bb};
   dl->AddConvexPolyFilled(rf, 4, right_c);
-  // Outline edges
   dl->AddQuad(tt, tr, tb, tl, edge, lw);
   dl->AddLine(tl, bl, edge, lw);
   dl->AddLine(tb, bb, edge, lw);
@@ -147,30 +149,27 @@ static void draw_unit(ImDrawList* dl, ImVec2 ctr, float cw2, float ch2,
                        game::UnitType type, ImU32 col) {
   switch (type) {
   case game::UnitType::Drone:
-    // Flat saucer
     draw_iso_box(dl, ctr, cw2, ch2, 0.42f, ch2 * 0.30f, col);
     dl->AddCircleFilled({ctr.x, ctr.y - ch2 * 0.30f}, cw2 * 0.16f, col);
     break;
   case game::UnitType::Interceptor:
-    // Slim, medium-tall prism
     draw_iso_box(dl, ctr, cw2, ch2, 0.44f, ch2 * 1.05f, col);
     break;
   case game::UnitType::Frigate:
-    // Wide, low ship hull
     draw_iso_box(dl, ctr, cw2, ch2, 0.76f, ch2 * 0.80f, col);
     break;
   case game::UnitType::Artillery:
-    // Narrow pedestal + tall barrel
     draw_iso_box(dl, ctr, cw2, ch2, 0.46f, ch2 * 0.75f, col);
     draw_iso_box(dl, {ctr.x, ctr.y - ch2 * 0.75f}, cw2, ch2,
                  0.20f, ch2 * 1.20f, dim_col(col, 0.85f));
     break;
   case game::UnitType::Battleship:
-    // Massive wide block
     draw_iso_box(dl, ctr, cw2, ch2, 0.84f, ch2 * 1.30f, col);
     break;
   }
 }
+
+// ---- Cell data builder ----------------------------------------------------
 
 static CellData make_cell(const game::Map& map, const game::FrameState& fr,
                            int view, int32_t x, int32_t y) {
@@ -232,7 +231,7 @@ struct App {
   float  cs      = 48.0f;
   double last_t  = 0.0;
   char   path_buf[512] = {};
-  bool              has_sel    = false;
+  bool              has_sel     = false;
   bool              sel_is_unit = true;
   game::UnitId      sel_id{};
   game::StructureId sel_struct_id{};
@@ -257,6 +256,266 @@ static void try_load(const char* path) {
     g.error  = e.what();
     fprintf(stderr, "error: %s\n", e.what());
   }
+}
+
+// ---- Per-frame draw functions ---------------------------------------------
+
+static void handle_input(const ImGuiIO& io, GLFWwindow* win) {
+  if (!io.WantCaptureMouse)
+    g.cs = std::clamp(g.cs + io.MouseWheel * 2.0f, 8.0f, 64.0f);
+
+  if (!io.WantCaptureKeyboard) {
+    if (g.loaded) {
+      if (ImGui::IsKeyPressed(ImGuiKey_Space)) {
+        g.playing = !g.playing;
+        g.last_t  = glfwGetTime();
+      }
+      if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) && g.cur + 1 < g.total)
+        { ++g.cur; g.playing = false; }
+      if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) && g.cur > 0)
+        { --g.cur; g.playing = false; }
+    }
+    if (ImGui::IsKeyPressed(ImGuiKey_U)) g.view = -2;
+    if (ImGui::IsKeyPressed(ImGuiKey_G)) g.view = -1;
+    if (ImGui::IsKeyPressed(ImGuiKey_0)) g.view = 0;
+    if (ImGui::IsKeyPressed(ImGuiKey_1)) g.view = 1;
+    if (ImGui::IsKeyPressed(ImGuiKey_Q)) glfwSetWindowShouldClose(win, GLFW_TRUE);
+  }
+}
+
+static void draw_file_bar() {
+  if (ImGui::Button("Open")) {
+    std::string picked = pick_file();
+    if (!picked.empty()) {
+      strncpy(g.path_buf, picked.c_str(), sizeof(g.path_buf) - 1);
+      try_load(g.path_buf);
+    }
+  }
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(360.0f);
+  if (ImGui::InputText("##path", g.path_buf, sizeof(g.path_buf),
+                       ImGuiInputTextFlags_EnterReturnsTrue))
+    try_load(g.path_buf);
+  if (!g.error.empty()) {
+    ImGui::SameLine();
+    ImGui::TextColored({1.0f, 0.4f, 0.4f, 1.0f}, "%s", g.error.c_str());
+  }
+}
+
+static void draw_playback_bar(const game::FrameState& fr) {
+  ImGui::SameLine();
+  ImGui::Text("|");
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(260.0f);
+  char tick_fmt[32];
+  snprintf(tick_fmt, sizeof(tick_fmt), "%%d / %d", g.total - 1);
+  if (ImGui::SliderInt("##t", &g.cur, 0, g.total - 1, tick_fmt)) g.playing = false;
+  ImGui::SameLine();
+  if (ImGui::Button(g.playing ? "Pause" : " Play "))
+    { g.playing = !g.playing; g.last_t = glfwGetTime(); }
+  ImGui::SameLine();
+  if (ImGui::ArrowButton("##l", ImGuiDir_Left) && g.cur > 0)
+    { --g.cur; g.playing = false; }
+  ImGui::SameLine(0, 2);
+  if (ImGui::ArrowButton("##r", ImGuiDir_Right) && g.cur + 1 < g.total)
+    { ++g.cur; g.playing = false; }
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(70.0f);
+  ImGui::SliderFloat("fps##s", &g.fps, 1.0f, 30.0f, "%.0f");
+  ImGui::SameLine();
+  ImGui::Text("|");
+  ImGui::SameLine();
+  if (ImGui::Button("Union")) g.view = -2;
+  ImGui::SameLine();
+  if (ImGui::Button("God")) g.view = -1;
+  ImGui::SameLine();
+  ImGui::PushStyleColor(ImGuiCol_Button,
+      ImVec4{kFactionA.x * 0.6f, kFactionA.y * 0.6f, kFactionA.z * 0.6f, 1.0f});
+  if (ImGui::Button(" A ")) g.view = 0;
+  ImGui::PopStyleColor();
+  ImGui::SameLine();
+  ImGui::PushStyleColor(ImGuiCol_Button,
+      ImVec4{kFactionB.x * 0.6f, kFactionB.y * 0.6f, kFactionB.z * 0.6f, 1.0f});
+  if (ImGui::Button(" B ")) g.view = 1;
+  ImGui::PopStyleColor();
+  ImGui::SameLine();
+  ImGui::SetNextItemWidth(65.0f);
+  ImGui::SliderFloat("px##z", &g.cs, 16.0f, 128.0f, "%.0f");
+  ImGui::SameLine();
+  ImGui::TextColored(kFactionA, "A  e:%-4d a:%d",
+      fr.resources[0].energy, fr.resources[0].alloy);
+  ImGui::SameLine();
+  ImGui::TextColored(kFactionB, "B  e:%-4d a:%d",
+      fr.resources[1].energy, fr.resources[1].alloy);
+
+  if (fr.result.has_value()) {
+    const auto& res = *fr.result;
+    ImGui::SameLine();
+    if (res.reason == game::WinReason::Draw) {
+      ImGui::TextColored({0.9f, 0.85f, 0.2f, 1.0f}, " | DRAW");
+    } else {
+      ImVec4 wc = res.winner.value == 0 ? kFactionA : kFactionB;
+      const char* why =
+          res.reason == game::WinReason::BaseDestroyed      ? "base" :
+          res.reason == game::WinReason::TerritoryThreshold ? "territory" : "tick cap";
+      ImGui::TextColored(wc, " | %s wins (%s)",
+          res.winner.value == 0 ? "A" : "B", why);
+    }
+  }
+}
+
+static void draw_tile_cell(ImDrawList* dl, ImVec2 ctr, float cw2, float ch2,
+                            const CellData& cd, int32_t x, int32_t y,
+                            const game::FrameState& fr) {
+  ImVec2 top    = {ctr.x,        ctr.y - ch2};
+  ImVec2 right  = {ctr.x + cw2,  ctr.y      };
+  ImVec2 bottom = {ctr.x,        ctr.y + ch2};
+  ImVec2 left   = {ctr.x - cw2,  ctr.y      };
+
+  dl->AddTriangleFilled(top, right, left, u32(cd.bg));
+  dl->AddTriangleFilled(right, bottom, left, u32(dim_vec(cd.bg, 0.70f)));
+  dl->AddQuad(top, right, bottom, left, u32({0.0f, 0.0f, 0.0f, 0.40f}), 0.5f);
+
+  if (cd.glyph) {
+    char   buf[2] = {cd.glyph, '\0'};
+    ImVec2 tsz    = ImGui::CalcTextSize(buf);
+    dl->AddText({ctr.x - tsz.x * 0.5f, ctr.y - tsz.y * 0.5f}, u32(cd.fg), buf);
+    if (g.has_sel && !g.sel_is_unit)
+      for (const auto& s : fr.structures)
+        if (s.id == g.sel_struct_id && s.pos.x == x && s.pos.y == y)
+          dl->AddQuad(top, right, bottom, left, IM_COL32(255, 255, 80, 220), 2.0f);
+  } else if (cd.is_unit) {
+    draw_unit(dl, ctr, cw2, ch2, cd.unit_type, u32(cd.fg));
+    if (g.has_sel && g.sel_is_unit)
+      for (const auto& u : fr.units)
+        if (u.id == g.sel_id && u.pos.x == x && u.pos.y == y)
+          dl->AddQuad(top, right, bottom, left, IM_COL32(255, 255, 80, 220), 2.0f);
+  }
+
+  if ((cd.glyph || cd.is_unit) && cd.hp >= 0 && cd.max_hp > 0 && g.cs >= 32.0f) {
+    float  ratio  = static_cast<float>(cd.hp) / static_cast<float>(cd.max_hp);
+    ImVec2 hp_end = {right.x + ratio * (bottom.x - right.x),
+                     right.y + ratio * (bottom.y - right.y)};
+    float  bw     = std::max(2.0f, ch2 * 0.3f);
+    dl->AddLine(right, bottom, u32({0.08f, 0.08f, 0.08f, 1.0f}), bw);
+    dl->AddLine(right, hp_end, u32(hp_color(ratio)), bw);
+  }
+}
+
+static void draw_grid(const game::FrameState& fr) {
+  ImGui::BeginChild("##grid", {0, 0}, false,
+      ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+  ImDrawList* dl     = ImGui::GetWindowDrawList();
+  ImVec2      origin = ImGui::GetCursorScreenPos();
+
+  const float  cw2     = g.cs * 0.5f;
+  const float  ch2     = g.cs * 0.25f;
+  const ImVec2 iso_org = {origin.x + (float)g.map.height * cw2, origin.y + ch2};
+
+  auto tile_ctr = [&](int32_t x, int32_t y) -> ImVec2 {
+    return {iso_org.x + (x - y) * cw2, iso_org.y + (x + y) * ch2};
+  };
+
+  for (int32_t y = 0; y < g.map.height; ++y)
+    for (int32_t x = 0; x < g.map.width; ++x)
+      draw_tile_cell(dl, tile_ctr(x, y), cw2, ch2,
+                     make_cell(g.map, fr, g.view, x, y), x, y, fr);
+
+  if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+    ImVec2  mp  = ImGui::GetMousePos();
+    float   fdx = (mp.x - iso_org.x) / cw2;
+    float   fdy = (mp.y - iso_org.y) / ch2;
+    int32_t tx  = static_cast<int32_t>(std::round((fdx + fdy) * 0.5f));
+    int32_t ty  = static_cast<int32_t>(std::round((fdy - fdx) * 0.5f));
+    if (tx >= 0 && tx < g.map.width && ty >= 0 && ty < g.map.height) {
+      g.has_sel = false;
+      for (const auto& u : fr.units) {
+        if (u.pos.x == tx && u.pos.y == ty)
+          { g.has_sel = true; g.sel_is_unit = true; g.sel_id = u.id; break; }
+      }
+      if (!g.has_sel) {
+        for (const auto& s : fr.structures) {
+          if (s.pos.x == tx && s.pos.y == ty)
+            { g.has_sel = true; g.sel_is_unit = false; g.sel_struct_id = s.id; break; }
+        }
+      }
+    }
+  }
+
+  ImGui::Dummy({(float)(g.map.width + g.map.height) * cw2 + cw2,
+                (float)(g.map.width + g.map.height) * ch2 + ch2});
+  ImGui::EndChild();
+}
+
+static void draw_sel_panel(const ImGuiIO& io) {
+  if (!g.loaded || !g.has_sel) return;
+
+  const auto& fr = g.frames[static_cast<size_t>(g.cur)];
+
+  ImGui::SetNextWindowPos(
+      {io.DisplaySize.x - 10.0f, 55.0f}, ImGuiCond_Always, {1.0f, 0.0f});
+  ImGui::SetNextWindowBgAlpha(0.88f);
+  ImGui::Begin("##sel", nullptr,
+      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize);
+
+  if (g.sel_is_unit) {
+    const game::UnitFrame* sel = nullptr;
+    for (const auto& u : fr.units)
+      if (u.id == g.sel_id) { sel = &u; break; }
+
+    if (!sel) {
+      g.has_sel = false;
+    } else {
+      ImVec4 fc = sel->faction.value == 0 ? kFactionA : kFactionB;
+      ImGui::TextColored(fc, "%s", unit_type_name(sel->type));
+      ImGui::SameLine();
+      ImGui::TextColored(fc, "[%s]", sel->faction.value == 0 ? "A" : "B");
+      ImGui::Separator();
+
+      float ratio = sel->max_hp > 0 ? (float)sel->hp / (float)sel->max_hp : 0.0f;
+      ImGui::Text("HP   ");
+      ImGui::SameLine();
+      ImGui::TextColored(hp_color(ratio), "%d / %d", sel->hp, sel->max_hp);
+      ImGui::Text("Pos  %d, %d", sel->pos.x, sel->pos.y);
+      ImGui::Separator();
+
+      const game::UnitStats& st = game::stats_for(sel->type);
+      ImGui::Text("Damage  %d", st.dmg);
+      ImGui::Text("Range   %d", st.range);
+      ImGui::Text("Sight   %d", st.sight);
+      ImGui::Text("Speed   %d", st.speed);
+      if (st.first_strike)
+        ImGui::TextColored({0.9f, 0.85f, 0.3f, 1.0f}, "* First Strike");
+      if (st.splash)
+        ImGui::TextColored({0.9f, 0.6f, 0.2f, 1.0f}, "* Splash  r=%d", st.splash_radius);
+    }
+  } else {
+    const game::StructureFrame* sel = nullptr;
+    for (const auto& s : fr.structures)
+      if (s.id == g.sel_struct_id) { sel = &s; break; }
+
+    if (!sel) {
+      g.has_sel = false;
+    } else {
+      ImVec4 fc = sel->faction.value == 0 ? kFactionA : kFactionB;
+      ImGui::TextColored(fc, "%s", structure_type_name(sel->type));
+      ImGui::SameLine();
+      ImGui::TextColored(fc, "[%s]", sel->faction.value == 0 ? "A" : "B");
+      ImGui::Separator();
+
+      float ratio = sel->max_hp > 0 ? (float)sel->hp / (float)sel->max_hp : 0.0f;
+      ImGui::Text("HP   ");
+      ImGui::SameLine();
+      ImGui::TextColored(hp_color(ratio), "%d / %d", sel->hp, sel->max_hp);
+      ImGui::Text("Pos  %d, %d", sel->pos.x, sel->pos.y);
+    }
+  }
+
+  ImGui::Separator();
+  if (ImGui::SmallButton("x")) g.has_sel = false;
+
+  ImGui::End();
 }
 
 // ---- Main -----------------------------------------------------------------
@@ -311,26 +570,7 @@ int main(int argc, char** argv) {
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
-    if (!io.WantCaptureMouse)
-      g.cs = std::clamp(g.cs + io.MouseWheel * 2.0f, 8.0f, 64.0f);
-
-    if (!io.WantCaptureKeyboard) {
-      if (g.loaded) {
-        if (ImGui::IsKeyPressed(ImGuiKey_Space)) {
-          g.playing = !g.playing;
-          g.last_t  = glfwGetTime();
-        }
-        if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) && g.cur + 1 < g.total)
-          { ++g.cur; g.playing = false; }
-        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) && g.cur > 0)
-          { --g.cur; g.playing = false; }
-      }
-      if (ImGui::IsKeyPressed(ImGuiKey_U)) g.view = -2;
-      if (ImGui::IsKeyPressed(ImGuiKey_G)) g.view = -1;
-      if (ImGui::IsKeyPressed(ImGuiKey_0)) g.view = 0;
-      if (ImGui::IsKeyPressed(ImGuiKey_1)) g.view = 1;
-      if (ImGui::IsKeyPressed(ImGuiKey_Q)) glfwSetWindowShouldClose(win, GLFW_TRUE);
-    }
+    handle_input(io, win);
 
     ImGui::SetNextWindowPos({0, 0});
     ImGui::SetNextWindowSize(io.DisplaySize);
@@ -338,272 +578,23 @@ int main(int argc, char** argv) {
         ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
         ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus);
 
-    // ---- File loader bar ---------------------------------------------------
-    if (ImGui::Button("Open")) {
-      std::string picked = pick_file();
-      if (!picked.empty()) {
-        strncpy(g.path_buf, picked.c_str(), sizeof(g.path_buf) - 1);
-        try_load(g.path_buf);
-      }
-    }
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(360.0f);
-    if (ImGui::InputText("##path", g.path_buf, sizeof(g.path_buf),
-                         ImGuiInputTextFlags_EnterReturnsTrue))
-      try_load(g.path_buf);
-    if (!g.error.empty()) {
-      ImGui::SameLine();
-      ImGui::TextColored({1.0f, 0.4f, 0.4f, 1.0f}, "%s", g.error.c_str());
-    }
+    draw_file_bar();
 
     if (g.loaded) {
-      // ---- Playback control bar --------------------------------------------
       const auto& fr = g.frames[static_cast<size_t>(g.cur)];
-
-      ImGui::SameLine();
-      ImGui::Text("|");
-      ImGui::SameLine();
-      ImGui::SetNextItemWidth(260.0f);
-      char tick_fmt[32];
-      snprintf(tick_fmt, sizeof(tick_fmt), "%%d / %d", g.total - 1);
-      if (ImGui::SliderInt("##t", &g.cur, 0, g.total - 1, tick_fmt)) g.playing = false;
-      ImGui::SameLine();
-      if (ImGui::Button(g.playing ? "Pause" : " Play "))
-        { g.playing = !g.playing; g.last_t = glfwGetTime(); }
-      ImGui::SameLine();
-      if (ImGui::ArrowButton("##l", ImGuiDir_Left)  && g.cur > 0)
-        { --g.cur; g.playing = false; }
-      ImGui::SameLine(0, 2);
-      if (ImGui::ArrowButton("##r", ImGuiDir_Right) && g.cur + 1 < g.total)
-        { ++g.cur; g.playing = false; }
-      ImGui::SameLine();
-      ImGui::SetNextItemWidth(70.0f);
-      ImGui::SliderFloat("fps##s", &g.fps, 1.0f, 30.0f, "%.0f");
-      ImGui::SameLine();
-      ImGui::Text("|");
-      ImGui::SameLine();
-      if (ImGui::Button("Union")) g.view = -2;
-      ImGui::SameLine();
-      if (ImGui::Button("God")) g.view = -1;
-      ImGui::SameLine();
-      ImGui::PushStyleColor(ImGuiCol_Button,
-          ImVec4{kFactionA.x * 0.6f, kFactionA.y * 0.6f, kFactionA.z * 0.6f, 1.0f});
-      if (ImGui::Button(" A ")) g.view = 0;
-      ImGui::PopStyleColor();
-      ImGui::SameLine();
-      ImGui::PushStyleColor(ImGuiCol_Button,
-          ImVec4{kFactionB.x * 0.6f, kFactionB.y * 0.6f, kFactionB.z * 0.6f, 1.0f});
-      if (ImGui::Button(" B ")) g.view = 1;
-      ImGui::PopStyleColor();
-      ImGui::SameLine();
-      ImGui::SetNextItemWidth(65.0f);
-      ImGui::SliderFloat("px##z", &g.cs, 16.0f, 128.0f, "%.0f");
-      ImGui::SameLine();
-      ImGui::TextColored(kFactionA, "A  e:%-4d a:%d",
-          fr.resources[0].energy, fr.resources[0].alloy);
-      ImGui::SameLine();
-      ImGui::TextColored(kFactionB, "B  e:%-4d a:%d",
-          fr.resources[1].energy, fr.resources[1].alloy);
-
-      if (fr.result.has_value()) {
-        const auto& res = *fr.result;
-        ImGui::SameLine();
-        if (res.reason == game::WinReason::Draw) {
-          ImGui::TextColored({0.9f, 0.85f, 0.2f, 1.0f}, " | DRAW");
-        } else {
-          ImVec4 wc = res.winner.value == 0 ? kFactionA : kFactionB;
-          const char* why =
-              res.reason == game::WinReason::BaseDestroyed      ? "base" :
-              res.reason == game::WinReason::TerritoryThreshold ? "territory" : "tick cap";
-          ImGui::TextColored(wc, " | %s wins (%s)",
-              res.winner.value == 0 ? "A" : "B", why);
-        }
-      }
-
+      draw_playback_bar(fr);
       ImGui::Separator();
-
-      // ---- Isometric grid --------------------------------------------------
-      ImGui::BeginChild("##grid", {0, 0}, false,
-          ImGuiWindowFlags_HorizontalScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
-      ImDrawList* dl     = ImGui::GetWindowDrawList();
-      ImVec2      origin = ImGui::GetCursorScreenPos();
-
-      const float cw2 = g.cs * 0.5f;
-      const float ch2 = g.cs * 0.25f;
-      const ImVec2 iso_org = {origin.x + (float)g.map.height * cw2,
-                               origin.y + ch2};
-
-      auto tile_ctr = [&](int32_t x, int32_t y) -> ImVec2 {
-        return {iso_org.x + (x - y) * cw2,
-                iso_org.y + (x + y) * ch2};
-      };
-
-      auto dim = [](ImVec4 c, float f) -> ImVec4 {
-        return {c.x * f, c.y * f, c.z * f, c.w};
-      };
-
-      for (int32_t y = 0; y < g.map.height; ++y) {
-        for (int32_t x = 0; x < g.map.width; ++x) {
-          CellData cd  = make_cell(g.map, fr, g.view, x, y);
-          ImVec2   ctr = tile_ctr(x, y);
-
-          ImVec2 top    = {ctr.x,        ctr.y - ch2};
-          ImVec2 right  = {ctr.x + cw2,  ctr.y      };
-          ImVec2 bottom = {ctr.x,        ctr.y + ch2};
-          ImVec2 left   = {ctr.x - cw2,  ctr.y      };
-
-          dl->AddTriangleFilled(top, right, left, u32(cd.bg));
-          dl->AddTriangleFilled(right, bottom, left, u32(dim(cd.bg, 0.70f)));
-          dl->AddQuad(top, right, bottom, left,
-                      u32({0.0f, 0.0f, 0.0f, 0.40f}), 0.5f);
-
-          if (cd.glyph) {
-            char   buf[2] = {cd.glyph, '\0'};
-            ImVec2 tsz    = ImGui::CalcTextSize(buf);
-            dl->AddText({ctr.x - tsz.x * 0.5f, ctr.y - tsz.y * 0.5f},
-                        u32(cd.fg), buf);
-            if (g.has_sel && !g.sel_is_unit)
-              for (const auto& s : fr.structures)
-                if (s.id == g.sel_struct_id && s.pos.x == x && s.pos.y == y)
-                  dl->AddQuad(top, right, bottom, left, IM_COL32(255,255,80,220), 2.0f);
-          } else if (cd.is_unit) {
-            draw_unit(dl, ctr, cw2, ch2, cd.unit_type, u32(cd.fg));
-            if (g.has_sel) {
-              for (const auto& u : fr.units)
-                if (u.id == g.sel_id && u.pos.x == x && u.pos.y == y)
-                  dl->AddQuad(top, right, bottom, left, IM_COL32(255,255,80,220), 2.0f);
-            }
-          }
-
-          if ((cd.glyph || cd.is_unit) && cd.hp >= 0 && cd.max_hp > 0 && g.cs >= 32.0f) {
-            float  ratio  = static_cast<float>(cd.hp) / static_cast<float>(cd.max_hp);
-            ImVec2 hp_end = {right.x + ratio * (bottom.x - right.x),
-                             right.y + ratio * (bottom.y - right.y)};
-            float  bw     = std::max(2.0f, ch2 * 0.3f);
-            ImVec4 hc     = ratio > 0.5f
-                ? ImVec4{0.2f + (1.0f - ratio) * 1.6f, 0.85f, 0.2f, 1.0f}
-                : ImVec4{1.0f, ratio * 1.7f, 0.1f, 1.0f};
-            dl->AddLine(right, bottom, u32({0.08f, 0.08f, 0.08f, 1.0f}), bw);
-            dl->AddLine(right, hp_end, u32(hc), bw);
-          }
-        }
-      }
-
-      // Left-click: select unit on that tile (only acts within grid bounds)
-      if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
-        ImVec2 mp  = ImGui::GetMousePos();
-        float  fdx = (mp.x - iso_org.x) / cw2;
-        float  fdy = (mp.y - iso_org.y) / ch2;
-        int32_t tx = static_cast<int32_t>(std::round((fdx + fdy) * 0.5f));
-        int32_t ty = static_cast<int32_t>(std::round((fdy - fdx) * 0.5f));
-        if (tx >= 0 && tx < g.map.width && ty >= 0 && ty < g.map.height) {
-          g.has_sel = false;
-          for (const auto& u : fr.units) {
-            if (u.pos.x == tx && u.pos.y == ty) {
-              g.has_sel = true; g.sel_is_unit = true; g.sel_id = u.id;
-              break;
-            }
-          }
-          if (!g.has_sel) {
-            for (const auto& s : fr.structures) {
-              if (s.pos.x == tx && s.pos.y == ty) {
-                g.has_sel = true; g.sel_is_unit = false; g.sel_struct_id = s.id;
-                break;
-              }
-            }
-          }
-        }
-      }
-
-      ImGui::Dummy({(float)(g.map.width + g.map.height) * cw2 + cw2,
-                    (float)(g.map.width + g.map.height) * ch2 + ch2});
-      ImGui::EndChild();
-
+      draw_grid(fr);
     } else {
-      // ---- No replay loaded ------------------------------------------------
       ImGui::Separator();
       ImGui::Spacing();
       ImGui::SetCursorPosX((io.DisplaySize.x - 380.0f) * 0.5f);
       ImGui::TextDisabled("Enter a path above, or drag and drop a .ud file here.");
     }
 
-    ImGui::End(); // ##ud
+    ImGui::End();
 
-    // ---- Selected unit panel (top-level so it renders above ##ud) ----------
-    if (g.loaded && g.has_sel) {
-      const auto& fr2 = g.frames[static_cast<size_t>(g.cur)];
-
-      ImGui::SetNextWindowPos(
-          {io.DisplaySize.x - 10.0f, 55.0f}, ImGuiCond_Always, {1.0f, 0.0f});
-      ImGui::SetNextWindowBgAlpha(0.88f);
-      ImGui::Begin("##sel", nullptr,
-          ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-          ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize);
-
-      if (g.sel_is_unit) {
-        const game::UnitFrame* sel = nullptr;
-        for (const auto& u : fr2.units)
-          if (u.id == g.sel_id) { sel = &u; break; }
-
-        if (!sel) {
-          g.has_sel = false;
-        } else {
-          ImVec4 fc = sel->faction.value == 0 ? kFactionA : kFactionB;
-          ImGui::TextColored(fc, "%s", unit_type_name(sel->type));
-          ImGui::SameLine();
-          ImGui::TextColored(fc, "[%s]", sel->faction.value == 0 ? "A" : "B");
-          ImGui::Separator();
-
-          float  ratio = sel->max_hp > 0 ? (float)sel->hp / (float)sel->max_hp : 0.0f;
-          ImVec4 hc    = ratio > 0.5f
-              ? ImVec4{0.2f + (1.0f - ratio) * 1.6f, 0.85f, 0.2f, 1.0f}
-              : ImVec4{1.0f, ratio * 1.7f, 0.1f, 1.0f};
-          ImGui::Text("HP   ");
-          ImGui::SameLine();
-          ImGui::TextColored(hc, "%d / %d", sel->hp, sel->max_hp);
-          ImGui::Text("Pos  %d, %d", sel->pos.x, sel->pos.y);
-          ImGui::Separator();
-
-          const game::UnitStats& st = game::stats_for(sel->type);
-          ImGui::Text("Damage  %d", st.dmg);
-          ImGui::Text("Range   %d", st.range);
-          ImGui::Text("Sight   %d", st.sight);
-          ImGui::Text("Speed   %d", st.speed);
-          if (st.first_strike)
-            ImGui::TextColored({0.9f, 0.85f, 0.3f, 1.0f}, "* First Strike");
-          if (st.splash)
-            ImGui::TextColored({0.9f, 0.6f, 0.2f, 1.0f}, "* Splash  r=%d", st.splash_radius);
-        }
-      } else {
-        const game::StructureFrame* sel = nullptr;
-        for (const auto& s : fr2.structures)
-          if (s.id == g.sel_struct_id) { sel = &s; break; }
-
-        if (!sel) {
-          g.has_sel = false;
-        } else {
-          ImVec4 fc = sel->faction.value == 0 ? kFactionA : kFactionB;
-          ImGui::TextColored(fc, "%s", structure_type_name(sel->type));
-          ImGui::SameLine();
-          ImGui::TextColored(fc, "[%s]", sel->faction.value == 0 ? "A" : "B");
-          ImGui::Separator();
-
-          float  ratio = sel->max_hp > 0 ? (float)sel->hp / (float)sel->max_hp : 0.0f;
-          ImVec4 hc    = ratio > 0.5f
-              ? ImVec4{0.2f + (1.0f - ratio) * 1.6f, 0.85f, 0.2f, 1.0f}
-              : ImVec4{1.0f, ratio * 1.7f, 0.1f, 1.0f};
-          ImGui::Text("HP   ");
-          ImGui::SameLine();
-          ImGui::TextColored(hc, "%d / %d", sel->hp, sel->max_hp);
-          ImGui::Text("Pos  %d, %d", sel->pos.x, sel->pos.y);
-        }
-      }
-
-      ImGui::Separator();
-      if (ImGui::SmallButton("x")) g.has_sel = false;
-
-      ImGui::End();
-    }
+    draw_sel_panel(io);
 
     ImGui::Render();
     int fb_w, fb_h;
