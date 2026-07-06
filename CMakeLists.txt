@@ -1,11 +1,11 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.20)
 
 project(ai_game
     VERSION 0.1.0
     LANGUAGES CXX
 )
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -27,7 +27,10 @@ FetchContent_Declare(
     GIT_TAG        v1.14.0
 )
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+# gtest v1.14 rejects CXX_STANDARD 23 inside its cmake; build it at 20 (ABI-compatible).
+set(CMAKE_CXX_STANDARD 20)
 FetchContent_MakeAvailable(googletest)
+set(CMAKE_CXX_STANDARD 23)
 
 FetchContent_Declare(
     xxhash

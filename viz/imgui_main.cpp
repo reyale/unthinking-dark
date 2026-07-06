@@ -196,6 +196,8 @@ static CellData make_cell(const game::Map& map, const game::FrameState& fr,
 
 // ---- App state ------------------------------------------------------------
 
+enum class SelType : uint8_t { Unit, Structure, Terrain };
+
 struct App {
   bool   loaded  = false;
   std::string error;
@@ -209,10 +211,11 @@ struct App {
   float  cs      = 48.0f;
   double last_t  = 0.0;
   char   path_buf[512] = {};
-  bool              has_sel     = false;
-  bool              sel_is_unit = true;
+  bool              has_sel  = false;
+  SelType           sel_type = SelType::Unit;
   game::UnitId      sel_id{};
   game::StructureId sel_struct_id{};
+  game::Vec2        sel_tile{};
 } g;
 
 static void try_load(const char* path) {
@@ -358,17 +361,21 @@ static void draw_tile_cell(ImDrawList* dl, ImVec2 ctr, float cw2, float ch2,
     char   buf[2] = {cd.glyph, '\0'};
     ImVec2 tsz    = ImGui::CalcTextSize(buf);
     dl->AddText({ctr.x - tsz.x * 0.5f, ctr.y - tsz.y * 0.5f}, u32(cd.fg), buf);
-    if (g.has_sel && !g.sel_is_unit)
+    if (g.has_sel && g.sel_type == SelType::Structure)
       for (const auto& s : fr.structures)
         if (s.id == g.sel_struct_id && s.pos.x == x && s.pos.y == y)
           dl->AddQuad(top, right, bottom, left, IM_COL32(255, 255, 80, 220), 2.0f);
   } else if (cd.is_unit) {
     draw_unit(dl, ctr, cw2, ch2, cd.unit_type, u32(cd.fg));
-    if (g.has_sel && g.sel_is_unit)
+    if (g.has_sel && g.sel_type == SelType::Unit)
       for (const auto& u : fr.units)
         if (u.id == g.sel_id && u.pos.x == x && u.pos.y == y)
           dl->AddQuad(top, right, bottom, left, IM_COL32(255, 255, 80, 220), 2.0f);
   }
+
+  if (g.has_sel && g.sel_type == SelType::Terrain &&
+      g.sel_tile.x == x && g.sel_tile.y == y)
+    dl->AddQuad(top, right, bottom, left, IM_COL32(180, 220, 255, 200), 2.0f);
 
   if ((cd.glyph || cd.is_unit) && cd.hp >= 0 && cd.max_hp > 0 && g.cs >= 32.0f) {
     float  ratio  = static_cast<float>(cd.hp) / static_cast<float>(cd.max_hp);
@@ -409,13 +416,16 @@ static void draw_grid(const game::FrameState& fr) {
       g.has_sel = false;
       for (const auto& u : fr.units) {
         if (u.pos.x == tx && u.pos.y == ty)
-          { g.has_sel = true; g.sel_is_unit = true; g.sel_id = u.id; break; }
+          { g.has_sel = true; g.sel_type = SelType::Unit; g.sel_id = u.id; break; }
       }
       if (!g.has_sel) {
         for (const auto& s : fr.structures) {
           if (s.pos.x == tx && s.pos.y == ty)
-            { g.has_sel = true; g.sel_is_unit = false; g.sel_struct_id = s.id; break; }
+            { g.has_sel = true; g.sel_type = SelType::Structure; g.sel_struct_id = s.id; break; }
         }
+      }
+      if (!g.has_sel) {
+        g.has_sel = true; g.sel_type = SelType::Terrain; g.sel_tile = {tx, ty};
       }
     }
   }
@@ -437,7 +447,7 @@ static void draw_sel_panel(const ImGuiIO& io) {
       ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
       ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_AlwaysAutoResize);
 
-  if (g.sel_is_unit) {
+  if (g.sel_type == SelType::Unit) {
     const game::UnitFrame* sel = nullptr;
     for (const auto& u : fr.units)
       if (u.id == g.sel_id) { sel = &u; break; }
@@ -468,7 +478,7 @@ static void draw_sel_panel(const ImGuiIO& io) {
       if (st.splash)
         ImGui::TextColored({0.9f, 0.6f, 0.2f, 1.0f}, "* Splash  r=%d", st.splash_radius);
     }
-  } else {
+  } else if (g.sel_type == SelType::Structure) {
     const game::StructureFrame* sel = nullptr;
     for (const auto& s : fr.structures)
       if (s.id == g.sel_struct_id) { sel = &s; break; }
@@ -477,7 +487,7 @@ static void draw_sel_panel(const ImGuiIO& io) {
       g.has_sel = false;
     } else {
       ImVec4 fc = sel->faction.value == 0 ? kFactionA : kFactionB;
-      ImGui::TextColored(fc, "%s", structure_type_name(sel->type));
+      ImGui::TextColored(fc, "%s", game::structure_type_name(sel->type));
       ImGui::SameLine();
       ImGui::TextColored(fc, "[%s]", sel->faction.value == 0 ? "A" : "B");
       ImGui::Separator();
@@ -488,6 +498,14 @@ static void draw_sel_panel(const ImGuiIO& io) {
       ImGui::TextColored(hp_color(ratio), "%d / %d", sel->hp, sel->max_hp);
       ImGui::Text("Pos  %d, %d", sel->pos.x, sel->pos.y);
     }
+  } else {
+    const game::Tile& tile = g.map.tile_at(g.sel_tile);
+    ImGui::Text("%s", game::terrain_type_name(tile.terrain));
+    ImGui::Separator();
+    ImGui::Text("Pos       %d, %d", g.sel_tile.x, g.sel_tile.y);
+    ImGui::Text("Passable  %s", game::is_passable(tile.terrain) ? "yes" : "no");
+    if (tile.terrain == game::Terrain::ResourceNode)
+      ImGui::Text("Resources  %d", tile.resource_amount);
   }
 
   ImGui::Separator();

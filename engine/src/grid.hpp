@@ -42,6 +42,16 @@ constexpr bool is_passable(Terrain t) {
   return t != Terrain::Asteroid;
 }
 
+inline const char* terrain_type_name(Terrain t) {
+  switch (t) {
+  case Terrain::Open:         return "Open";
+  case Terrain::Asteroid:     return "Asteroid";
+  case Terrain::Nebula:       return "Nebula";
+  case Terrain::ResourceNode: return "Resource Node";
+  }
+  return "?";
+}
+
 struct Tile {
   Terrain terrain{Terrain::Open};
   int32_t resource_amount{0}; // only meaningful for ResourceNode

@@ -31,10 +31,12 @@ Additional work:
 ## Build & Test
 
 ```bash
-cmake -B build -DCMAKE_BUILD_TYPE=Debug   # once, or when CMakeLists.txt changes
+~/.local/bin/cmake -B build -DCMAKE_BUILD_TYPE=Debug   # once, or when CMakeLists.txt changes
 cmake --build build -j$(nproc)
 cd build && ctest --output-on-failure
 ```
+
+Requires CMake ≥ 3.20 (system cmake is 3.16; use `~/.local/bin/cmake` which is 4.x).
 
 ASan + UBSan are enabled in Debug builds. Never suppress them — a sanitizer failure is a
 determinism bug, not a false positive.
