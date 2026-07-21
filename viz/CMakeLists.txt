@@ -55,6 +55,12 @@ if(OpenGL_FOUND AND glfw3_FOUND)
   )
   target_link_libraries(ud_viz_imgui PRIVATE engine ud_imgui)
 
+  add_executable(ud_shape_editor shape_editor_main.cpp)
+  target_include_directories(ud_shape_editor PRIVATE
+    ${CMAKE_SOURCE_DIR}/engine/src
+  )
+  target_link_libraries(ud_shape_editor PRIVATE engine ud_imgui)
+
 else()
   message(STATUS "OpenGL or GLFW not found — skipping ud_viz_imgui (apt install libglfw3-dev)")
 endif()
