@@ -8,6 +8,7 @@
 namespace game {
 
 struct World;
+struct Unit;
 
 // Presentation-only record of what combat did, for replay viewers. Collected only
 // when a caller passes a CombatLog; never read back by game logic, never hashed,
@@ -56,5 +57,10 @@ struct CombatLog {
 //   range (Manhattan); else no attack.
 void run_combat(World& world, const ValidatedCommands& cmds_a, const ValidatedCommands& cmds_b,
                 CombatLog* log = nullptr);
+
+// True if `unit` has anything it could attack right now: a living enemy unit or
+// structure within its range. Movement uses this to halt MoveAttack units, so a
+// unit stops at full range whether it is closing on a ship or a building.
+bool target_in_range(const World& world, const Unit& unit);
 
 } // namespace game

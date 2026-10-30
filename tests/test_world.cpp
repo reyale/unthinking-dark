@@ -2,6 +2,9 @@
 #include <optional>
 #include "statehash.hpp"
 #include "tick.hpp"
+#include "combat.hpp"
+#include "stats.hpp"
+#include "grid.hpp"
 #include "command.hpp"
 #include "config.hpp"
 #include "economy.hpp"
@@ -588,6 +591,74 @@ TEST(Movement, MoveAttackHaltsWhenEnemyInRange) {
   game::ValidatedCommands empty;
   game::run_movement(w, cmds, empty);
   EXPECT_EQ(unit.pos.x, 1); // halted — enemy in range
+}
+
+// MoveAttack halts at full range whatever the target is. Marches along a row toward
+// an enemy and returns the distance at which the unit stopped.
+static int32_t halt_distance(game::UnitType shooter, bool target_is_structure,
+                             game::StructureType stype = game::StructureType::CommandCore) {
+  game::World w;
+  w.map = game::Map::make(20, 5);
+  w.rng = game::Rng{0};
+  game::Vec2 enemy_at{15, 2};
+  if (target_is_structure)
+    w.spawn_structure({1}, stype, enemy_at);
+  else
+    w.spawn_unit({1}, game::UnitType::Drone, enemy_at);
+  game::UnitId id = w.spawn_unit({0}, shooter, {0, 2}).id;
+  game::ValidatedCommands empty;
+  for (int t = 0; t < 30; ++t)
+    game::run_movement(w, move_cmd(id, enemy_at.x, enemy_at.y, game::CommandKind::MoveAttack),
+                       empty);
+  return game::manhattan(w.find_unit(id)->pos, enemy_at);
+}
+
+TEST(Movement, MoveAttackHaltsAtFullRangeFromUnits) {
+  for (auto t : {game::UnitType::Interceptor, game::UnitType::Frigate,
+                 game::UnitType::Artillery, game::UnitType::Battleship})
+    EXPECT_EQ(halt_distance(t, false), game::stats_for(t).range) << game::unit_type_name(t);
+}
+
+TEST(Movement, MoveAttackHaltsAtFullRangeFromStructures) {
+  for (auto st : {game::StructureType::CommandCore, game::StructureType::Factory,
+                  game::StructureType::ClaimNode})
+    for (auto t : {game::UnitType::Interceptor, game::UnitType::Frigate,
+                   game::UnitType::Artillery, game::UnitType::Battleship})
+      EXPECT_EQ(halt_distance(t, true, st), game::stats_for(t).range)
+          << game::unit_type_name(t) << " vs " << game::structure_type_name(st);
+}
+
+TEST(Movement, MoveAttackIgnoresFriendlyStructures) {
+  auto w = make_world();
+  w.spawn_structure({0}, game::StructureType::Factory, {4, 3}); // beside the path
+  auto& unit = w.spawn_unit({0}, game::UnitType::Interceptor, {1, 1});
+  game::ValidatedCommands empty;
+  for (int t = 0; t < 10; ++t)
+    game::run_movement(w, move_cmd(unit.id, 8, 1, game::CommandKind::MoveAttack), empty);
+  EXPECT_EQ(unit.pos, (game::Vec2{8, 1}));
+}
+
+TEST(Movement, DroneMoveAttackNeverHalts) {
+  auto w = make_world();
+  w.spawn_structure({1}, game::StructureType::CommandCore, {5, 2});
+  auto& drone = w.spawn_unit({0}, game::UnitType::Drone, {1, 1}); // range 0
+  game::ValidatedCommands empty;
+  for (int t = 0; t < 10; ++t)
+    game::run_movement(w, move_cmd(drone.id, 8, 1, game::CommandKind::MoveAttack), empty);
+  EXPECT_EQ(drone.pos, (game::Vec2{8, 1}));
+}
+
+TEST(Combat, TargetInRangeSeesUnitsAndStructuresOfTheEnemyOnly) {
+  auto w = make_world();
+  auto& inter = w.spawn_unit({0}, game::UnitType::Interceptor, {1, 1});
+  EXPECT_FALSE(game::target_in_range(w, inter));
+  w.spawn_structure({0}, game::StructureType::Factory, {2, 1}); // friendly
+  w.spawn_unit({0}, game::UnitType::Frigate, {1, 2});           // friendly
+  EXPECT_FALSE(game::target_in_range(w, inter));
+  w.spawn_structure({1}, game::StructureType::ClaimNode, {4, 1}); // distance 3 > range 2
+  EXPECT_FALSE(game::target_in_range(w, inter));
+  w.spawn_structure({1}, game::StructureType::ClaimNode, {2, 2}); // distance 2
+  EXPECT_TRUE(game::target_in_range(w, inter));
 }
 
 TEST(Movement, BlockedByAsteroid) {

@@ -14,6 +14,19 @@ struct CombatTarget {
   bool is_null() const { return unit_id.is_null() && struct_id.is_null(); }
 };
 
+bool target_in_range(const World& world, const Unit& unit) {
+  const int32_t range = unit.stats().range;
+  if (range == 0)
+    return false;
+  for (const auto& [eid, enemy] : world.units)
+    if (enemy.faction != unit.faction && enemy.alive() && manhattan(unit.pos, enemy.pos) <= range)
+      return true;
+  for (const auto& [sid, s] : world.structures)
+    if (s.faction != unit.faction && s.alive() && manhattan(unit.pos, s.pos) <= range)
+      return true;
+  return false;
+}
+
 // Pick the best target for `attacker`.  Priority order:
 //   1. Explicit unit target from command (if valid and in range)
 //   2. Explicit structure target from command (if valid and in range)

@@ -1,4 +1,5 @@
 #include "movement.hpp"
+#include "combat.hpp"
 #include "world.hpp"
 #include "entity.hpp"
 #include "config.hpp"
@@ -22,18 +23,6 @@ static Vec2 step_toward(Vec2 from, Vec2 to) {
   if (std::abs(dx) >= std::abs(dy))
     return {from.x + (dx > 0 ? 1 : -1), from.y};
   return {from.x, from.y + (dy > 0 ? 1 : -1)};
-}
-
-// Returns true if any enemy unit is within attack range of `unit`.
-static bool enemy_in_range(const World& world, const Unit& unit) {
-  const int32_t range = unit.stats().range;
-  for (const auto& [eid, enemy] : world.units) {
-    if (enemy.faction == unit.faction || !enemy.alive())
-      continue;
-    if (manhattan(unit.pos, enemy.pos) <= range)
-      return true;
-  }
-  return false;
 }
 
 void run_movement(World& world, const ValidatedCommands& cmds_a, const ValidatedCommands& cmds_b) {
@@ -78,7 +67,7 @@ void run_movement(World& world, const ValidatedCommands& cmds_a, const Validated
         continue;
 
       // MoveAttack: halt if enemy now in range
-      if (mv.move_attack && enemy_in_range(world, *u)) {
+      if (mv.move_attack && target_in_range(world, *u)) {
         mv.steps_left = 0;
         continue;
       }
