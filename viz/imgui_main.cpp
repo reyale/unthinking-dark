@@ -87,6 +87,8 @@ struct CellData {
   ImVec4  fg{};
   int32_t hp{-1}, max_hp{-1};
   int     facing{0};
+  uint32_t id{0};        // unit or structure id, for hit flashes
+  bool     is_struct{false};
 };
 
 // ---- Cell data builder ----------------------------------------------------
@@ -131,7 +133,7 @@ static CellData make_cell(const game::Map& map, const game::FrameState& fr,
              s.type == game::StructureType::Factory     ? 'T' : 'N';
     ImVec4 fg = s.faction.value == 0 ? kFactionA : kFactionB;
     return {bg, g, false, game::UnitType::Drone, shape_index(s.type), fg, s.hp, s.max_hp,
-            structure_facing(map, x, y)};
+            structure_facing(map, x, y), s.id.value, true};
   }
 
   int top = -1;
@@ -141,7 +143,7 @@ static CellData make_cell(const game::Map& map, const game::FrameState& fr,
     const auto& u = fr.units[top];
     ImVec4 fg = u.faction.value == 0 ? kFactionA : kFactionB;
     int facing = top < static_cast<int>(facings.size()) ? facings[top] : 0;
-    return {bg, '\0', true, u.type, shape_index(u.type), fg, u.hp, u.max_hp, facing};
+    return {bg, '\0', true, u.type, shape_index(u.type), fg, u.hp, u.max_hp, facing, u.id.value};
   }
 
   return {bg};
@@ -154,18 +156,27 @@ static CellData make_cell(const game::Map& map, const game::FrameState& fr,
 // Frame N's effects are the combat that produced frame N, so stepping in either
 // direction shows how the current frame came about.
 
-enum class FxKind : uint8_t { Tracer, Hit, Burst };
+enum class FxKind : uint8_t { Tracer, Muzzle, Hit, Splash, Burst };
 
 struct Effect {
-  FxKind     kind;
-  game::Vec2 from, to; // tiles; Hit and Burst only use `to`
-  ImVec4     col;
-  double     start, dur;
+  FxKind         kind;
+  game::UnitType weapon;   // shooter type; picks the shot style
+  game::Vec2     from, to; // tiles; only Tracer uses `from`
+  ImVec4         col;
+  double         start, dur;
+  float          size = 1.0f;
+  // Hit: the entity that flashes white. Burst: the victim (also flashes).
+  game::UnitId      unit{};
+  game::StructureId structure{};
+  int32_t           radius = 0; // Splash: everything this close to `to` flashes
+  // Tracer/Muzzle: the shooter, so shots leave from its muzzle point.
+  int               shooter_shape  = -1;
+  int               shooter_facing = 0;
   // Burst only: the victim, drawn until the explosion covers it. The frame being
   // shown is post-combat, so without this the target vanishes before it is hit.
-  int        ghost_shape  = -1;
-  int        ghost_facing = 0;
-  ImVec4     ghost_col{};
+  int    ghost_shape  = -1;
+  int    ghost_facing = 0;
+  ImVec4 ghost_col{};
 };
 
 struct FxState {
@@ -234,8 +245,9 @@ static void poll_shape_reload(double now) {
 #endif
 }
 
-// Units face the way they last moved. Before their first move they face the map
-// centre, so freshly built units look toward the action rather than all NE.
+// Units face the way they last moved or fired; firing wins within a tick because
+// combat runs after movement. Before either, they face the map centre, so freshly
+// built units look toward the action rather than all NE.
 static void compute_unit_facings() {
   g.unit_facing.assign(g.frames.size(), {});
   std::map<game::UnitId, std::pair<game::Vec2, uint8_t>> last; // pos, facing
@@ -244,11 +256,19 @@ static void compute_unit_facings() {
     const auto& units = g.frames[f].units;
     auto& out = g.unit_facing[f];
     out.resize(units.size());
+    std::map<game::UnitId, int> fired; // shooter -> facing toward its target
+    for (const auto& sh : g.frames[f].shots) {
+      const int fc = facing_from_step(sh.to.x - sh.from.x, sh.to.y - sh.from.y);
+      if (fc >= 0) fired[sh.attacker] = fc;
+    }
     for (size_t i = 0; i < units.size(); ++i) {
       const auto& u = units[i];
       auto it = last.find(u.id);
+      auto shot = fired.find(u.id);
       int facing;
-      if (it == last.end()) {
+      if (shot != fired.end()) {
+        facing = shot->second;
+      } else if (it == last.end()) {
         facing = facing_from_step(cx - u.pos.x, cy - u.pos.y);
         if (facing < 0) facing = 0;
       } else {
@@ -289,36 +309,141 @@ static void try_load(const char* path) {
 // ---- Combat effects ---------------------------------------------------------
 
 // Base timings in seconds, used as-is when stepping. During playback they are
-// compressed so an effect lasts at most kFxMaxTicks ticks and effects can't pile up.
+// compressed so a tick's effects finish within kFxMaxTicks ticks and can't pile up.
 static constexpr double kFxDelayNormal = 0.08; // first-strike shots go at t=0
-static constexpr double kFxTracer      = 0.22;
 static constexpr double kFxHit         = 0.18;
-static constexpr double kFxBurstDelay  = kFxDelayNormal + kFxTracer;
-static constexpr double kFxBurst       = 0.40;
-static constexpr double kFxTotal       = kFxBurstDelay + kFxBurst;
-static constexpr double kFxMaxTicks    = 3.0;
+static constexpr double kFxSplash      = 0.38;
+static constexpr double kFxMuzzle      = 0.12;
+static constexpr double kFxBurst       = 0.40; // scaled up for bigger victims
+static constexpr double kFxTotal       = 1.10; // worst case: artillery onto a Command Core
+static constexpr double kFxMaxTicks    = 5.0;
 static constexpr double kFxScrubSettle = 0.10; // slider must rest this long before spawning
+
+// How each shooter's shot looks. Widths are in ch2 units so effects scale with zoom.
+struct WeaponFx {
+  double travel;   // seconds from muzzle to impact
+  int    bolts;    // Interceptors fire a quick burst
+  double stagger;  // between bolts
+  float  width;
+  float  tail;     // tracer length as a fraction of the path
+  float  hit_size;
+  bool   beam;     // twin parallel lines plus a muzzle flash
+  bool   arc;      // lobbed shell
+};
+
+static WeaponFx weapon_fx(game::UnitType t) {
+  switch (t) {
+  case game::UnitType::Interceptor: return {0.14, 3, 0.05, 0.08f, 0.30f, 0.6f, false, false};
+  case game::UnitType::Frigate:     return {0.20, 1, 0.00, 0.13f, 0.45f, 1.0f, false, false};
+  case game::UnitType::Artillery:   return {0.45, 1, 0.00, 0.14f, 0.00f, 1.0f, false, true};
+  case game::UnitType::Battleship:  return {0.24, 1, 0.00, 0.17f, 0.70f, 1.5f, true,  false};
+  case game::UnitType::Drone:       break;
+  }
+  return {0.20, 1, 0.00, 0.10f, 0.45f, 0.8f, false, false};
+}
+
+static float burst_size(const game::KillEvent& k) {
+  if (!k.unit.is_null()) {
+    switch (k.unit_type) {
+    case game::UnitType::Drone:       return 0.7f;
+    case game::UnitType::Interceptor: return 0.8f;
+    case game::UnitType::Frigate:     return 1.1f;
+    case game::UnitType::Artillery:   return 1.0f;
+    case game::UnitType::Battleship:  return 1.5f;
+    }
+  }
+  switch (k.structure_type) {
+  case game::StructureType::ClaimNode:   return 1.3f;
+  case game::StructureType::Factory:     return 1.9f;
+  case game::StructureType::CommandCore: return 2.6f;
+  }
+  return 1.0f;
+}
 
 static ImVec4 mix_white(ImVec4 c, float t) {
   return {c.x + (1.0f - c.x) * t, c.y + (1.0f - c.y) * t, c.z + (1.0f - c.z) * t, c.w};
 }
 
+static bool shot_visible(const game::FrameState& fr, const game::ShotEvent& sh) {
+  return tile_visible(fr, g.view, sh.from.x, sh.from.y) ||
+         tile_visible(fr, g.view, sh.to.x, sh.to.y);
+}
+
+static int32_t splash_radius(const game::ShotEvent& sh) {
+  return game::stats_for(sh.attacker_type).splash_radius;
+}
+
+// The shooter's facing on `frame` (it turned toward its target). A shooter killed in
+// the same tick isn't in the frame, so fall back to the shot direction.
+static int shooter_facing(int frame, const game::ShotEvent& sh) {
+  const auto& units = g.frames[static_cast<size_t>(frame)].units;
+  for (size_t i = 0; i < units.size(); ++i)
+    if (units[i].id == sh.attacker) return g.unit_facing[static_cast<size_t>(frame)][i];
+  const int fc = facing_from_step(sh.to.x - sh.from.x, sh.to.y - sh.from.y);
+  return fc < 0 ? 0 : fc;
+}
+
 static void spawn_fx(int frame, double now) {
   const auto& fr = g.frames[static_cast<size_t>(frame)];
   const double k = g.playing ? std::min(1.0, kFxMaxTicks / g.fps / kFxTotal) : 1.0;
-  for (const auto& sh : fr.shots) {
-    if (!tile_visible(fr, g.view, sh.from.x, sh.from.y) &&
-        !tile_visible(fr, g.view, sh.to.x, sh.to.y))
-      continue;
-    const ImVec4 fc = sh.faction.value == 0 ? kFactionA : kFactionB;
+
+  // Impact time per shot, so each explosion waits for the shot that caused it.
+  std::vector<double> impact(fr.shots.size());
+  double last_impact = now;
+  for (size_t i = 0; i < fr.shots.size(); ++i) {
+    const auto& sh  = fr.shots[i];
+    const WeaponFx w = weapon_fx(sh.attacker_type);
     const double t0 = now + (sh.first_strike ? 0.0 : kFxDelayNormal) * k;
-    g.fx.live.push_back({FxKind::Tracer, sh.from, sh.to, mix_white(fc, 0.45f), t0, kFxTracer * k});
-    g.fx.live.push_back({FxKind::Hit, sh.to, sh.to, {1, 1, 1, 1}, t0 + kFxTracer * k, kFxHit * k});
+    impact[i]   = t0 + (w.travel + w.stagger * (w.bolts - 1)) * k;
+    last_impact = std::max(last_impact, impact[i]);
+    if (!shot_visible(fr, sh)) continue;
+
+    const ImVec4 fc = sh.faction.value == 0 ? kFactionA : kFactionB;
+    const ImVec4 tc = mix_white(fc, sh.attacker_type == game::UnitType::Frigate ? 0.65f : 0.45f);
+    const int sshape = shape_index(sh.attacker_type), sface = shooter_facing(frame, sh);
+    for (int b = 0; b < w.bolts; ++b) {
+      Effect e{FxKind::Tracer, sh.attacker_type, sh.from, sh.to, tc, t0 + b * w.stagger * k,
+               w.travel * k};
+      e.shooter_shape = sshape; e.shooter_facing = sface;
+      g.fx.live.push_back(e);
+    }
+    if (w.beam) {
+      Effect e{FxKind::Muzzle, sh.attacker_type, sh.from, sh.to, mix_white(fc, 0.7f), t0,
+               kFxMuzzle * k, w.hit_size};
+      e.shooter_shape = sshape; e.shooter_facing = sface;
+      g.fx.live.push_back(e);
+    }
+    if (sh.splash) {
+      Effect e{FxKind::Splash, sh.attacker_type, sh.to, sh.to, {1.0f, 0.55f, 0.18f, 1.0f},
+               impact[i], kFxSplash * k};
+      e.radius = splash_radius(sh);
+      g.fx.live.push_back(e);
+    } else {
+      Effect e{FxKind::Hit, sh.attacker_type, sh.to, sh.to, {1, 1, 1, 1}, impact[i],
+               kFxHit * k, w.hit_size};
+      e.unit      = sh.target_unit;
+      e.structure = sh.target_struct;
+      g.fx.live.push_back(e);
+    }
   }
+
   for (const auto& kl : fr.kills) {
     if (!tile_visible(fr, g.view, kl.pos.x, kl.pos.y)) continue;
-    Effect e{FxKind::Burst, kl.pos, kl.pos, {1.0f, 0.62f, 0.22f, 1.0f},
-             now + kFxBurstDelay * k, kFxBurst * k};
+    double t = -1.0;
+    for (size_t i = 0; i < fr.shots.size(); ++i) {
+      const auto& sh = fr.shots[i];
+      const bool caused = (!kl.unit.is_null() && sh.target_unit == kl.unit) ||
+                          (!kl.structure.is_null() && sh.target_struct == kl.structure) ||
+                          (sh.splash && game::manhattan(sh.to, kl.pos) <= splash_radius(sh));
+      if (caused) t = std::max(t, impact[i]);
+    }
+    if (t < 0.0) t = last_impact;
+
+    const float size = burst_size(kl);
+    Effect e{FxKind::Burst, game::UnitType::Drone, kl.pos, kl.pos, {1.0f, 0.62f, 0.22f, 1.0f},
+             t, kFxBurst * (0.7 + 0.3 * size) * k, size};
+    e.unit      = kl.unit;
+    e.structure = kl.structure;
     const bool is_unit = !kl.unit.is_null();
     e.ghost_shape = is_unit ? shape_index(kl.unit_type) : shape_index(kl.structure_type);
     e.ghost_col   = kl.faction.value == 0 ? kFactionA : kFactionB;
@@ -351,69 +476,164 @@ static void update_fx(double now) {
   std::erase_if(fx.live, [&](const Effect& e) { return now > e.start + e.dur; });
 }
 
+// 0..1: how strongly an entity should flash white right now from hits on it.
+static float hit_flash(bool is_struct, uint32_t id, game::Vec2 pos, double now) {
+  float best = 0.0f;
+  for (const auto& e : g.fx.live) {
+    if ((e.kind != FxKind::Hit && e.kind != FxKind::Splash) || now < e.start ||
+        now > e.start + e.dur)
+      continue;
+    const bool match =
+        e.kind == FxKind::Splash ? game::manhattan(pos, e.to) <= e.radius
+        : is_struct              ? !e.structure.is_null() && e.structure.value == id
+                                 : !e.unit.is_null() && e.unit.value == id;
+    if (match)
+      best = std::max(best, 1.0f - static_cast<float>((now - e.start) / e.dur));
+  }
+  return best;
+}
+
+static ImVec2 arc_point(ImVec2 a, ImVec2 b, float p, float h) {
+  return {a.x + (b.x - a.x) * p, a.y + (b.y - a.y) * p - h * 4.0f * p * (1.0f - p)};
+}
+
 static void draw_fx(ImDrawList* dl, ImVec2 iso_org, float cw2, float ch2, double now) {
   auto ctr = [&](game::Vec2 t, float lift) -> ImVec2 {
     return {iso_org.x + (t.x - t.y) * cw2, iso_org.y + (t.x + t.y) * ch2 - lift * ch2};
   };
   auto with_a = [](ImVec4 c, float a) { return u32({c.x, c.y, c.z, c.w * a}); };
-  const float muzzle = 0.8f, impact = 0.5f; // heights in ch2 units, roughly hull top
+  auto arc_h  = [&](game::Vec2 a, game::Vec2 b) {
+    return ch2 * (1.2f + 0.45f * static_cast<float>(game::manhattan(a, b)));
+  };
+  const float impact = 0.5f; // ch2 units above the target tile, roughly hull top
+  auto muzzle_at = [&](game::Vec2 tile, int shape, int facing) {
+    const ImVec2 c = ctr(tile, 0.0f);
+    return shape >= 0 ? shape_muzzle(g.shape_defs[shape], c, cw2, ch2, facing)
+                      : ImVec2{c.x, c.y - kDefaultMuzzleZ * ch2};
+  };
 
   const bool idle = !g.playing && g.fx.live.empty() && !g.fx.pending;
   if (idle && g.fx.show_static) {
     const auto& fr = g.frames[static_cast<size_t>(g.cur)];
     for (const auto& sh : fr.shots) {
-      if (!tile_visible(fr, g.view, sh.from.x, sh.from.y) &&
-          !tile_visible(fr, g.view, sh.to.x, sh.to.y))
-        continue;
-      const ImVec4 fc = sh.faction.value == 0 ? kFactionA : kFactionB;
-      const ImVec2 a = ctr(sh.from, muzzle), b = ctr(sh.to, impact);
-      dl->AddLine(a, b, with_a(mix_white(fc, 0.3f), 0.45f), 1.5f);
-      dl->AddCircleFilled(b, std::max(2.0f, ch2 * 0.12f), with_a(mix_white(fc, 0.3f), 0.6f));
+      if (!shot_visible(fr, sh)) continue;
+      const ImVec4 fc = mix_white(sh.faction.value == 0 ? kFactionA : kFactionB, 0.3f);
+      const ImVec2 a = muzzle_at(sh.from, shape_index(sh.attacker_type), shooter_facing(g.cur, sh));
+      const ImVec2 b = ctr(sh.to, impact);
+      if (weapon_fx(sh.attacker_type).arc) {
+        ImVec2 pts[13];
+        for (int i = 0; i <= 12; ++i) pts[i] = arc_point(a, b, i / 12.0f, arc_h(sh.from, sh.to));
+        dl->AddPolyline(pts, 13, with_a(fc, 0.45f), 0, 1.5f);
+      } else {
+        dl->AddLine(a, b, with_a(fc, 0.45f), 1.5f);
+      }
+      dl->AddCircleFilled(b, std::max(2.0f, ch2 * 0.12f), with_a(fc, 0.6f));
     }
   }
 
   // Victims first, so tracers and explosions draw over them.
   for (const auto& e : g.fx.live) {
     if (e.ghost_shape < 0 || now > e.start + e.dur * 0.15) continue;
+    const bool is_struct = e.unit.is_null();
+    const float f = hit_flash(is_struct, is_struct ? e.structure.value : e.unit.value, e.to, now);
     draw_unit_from_def(dl, ctr(e.to, 0.0f), cw2, ch2, g.shape_defs[e.ghost_shape],
-                       u32(e.ghost_col), e.ghost_facing);
+                       u32(mix_white(e.ghost_col, 0.75f * f)), e.ghost_facing);
   }
 
   for (const auto& e : g.fx.live) {
     if (now < e.start) continue;
     const float p = static_cast<float>(std::clamp((now - e.start) / e.dur, 0.0, 1.0));
+    const float q = 1.0f - p;
     switch (e.kind) {
     case FxKind::Tracer: {
-      const ImVec2 a = ctr(e.from, muzzle), b = ctr(e.to, impact);
-      const float head = 1.0f - (1.0f - p) * (1.0f - p); // ease-out
-      const float tail = std::max(0.0f, head - 0.45f);
+      const WeaponFx w = weapon_fx(e.weapon);
+      const ImVec2 a = muzzle_at(e.from, e.shooter_shape, e.shooter_facing);
+      const ImVec2 b = ctr(e.to, impact);
+      const float  wd = std::max(1.2f, ch2 * w.width);
+      if (w.arc) {
+        const float h = arc_h(e.from, e.to);
+        ImVec2 trail[8];
+        for (int i = 0; i < 8; ++i)
+          trail[i] = arc_point(a, b, std::max(0.0f, p - 0.2f * (1.0f - i / 7.0f)), h);
+        dl->AddPolyline(trail, 8, with_a(e.col, 0.45f), 0, wd);
+        const ImVec2 shell = trail[7];
+        dl->AddCircleFilled(shell, wd * 2.4f, with_a(e.col, 0.25f));
+        dl->AddCircleFilled(shell, wd * 1.1f, with_a(mix_white(e.col, 0.6f), 1.0f));
+        break;
+      }
+      const float head = 1.0f - q * q; // ease-out
+      const float tail = std::max(0.0f, head - w.tail);
       const ImVec2 h = {a.x + (b.x - a.x) * head, a.y + (b.y - a.y) * head};
       const ImVec2 t = {a.x + (b.x - a.x) * tail, a.y + (b.y - a.y) * tail};
-      const float w = std::max(1.5f, ch2 * 0.12f);
-      dl->AddLine(t, h, with_a(e.col, 0.25f), w * 3.0f);
-      dl->AddLine(t, h, with_a(e.col, 0.95f), w);
-      dl->AddCircleFilled(h, w * 1.1f, with_a(mix_white(e.col, 0.6f), 1.0f));
+      auto bolt = [&](ImVec2 off) {
+        const ImVec2 t2{t.x + off.x, t.y + off.y}, h2{h.x + off.x, h.y + off.y};
+        dl->AddLine(t2, h2, with_a(e.col, 0.25f), wd * 3.0f);
+        dl->AddLine(t2, h2, with_a(e.col, 0.95f), wd);
+        dl->AddCircleFilled(h2, wd * 1.1f, with_a(mix_white(e.col, 0.6f), 1.0f));
+      };
+      if (w.beam) {
+        const float dx = b.x - a.x, dy = b.y - a.y;
+        const float len = std::max(1.0f, std::sqrt(dx * dx + dy * dy));
+        const ImVec2 n = {-dy / len * wd * 1.2f, dx / len * wd * 1.2f};
+        bolt(n);
+        bolt({-n.x, -n.y});
+      } else {
+        bolt({0.0f, 0.0f});
+      }
+      break;
+    }
+    case FxKind::Muzzle: {
+      const ImVec2 c = muzzle_at(e.from, e.shooter_shape, e.shooter_facing);
+      const float r = ch2 * 0.35f * e.size * (0.6f + 0.6f * p);
+      dl->AddCircleFilled(c, r, with_a(e.col, 0.85f * q));
+      dl->AddCircleFilled(c, r * 0.5f, with_a({1, 1, 1, 1}, q));
       break;
     }
     case FxKind::Hit: {
       const ImVec2 c = ctr(e.to, impact);
-      const float r = ch2 * (0.25f + 0.55f * p);
-      dl->AddEllipseFilled(c, {r, r * 0.7f}, with_a(e.col, 0.55f * (1.0f - p)));
-      dl->AddEllipse(c, {r * 1.2f, r * 0.84f}, with_a(e.col, 0.8f * (1.0f - p)), 0.0f, 0, 1.5f);
+      const float r = ch2 * (0.25f + 0.55f * p) * e.size;
+      dl->AddEllipseFilled(c, {r, r * 0.7f}, with_a(e.col, 0.55f * q));
+      dl->AddEllipse(c, {r * 1.2f, r * 0.84f}, with_a(e.col, 0.8f * q), 0.0f, 0, 1.5f);
+      break;
+    }
+    case FxKind::Splash: {
+      // Light up every tile in the blast, friendlies included, then a ground ring.
+      for (int32_t dy = -e.radius; dy <= e.radius; ++dy)
+        for (int32_t dx = -e.radius; dx <= e.radius; ++dx) {
+          if (std::abs(dx) + std::abs(dy) > e.radius) continue;
+          const ImVec2 c = ctr({e.to.x + dx, e.to.y + dy}, 0.0f);
+          const ImVec2 quad[4] = {{c.x, c.y - ch2}, {c.x + cw2, c.y}, {c.x, c.y + ch2},
+                                  {c.x - cw2, c.y}};
+          dl->AddConvexPolyFilled(quad, 4, with_a(e.col, 0.45f * q * q));
+        }
+      const ImVec2 c = ctr(e.to, 0.0f);
+      const float rx = cw2 * (0.6f + (e.radius + 0.6f) * p);
+      dl->AddEllipse(c, {rx, rx * 0.5f}, with_a(mix_white(e.col, 0.4f), 0.9f * q), 0.0f, 0,
+                     2.5f);
+      if (p < 0.35f)
+        dl->AddEllipseFilled(ctr(e.to, impact), {cw2 * 0.45f, ch2 * 0.6f},
+                             with_a({1, 1, 1, 1}, 1.0f - p / 0.35f));
       break;
     }
     case FxKind::Burst: {
       const ImVec2 c = ctr(e.to, impact);
-      const float r = ch2 * (0.4f + 1.1f * p);
-      const ImVec4 hot = mix_white(e.col, 0.5f * (1.0f - p));
-      dl->AddEllipseFilled(c, {r, r * 0.65f}, with_a(hot, 0.7f * (1.0f - p) * (1.0f - p)));
-      dl->AddEllipse(c, {r * 1.25f, r * 0.8f}, with_a(e.col, 0.9f * (1.0f - p)), 0.0f, 0, 2.0f);
-      for (int i = 0; i < 8; ++i) {
-        const float ang = 0.785398f * static_cast<float>(i) + 0.3f;
+      const float r = ch2 * (0.4f + 1.1f * p) * e.size;
+      const ImVec4 hot = mix_white(e.col, 0.5f * q);
+      dl->AddEllipseFilled(c, {r, r * 0.65f}, with_a(hot, 0.7f * q * q));
+      dl->AddEllipse(c, {r * 1.25f, r * 0.8f}, with_a(e.col, 0.9f * q), 0.0f, 0, 2.0f);
+      const int sparks = e.size > 1.5f ? 12 : 8;
+      for (int i = 0; i < sparks; ++i) {
+        const float ang = 6.2831853f * static_cast<float>(i) / sparks + 0.3f;
         const float r0 = r * 0.6f, r1 = r * 1.5f;
         dl->AddLine({c.x + std::cos(ang) * r0, c.y + std::sin(ang) * r0 * 0.6f},
                     {c.x + std::cos(ang) * r1, c.y + std::sin(ang) * r1 * 0.6f},
-                    with_a(hot, 0.8f * (1.0f - p)), 1.5f);
+                    with_a(hot, 0.8f * q), 1.5f);
+      }
+      if (e.size > 1.8f) { // structures: a slower ground shockwave
+        const ImVec2 g0 = ctr(e.to, 0.0f);
+        const float sr = cw2 * (0.5f + 1.8f * p) * (e.size / 2.0f);
+        dl->AddEllipse(g0, {sr, sr * 0.5f}, with_a(mix_white(e.col, 0.3f), 0.7f * q), 0.0f, 0,
+                       3.0f);
       }
       break;
     }
@@ -544,8 +764,11 @@ static void draw_tile_cell(ImDrawList* dl, ImVec2 ctr, float cw2, float ch2,
   dl->AddTriangleFilled(right, bottom, left, u32(dim_vec(cd.bg, 0.70f)));
   dl->AddQuad(top, right, bottom, left, u32({0.0f, 0.0f, 0.0f, 0.40f}), 0.5f);
 
-  if (cd.shape >= 0)
-    draw_unit_from_def(dl, ctr, cw2, ch2, g.shape_defs[cd.shape], u32(cd.fg), cd.facing);
+  if (cd.shape >= 0) {
+    const float flash = hit_flash(cd.is_struct, cd.id, {x, y}, glfwGetTime());
+    draw_unit_from_def(dl, ctr, cw2, ch2, g.shape_defs[cd.shape],
+                       u32(mix_white(cd.fg, 0.75f * flash)), cd.facing);
+  }
 
   if (cd.glyph) {
     if (g.has_sel && g.sel_type == SelType::Structure)

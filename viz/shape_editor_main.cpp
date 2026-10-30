@@ -18,6 +18,21 @@
 // Plain ASCII: ImGui's default font has no arrow glyphs.
 static const char* kFacingLabels[4] = {"NE", "SE", "SW", "NW"};
 
+// Crosshair where shots leave, plus a short stub along the heading so it's obvious
+// which way the shape fires.
+static void draw_muzzle_marker(ImDrawList* dl, const UnitShapeDef& def, ImVec2 ctr, float cw2,
+                               float ch2, int facing, float r) {
+  if (!def.has_muzzle) return;
+  static const ImU32 kMuzzleCol = IM_COL32(255, 90, 60, 230);
+  const ImVec2 m = shape_muzzle(def, ctr, cw2, ch2, facing);
+  const ImVec2 fwd = rotate_facing(facing, {0.0f, -0.35f});
+  const ImVec2 tip = {m.x + (fwd.x - fwd.y) * cw2, m.y + (fwd.x + fwd.y) * ch2};
+  dl->AddLine(m, tip, kMuzzleCol, 1.5f);
+  dl->AddCircle(m, r, kMuzzleCol, 0, 1.5f);
+  dl->AddLine({m.x - r * 1.6f, m.y}, {m.x + r * 1.6f, m.y}, kMuzzleCol, 1.0f);
+  dl->AddLine({m.x, m.y - r * 1.6f}, {m.x, m.y + r * 1.6f}, kMuzzleCol, 1.0f);
+}
+
 static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, int& facing,
                                int& sel_prim, float& game_cs, char* save_path,
                                std::string& status) {
@@ -225,6 +240,7 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
       dl->AddRect({p.x-5.f, p.y-5.f}, {p.x+5.f, p.y+5.f}, IM_COL32(0,0,0,200), 0, 0, 1.0f);
     }
   }
+  draw_muzzle_marker(dl, def, big_ctr, big_cw2, big_ch2, facing, 6.f);
   {
     const char* hint = "click: select  drag: move  shift+drag: pz  "
                        "[cyan]=width  [green]=depth  [purple]=height";
@@ -289,6 +305,7 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
                   0, 0, active ? 1.5f : 0.8f);
       ImVec2 mctr = {mp0.x + (mini_w - 2.f) * 0.5f, mp0.y + (dir_bar_h - 2.f) * 0.65f};
       draw_unit_from_def(dl, mctr, mini_cw2, mini_ch2, def, kUCol, d);
+      draw_muzzle_marker(dl, def, mctr, mini_cw2, mini_ch2, d, 3.f);
       ImVec2 lsz = ImGui::CalcTextSize(kFacingLabels[d]);
       dl->AddText({mp0.x + ((mini_w - 2.f) - lsz.x) * 0.5f, mp0.y + 4.f},
                   active ? IM_COL32(255,220,60,220) : IM_COL32(140,140,160,200),
@@ -377,6 +394,17 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
   ImGui::SameLine();
   if (ImGui::Button("+ Sphere"))
     def.prims.push_back({PrimKind::Sphere, 0.f, 0.f, 0.3f, 0.f, 0.f, 0.f, 0.20f, 1.0f});
+
+  ImGui::Separator();
+  ImGui::Checkbox("Muzzle (where shots leave)", &def.has_muzzle);
+  if (def.has_muzzle) {
+    ImGui::PushID("muzzle");
+    ImGui::SliderFloat("px", &def.mx, -1.0f, 1.0f, "%.3f");
+    ImGui::SliderFloat("py", &def.my, -1.0f, 1.0f, "%.3f");
+    ImGui::SliderFloat("pz", &def.mz,  0.0f, 3.0f, "%.3f");
+    ImGui::TextDisabled("forward is -py; pz in the same units as h");
+    ImGui::PopID();
+  }
 
   ImGui::EndChild();
   ImGui::End();

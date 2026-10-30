@@ -37,7 +37,13 @@ struct ShapePrim {
 
 struct UnitShapeDef {
   std::vector<ShapePrim> prims;
+  // Where shots leave, in the same model space as prims (authored facing NE).
+  bool  has_muzzle = false;
+  float mx = 0.0f, my = 0.0f, mz = 0.8f;
 };
+
+// Shapes without a muzzle fire from this height above the tile centre (ch2 units).
+inline constexpr float kDefaultMuzzleZ = 0.8f;
 
 // One shape per unit type, then one per structure type.
 inline constexpr int kUnitShapeCount   = 5;
@@ -168,6 +174,13 @@ struct PrimGeom {
 
 inline ImVec2 iso_project(ImVec2 ctr, float cw2, float ch2, float x, float y, float z) {
   return {ctr.x + (x - y) * cw2, ctr.y + (x + y) * ch2 - z * ch2};
+}
+
+// Screen position shots leave from, for a shape drawn at `ctr` with `facing`.
+inline ImVec2 shape_muzzle(const UnitShapeDef& d, ImVec2 ctr, float cw2, float ch2, int facing) {
+  if (!d.has_muzzle) return iso_project(ctr, cw2, ch2, 0.0f, 0.0f, kDefaultMuzzleZ);
+  const ImVec2 r = rotate_facing(facing, {d.mx, d.my});
+  return iso_project(ctr, cw2, ch2, r.x, r.y, d.mz);
 }
 
 // Depth toward the camera for the 2:1 projection (30° elevation), up to scale.
@@ -450,6 +463,10 @@ inline UnitShapeDef make_default_shape(int shape) {
     add(PrimKind::Sphere, px, py, pz, 0.f, 0.f, 0.f, r, dim);
   };
   auto shadow = [&](float r) { add(PrimKind::Circle, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, r, 0.22f); };
+  auto muzzle = [&](float px, float py, float pz) {
+    d.has_muzzle = true;
+    d.mx = px; d.my = py; d.mz = pz;
+  };
 
   switch (shape) {
   case 0: // Drone: stubby mining tug with side ore pods
@@ -468,6 +485,7 @@ inline UnitShapeDef make_default_shape(int shape) {
     cyl(-0.07f, 0.30f, 0.38f, 0.10f, 0.24f, 0.55f);
     cyl( 0.07f, 0.30f, 0.38f, 0.10f, 0.24f, 0.55f);
     sphere(0.f, 0.02f, 0.70f, 0.07f, 1.0f);
+    muzzle(0.f, -0.40f, 0.50f); // nose
     break;
   case 2: // Frigate: bowed hull, bridge aft, forward turret
     shadow(0.36f);
@@ -478,6 +496,7 @@ inline UnitShapeDef make_default_shape(int shape) {
     block(0.f, -0.30f, 0.76f, 0.05f, 0.26f, 0.06f, 0.7f);
     cyl(-0.13f, 0.38f, 0.28f, 0.13f, 0.32f, 0.55f);
     cyl( 0.13f, 0.38f, 0.28f, 0.13f, 0.32f, 0.55f);
+    muzzle(0.f, -0.43f, 0.79f); // turret barrel tip
     break;
   case 3: // Artillery: squat platform carrying one very long gun
     shadow(0.32f);
@@ -485,6 +504,7 @@ inline UnitShapeDef make_default_shape(int shape) {
     cyl(0.f, 0.10f, 0.54f, 0.30f, 0.24f, 1.0f);
     block(0.f, -0.24f, 0.70f, 0.07f, 0.62f, 0.08f, 0.75f);
     block(0.f, 0.30f, 0.54f, 0.22f, 0.12f, 0.22f, 0.6f);
+    muzzle(0.f, -0.55f, 0.74f); // end of the long gun
     break;
   case 4: // Battleship: long armoured hull, twin forward guns, tall bridge
     shadow(0.48f);
@@ -497,6 +517,7 @@ inline UnitShapeDef make_default_shape(int shape) {
     block( 0.04f, -0.40f, 0.80f, 0.04f, 0.26f, 0.06f, 0.7f);
     cyl(-0.15f, 0.44f, 0.30f, 0.12f, 0.30f, 0.55f);
     cyl( 0.15f, 0.44f, 0.30f, 0.12f, 0.30f, 0.55f);
+    muzzle(0.f, -0.53f, 0.83f); // between the twin barrels
     break;
   case 5: // Command Core: plinth, corner pylons, tiered tower, domed top, spire
     block(0.f, 0.f, 0.f, 0.86f, 0.86f, 0.30f, 0.65f);
@@ -563,6 +584,8 @@ inline bool save_shapes(const UnitShapeDef* defs, const char* path) {
         break;
       }
     }
+    if (defs[i].has_muzzle)
+      fprintf(f, "muzzle px=%.4f py=%.4f pz=%.4f\n", defs[i].mx, defs[i].my, defs[i].mz);
   }
   bool ok = fclose(f) == 0;
   if (!ok || std::rename(tmp.c_str(), path) != 0) {
@@ -585,16 +608,21 @@ inline bool load_shapes(UnitShapeDef* defs, const char* path) {
     int uid; char name[64];
     if (sscanf(line, "unit %d %63s", &uid, name) == 2 && uid >= 0 && uid < kUnitShapeCount) {
       cur = uid;
-      defs[cur].prims.clear();
+      defs[cur] = UnitShapeDef{};
       continue;
     }
     if (sscanf(line, "structure %d %63s", &uid, name) == 2 && uid >= 0 &&
         uid < kStructShapeCount) {
       cur = kUnitShapeCount + uid;
-      defs[cur].prims.clear();
+      defs[cur] = UnitShapeDef{};
       continue;
     }
     if (cur < 0) continue;
+    UnitShapeDef& def = defs[cur];
+    if (sscanf(line, "muzzle px=%f py=%f pz=%f", &def.mx, &def.my, &def.mz) == 3) {
+      def.has_muzzle = true;
+      continue;
+    }
     ShapePrim p{};
     auto read_sym = [&]() {
       const char* sp = strstr(line, "sym="); int sv = 0;
