@@ -90,6 +90,12 @@ struct CellData {
 
 // ---- Cell data builder ----------------------------------------------------
 
+// Structures never move; turn them toward the map centre so bases face each other.
+static int structure_facing(const game::Map& map, int32_t x, int32_t y) {
+  int facing = facing_from_step(map.width / 2 - x, map.height / 2 - y);
+  return facing < 0 ? 0 : facing;
+}
+
 static CellData make_cell(const game::Map& map, const game::FrameState& fr,
                            const std::vector<uint8_t>& facings,
                            int view, int32_t x, int32_t y) {
@@ -122,10 +128,8 @@ static CellData make_cell(const game::Map& map, const game::FrameState& fr,
     char g = s.type == game::StructureType::CommandCore ? 'C' :
              s.type == game::StructureType::Factory     ? 'T' : 'N';
     ImVec4 fg = s.faction.value == 0 ? kFactionA : kFactionB;
-    // Structures never move; turn them toward the map centre so bases face each other.
-    int facing = facing_from_step(map.width / 2 - x, map.height / 2 - y);
     return {bg, g, false, game::UnitType::Drone, shape_index(s.type), fg, s.hp, s.max_hp,
-            facing < 0 ? 0 : facing};
+            structure_facing(map, x, y)};
   }
 
   int top = -1;
@@ -442,6 +446,25 @@ static void draw_grid(const game::FrameState& fr) {
   ImGui::EndChild();
 }
 
+// Selected unit/structure drawn large on its own tile, in faction colour and
+// facing the same way it does on the map.
+static void draw_portrait(int shape, ImVec4 col, int facing) {
+  const ImVec2 size = {150.0f, 120.0f};
+  const ImVec2 p0   = ImGui::GetCursorScreenPos();
+  ImGui::Dummy(size);
+  ImDrawList* dl  = ImGui::GetWindowDrawList();
+  const float cw2 = 52.0f, ch2 = 26.0f;
+  const ImVec2 c  = {p0.x + size.x * 0.5f, p0.y + size.y * 0.70f};
+  dl->AddRectFilled(p0, {p0.x + size.x, p0.y + size.y}, IM_COL32(14, 14, 20, 255), 4.0f);
+  ImVec2 top{c.x, c.y - ch2}, right{c.x + cw2, c.y}, bottom{c.x, c.y + ch2}, left{c.x - cw2, c.y};
+  dl->AddTriangleFilled(top, right, left, u32(kOpenBg));
+  dl->AddTriangleFilled(right, bottom, left, u32(dim_vec(kOpenBg, 0.70f)));
+  dl->AddQuad(top, right, bottom, left, u32({0.0f, 0.0f, 0.0f, 0.40f}), 0.8f);
+  dl->PushClipRect(p0, {p0.x + size.x, p0.y + size.y}, true);
+  draw_unit_from_def(dl, c, cw2, ch2, g.shape_defs[shape], u32(col), facing);
+  dl->PopClipRect();
+}
+
 static void draw_sel_panel(const ImGuiIO& io) {
   if (!g.loaded || !g.has_sel) return;
 
@@ -456,8 +479,14 @@ static void draw_sel_panel(const ImGuiIO& io) {
 
   if (g.sel_type == SelType::Unit) {
     const game::UnitFrame* sel = nullptr;
-    for (const auto& u : fr.units)
-      if (u.id == g.sel_id) { sel = &u; break; }
+    int facing = 0;
+    for (size_t i = 0; i < fr.units.size(); ++i) {
+      if (fr.units[i].id != g.sel_id) continue;
+      sel = &fr.units[i];
+      const auto& facings = g.unit_facing[static_cast<size_t>(g.cur)];
+      if (i < facings.size()) facing = facings[i];
+      break;
+    }
 
     if (!sel) {
       g.has_sel = false;
@@ -466,6 +495,8 @@ static void draw_sel_panel(const ImGuiIO& io) {
       ImGui::TextColored(fc, "%s", game::unit_type_name(sel->type));
       ImGui::SameLine();
       ImGui::TextColored(fc, "[%s]", sel->faction.value == 0 ? "A" : "B");
+      ImGui::Separator();
+      draw_portrait(shape_index(sel->type), fc, facing);
       ImGui::Separator();
 
       float ratio = sel->max_hp > 0 ? (float)sel->hp / (float)sel->max_hp : 0.0f;
@@ -497,6 +528,8 @@ static void draw_sel_panel(const ImGuiIO& io) {
       ImGui::TextColored(fc, "%s", game::structure_type_name(sel->type));
       ImGui::SameLine();
       ImGui::TextColored(fc, "[%s]", sel->faction.value == 0 ? "A" : "B");
+      ImGui::Separator();
+      draw_portrait(shape_index(sel->type), fc, structure_facing(g.map, sel->pos.x, sel->pos.y));
       ImGui::Separator();
 
       float ratio = sel->max_hp > 0 ? (float)sel->hp / (float)sel->max_hp : 0.0f;
