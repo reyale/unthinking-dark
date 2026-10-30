@@ -1,3 +1,4 @@
+// Usage: ud_viz_imgui [replay.ud] [--shapes file.udshapes]   (shapes hot-reload on save)
 // Controls: Space=play/pause  ←/→=step  U=union  G=god  0/1=faction view  scroll=zoom  Q=quit
 
 #include "imgui.h"
@@ -18,6 +19,8 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -63,8 +66,6 @@ static constexpr ImVec4 kOpenBg   = {0.14f, 0.14f, 0.18f, 1.0f};
 static constexpr ImVec4 kAsteroid = {0.35f, 0.30f, 0.22f, 1.0f};
 static constexpr ImVec4 kNebula   = {0.22f, 0.15f, 0.35f, 1.0f};
 static constexpr ImVec4 kResource = {0.15f, 0.32f, 0.15f, 1.0f};
-static constexpr ImVec4 kFactionA = {0.40f, 0.70f, 1.00f, 1.0f};  // blue
-static constexpr ImVec4 kFactionB = {1.00f, 0.42f, 0.32f, 1.0f};  // red
 
 static ImU32  u32(const ImVec4& c) { return ImGui::ColorConvertFloat4ToU32(c); }
 static ImVec4 dim_vec(ImVec4 c, float f) { return {c.x*f, c.y*f, c.z*f, c.w}; }
@@ -83,11 +84,13 @@ struct CellData {
   game::UnitType unit_type{game::UnitType::Drone};
   ImVec4  fg{};
   int32_t hp{-1}, max_hp{-1};
+  int     facing{0};
 };
 
 // ---- Cell data builder ----------------------------------------------------
 
 static CellData make_cell(const game::Map& map, const game::FrameState& fr,
+                           const std::vector<uint8_t>& facings,
                            int view, int32_t x, int32_t y) {
   bool vis = (view == -1);
   if (!vis) {
@@ -121,12 +124,14 @@ static CellData make_cell(const game::Map& map, const game::FrameState& fr,
     return {bg, g, false, game::UnitType::Drone, fg, s.hp, s.max_hp};
   }
 
-  const game::UnitFrame* top = nullptr;
-  for (const auto& u : fr.units)
-    if (u.pos.x == x && u.pos.y == y) top = &u;
-  if (top) {
-    ImVec4 fg = top->faction.value == 0 ? kFactionA : kFactionB;
-    return {bg, '\0', true, top->type, fg, top->hp, top->max_hp};
+  int top = -1;
+  for (size_t i = 0; i < fr.units.size(); ++i)
+    if (fr.units[i].pos.x == x && fr.units[i].pos.y == y) top = static_cast<int>(i);
+  if (top >= 0) {
+    const auto& u = fr.units[top];
+    ImVec4 fg = u.faction.value == 0 ? kFactionA : kFactionB;
+    int facing = top < static_cast<int>(facings.size()) ? facings[top] : 0;
+    return {bg, '\0', true, u.type, fg, u.hp, u.max_hp, facing};
   }
 
   return {bg};
@@ -155,7 +160,63 @@ struct App {
   game::StructureId sel_struct_id{};
   game::Vec2        sel_tile{};
   UnitShapeDef      shape_defs[5];
+  // unit_facing[f][i]: facing of frames[f].units[i], from its last move.
+  std::vector<std::vector<uint8_t>> unit_facing;
+  std::string       shapes_path = "shapes.udshapes";
+  std::filesystem::file_time_type shapes_mtime{};
+  double            shapes_checked_t = 0.0;
 } g;
+
+static void load_shape_defs() {
+  if (!load_shapes(g.shape_defs, g.shapes_path.c_str()))
+    for (int i = 0; i < 5; ++i)
+      g.shape_defs[i] = make_default_shape(static_cast<game::UnitType>(i));
+  std::error_code ec;
+  g.shapes_mtime = std::filesystem::last_write_time(g.shapes_path, ec);
+}
+
+// Polls rather than using inotify so it works the same everywhere; twice a second is
+// plenty for "save in the editor, glance at the viewer".
+static void poll_shape_reload(double now) {
+#ifndef __EMSCRIPTEN__
+  if (now - g.shapes_checked_t < 0.5) return;
+  g.shapes_checked_t = now;
+  std::error_code ec;
+  auto mt = std::filesystem::last_write_time(g.shapes_path, ec);
+  if (ec || mt == g.shapes_mtime) return;
+  load_shape_defs();
+  fprintf(stderr, "Reloaded shapes from %s\n", g.shapes_path.c_str());
+#else
+  (void)now;
+#endif
+}
+
+// Units face the way they last moved. Before their first move they face the map
+// centre, so freshly built units look toward the action rather than all NE.
+static void compute_unit_facings() {
+  g.unit_facing.assign(g.frames.size(), {});
+  std::map<game::UnitId, std::pair<game::Vec2, uint8_t>> last; // pos, facing
+  const int32_t cx = g.map.width / 2, cy = g.map.height / 2;
+  for (size_t f = 0; f < g.frames.size(); ++f) {
+    const auto& units = g.frames[f].units;
+    auto& out = g.unit_facing[f];
+    out.resize(units.size());
+    for (size_t i = 0; i < units.size(); ++i) {
+      const auto& u = units[i];
+      auto it = last.find(u.id);
+      int facing;
+      if (it == last.end()) {
+        facing = facing_from_step(cx - u.pos.x, cy - u.pos.y);
+        if (facing < 0) facing = 0;
+      } else {
+        facing = facing_from_step(u.pos.x - it->second.first.x, u.pos.y - it->second.first.y);
+        if (facing < 0) facing = it->second.second;
+      }
+      out[i] = static_cast<uint8_t>(facing);
+      last[u.id] = {u.pos, static_cast<uint8_t>(facing)};
+    }
+  }
+}
 
 static void try_load(const char* path) {
   g.playing = false;
@@ -166,6 +227,7 @@ static void try_load(const char* path) {
       fprintf(stderr, "warning: hash mismatch — replay may not reproduce original match\n");
     g.map    = map_from_log(log);
     g.frames = game::replay_frames(log);
+    compute_unit_facings();
     g.cur    = 0;
     g.total  = static_cast<int>(g.frames.size());
     g.loaded = true;
@@ -199,7 +261,8 @@ static void handle_input(const ImGuiIO& io, GLFWwindow* win) {
     if (ImGui::IsKeyPressed(ImGuiKey_G)) g.view = -1;
     if (ImGui::IsKeyPressed(ImGuiKey_0)) g.view = 0;
     if (ImGui::IsKeyPressed(ImGuiKey_1)) g.view = 1;
-    if (ImGui::IsKeyPressed(ImGuiKey_Q)) glfwSetWindowShouldClose(win, GLFW_TRUE);
+    if (!io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Q))
+      glfwSetWindowShouldClose(win, GLFW_TRUE);
   }
 }
 
@@ -305,7 +368,8 @@ static void draw_tile_cell(ImDrawList* dl, ImVec2 ctr, float cw2, float ch2,
         if (s.id == g.sel_struct_id && s.pos.x == x && s.pos.y == y)
           dl->AddQuad(top, right, bottom, left, IM_COL32(255, 255, 80, 220), 2.0f);
   } else if (cd.is_unit) {
-    draw_unit_from_def(dl, ctr, cw2, ch2, g.shape_defs[static_cast<int>(cd.unit_type)], u32(cd.fg));
+    draw_unit_from_def(dl, ctr, cw2, ch2, g.shape_defs[static_cast<int>(cd.unit_type)], u32(cd.fg),
+                       cd.facing);
     if (g.has_sel && g.sel_type == SelType::Unit)
       for (const auto& u : fr.units)
         if (u.id == g.sel_id && u.pos.x == x && u.pos.y == y)
@@ -343,7 +407,7 @@ static void draw_grid(const game::FrameState& fr) {
   for (int32_t y = 0; y < g.map.height; ++y)
     for (int32_t x = 0; x < g.map.width; ++x)
       draw_tile_cell(dl, tile_ctr(x, y), cw2, ch2,
-                     make_cell(g.map, fr, g.view, x, y), x, y, fr);
+                     make_cell(g.map, fr, g.unit_facing[g.cur], g.view, x, y), x, y, fr);
 
   if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
     ImVec2  mp  = ImGui::GetMousePos();
@@ -456,13 +520,18 @@ static void draw_sel_panel(const ImGuiIO& io) {
 // ---- Main -----------------------------------------------------------------
 
 int main(int argc, char** argv) {
-  if (!load_shapes(g.shape_defs, "shapes.udshapes"))
-    for (int i = 0; i < 5; ++i)
-      g.shape_defs[i] = make_default_shape(static_cast<game::UnitType>(i));
+  const char* replay_arg = nullptr;
+  for (int i = 1; i < argc; ++i) {
+    if (strcmp(argv[i], "--shapes") == 0 && i + 1 < argc)
+      g.shapes_path = argv[++i];
+    else if (!replay_arg)
+      replay_arg = argv[i];
+  }
+  load_shape_defs();
 
-  if (argc >= 2) {
-    strncpy(g.path_buf, argv[1], sizeof(g.path_buf) - 1);
-    try_load(argv[1]);
+  if (replay_arg) {
+    strncpy(g.path_buf, replay_arg, sizeof(g.path_buf) - 1);
+    try_load(replay_arg);
   }
 
   if (!glfwInit()) { fprintf(stderr, "glfwInit failed\n"); return 1; }
@@ -496,6 +565,7 @@ int main(int argc, char** argv) {
   while (!glfwWindowShouldClose(win)) {
     glfwPollEvents();
     ImGuiIO& io = ImGui::GetIO();
+    poll_shape_reload(glfwGetTime());
 
     if (g.loaded && g.playing) {
       double now = glfwGetTime();

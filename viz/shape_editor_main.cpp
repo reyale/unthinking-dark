@@ -15,10 +15,14 @@
 
 // ---- Shape editor UI -------------------------------------------------------
 
-static const char* kFacingLabels[4] = {"↗ NE", "↘ SE", "↙ SW", "↖ NW"};
+// Plain ASCII: ImGui's default font has no arrow glyphs.
+static const char* kFacingLabels[4] = {"NE", "SE", "SW", "NW"};
+
+static constexpr int kUnitTypeCount = 5;
 
 static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, int& facing,
-                               int& sel_prim, char* save_path, std::string& status) {
+                               int& sel_prim, float& game_cs, char* save_path,
+                               std::string& status) {
   ImGui::SetNextWindowPos({0, 0});
   ImGui::SetNextWindowSize(io.DisplaySize);
   ImGui::Begin("##se", nullptr,
@@ -26,7 +30,10 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
     ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus);
 
   // Header bar
-  ImGui::Text("Shape Editor");
+  ImGui::SetNextItemWidth(120.f);
+  ImGui::Combo("##unit", &sel, [](void*, int i) {
+    return game::unit_type_name(static_cast<game::UnitType>(i));
+  }, nullptr, kUnitTypeCount);
   ImGui::SameLine();
   ImGui::SetNextItemWidth(280.f);
   ImGui::InputText("##sp", save_path, 512);
@@ -38,7 +45,7 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
     status = load_shapes(defs, save_path) ? "Loaded." : "Load failed.";
   ImGui::SameLine();
   if (ImGui::Button("Defaults")) {
-    for (int i = 0; i < 5; ++i)
+    for (int i = 0; i < kUnitTypeCount; ++i)
       defs[i] = make_default_shape(static_cast<game::UnitType>(i));
     status = "Reset to defaults.";
   }
@@ -58,50 +65,27 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
   ImDrawList* dl = ImGui::GetWindowDrawList();
 
   static const ImU32 kPBg   = IM_COL32(18,  18,  26,  255);
-  static const ImU32 kSelBr = IM_COL32(255, 255, 80,  220);
-  static const ImU32 kNrmBr = IM_COL32(55,  55,  75,  200);
-  static const ImU32 kUCol  = IM_COL32(110, 170, 255, 255);
+  const ImU32 kUCol = ImGui::ColorConvertFloat4ToU32(kFactionA);
   static const ImU32 kTileT = IM_COL32(38,  48,  60,  255);
   static const ImU32 kTileS = IM_COL32(25,  33,  42,  255);
   static const ImU32 kTileE = IM_COL32(0,   0,   0,   100);
 
-  // -- Thumbnail strip (all 5 units) --
-  const float thumb_h = std::min(content_h * 0.26f, 140.f);
-  const float thumb_w = preview_w / 5.f;
-  const float th_cs   = std::min(thumb_w * 0.55f, thumb_h * 0.40f);
-  const float th_cw2  = th_cs * 0.5f;
-  const float th_ch2  = th_cs * 0.25f;
+  // -- Single-unit preview (drag to move primitives) --
+  const float dir_bar_h  = 110.f;
+  const float game_bar_h = std::max(90.f, game_cs * 2.2f);
+  const float big_h = content_h - dir_bar_h - game_bar_h - 8.f;
 
-  for (int i = 0; i < 5; ++i) {
-    if (i > 0) ImGui::SameLine(0, 0);
-    ImVec2 p0 = ImGui::GetCursorScreenPos();
-    ImGui::PushID(100 + i);
-    if (ImGui::InvisibleButton("##th", {thumb_w, thumb_h})) sel = i;
-    ImGui::PopID();
-    dl->AddRectFilled(p0, {p0.x + thumb_w, p0.y + thumb_h}, kPBg);
-    dl->AddRect(p0, {p0.x + thumb_w, p0.y + thumb_h},
-                i == sel ? kSelBr : kNrmBr, 0, 0, i == sel ? 2.f : 1.f);
-    ImVec2 tc = {p0.x + thumb_w * 0.5f, p0.y + thumb_h * 0.60f};
-    ImVec2 t_top = {tc.x, tc.y - th_ch2}, t_rt = {tc.x + th_cw2, tc.y};
-    ImVec2 t_bot = {tc.x, tc.y + th_ch2}, t_lt = {tc.x - th_cw2, tc.y};
-    dl->AddTriangleFilled(t_top, t_rt, t_lt, kTileT);
-    dl->AddTriangleFilled(t_rt, t_bot, t_lt, kTileS);
-    dl->AddQuad(t_top, t_rt, t_bot, t_lt, kTileE, 0.5f);
-    draw_unit_from_def(dl, tc, th_cw2, th_ch2, defs[i], kUCol, facing);
-    const char* nm = game::unit_type_name(static_cast<game::UnitType>(i));
-    ImVec2 tsz = ImGui::CalcTextSize(nm);
-    dl->AddText({p0.x + (thumb_w - tsz.x) * 0.5f, p0.y + thumb_h - tsz.y - 4.f},
-                IM_COL32(200, 200, 200, 255), nm);
-  }
+  enum class DragMode : uint8_t {
+    Move, ResizeWidth, ResizeDepth, ResizeHeight, ResizeRadius, ResizeDiameter
+  };
 
-  // -- Large single-unit preview (drag to move primitives) --
-  const float dir_bar_h = 38.f;
-  const float big_h = content_h - thumb_h - dir_bar_h - 4.f;
-
-  static int    drag_prim     = -1;
-  static int    drag_prev_sel = -1;
-  static float  drag_start_px = 0, drag_start_py = 0, drag_start_pz = 0;
-  static ImVec2 drag_origin   = {0, 0};
+  static int      drag_prim     = -1;
+  static int      drag_prev_sel = -1;
+  static DragMode drag_mode     = DragMode::Move;
+  static float    drag_start_px = 0, drag_start_py = 0, drag_start_pz = 0;
+  static float    drag_start_fw = 0, drag_start_fd = 0;
+  static float    drag_start_h  = 0, drag_start_r  = 0;
+  static ImVec2   drag_origin   = {0, 0};
 
   if (sel != drag_prev_sel) { drag_prim = -1; sel_prim = 0; drag_prev_sel = sel; }
 
@@ -118,31 +102,65 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
 
   auto& def = defs[sel];
 
-  auto prim_anchor = [&](const ShapePrim& p) -> ImVec2 {
+  // Handle positions for the selected primitive, shared by hit-testing and drawing.
+  struct Handle { ImVec2 pos; DragMode mode; ImU32 col; };
+  static const ImU32 kHwCol = IM_COL32(0,   210, 210, 230); // width/radius
+  static const ImU32 kHdCol = IM_COL32(80,  210, 80,  230); // depth/length
+  static const ImU32 kHhCol = IM_COL32(240, 100, 240, 230); // height
+  auto handles_for = [&](const ShapePrim& sp) {
+    std::vector<Handle> hs;
     float rpx, rpy, rfw, rfd;
-    apply_facing(facing, p.px, p.py, p.fw, p.fd, rpx, rpy, rfw, rfd);
-    return { big_ctr.x + (rpx - rpy) * big_cw2,
-             big_ctr.y + (rpx + rpy) * big_ch2 - p.pz * big_ch2 };
+    apply_facing(facing, sp.px, sp.py, sp.fw, sp.fd, rpx, rpy, rfw, rfd);
+    ImVec2 anch = { big_ctr.x + (rpx - rpy) * big_cw2,
+                    big_ctr.y + (rpx + rpy) * big_ch2 - sp.pz * big_ch2 };
+    float h_px = big_ch2 * sp.h;
+    switch (sp.kind) {
+    case PrimKind::Box:
+      hs.push_back({{anch.x + rfw*big_cw2, anch.y - h_px},               DragMode::ResizeWidth,  kHwCol});
+      hs.push_back({{anch.x,               anch.y + rfd*big_ch2 - h_px}, DragMode::ResizeDepth,  kHdCol});
+      hs.push_back({{anch.x,               anch.y - rfd*big_ch2 - h_px}, DragMode::ResizeHeight, kHhCol});
+      break;
+    case PrimKind::Cylinder:
+      hs.push_back({{anch.x + sp.fw*big_cw2, anch.y - h_px}, DragMode::ResizeDiameter, kHwCol});
+      hs.push_back({{anch.x,                 anch.y - h_px}, DragMode::ResizeHeight,   kHhCol});
+      break;
+    case PrimKind::Wedge:
+      hs.push_back({{anch.x, anch.y - h_px}, DragMode::ResizeHeight, kHhCol});
+      break;
+    case PrimKind::Circle:
+    case PrimKind::Sphere:
+      hs.push_back({{anch.x + big_cw2 * sp.r, anch.y}, DragMode::ResizeRadius, kHwCol});
+      break;
+    }
+    return hs;
+  };
+
+  auto begin_drag = [&](int pi, DragMode mode) {
+    const auto& sp = def.prims[pi];
+    drag_prim     = pi;           drag_mode     = mode;
+    drag_origin   = io.MousePos;
+    drag_start_px = sp.px;        drag_start_py = sp.py;   drag_start_pz = sp.pz;
+    drag_start_fw = sp.fw;        drag_start_fd = sp.fd;
+    drag_start_h  = sp.h;         drag_start_r  = sp.r;
   };
 
   if (big_clicked) {
-    float best = 50.f;
-    int   hit  = -1;
-    for (int pi = 0; pi < static_cast<int>(def.prims.size()); ++pi) {
-      ImVec2 a = prim_anchor(def.prims[pi]);
-      float dx = io.MousePos.x - a.x, dy = io.MousePos.y - a.y;
-      float d  = std::sqrt(dx*dx + dy*dy);
-      if (d < best) { best = d; hit = pi; }
+    bool hit_handle = false;
+    if (sel_prim >= 0 && sel_prim < static_cast<int>(def.prims.size())) {
+      for (const auto& h : handles_for(def.prims[sel_prim])) {
+        float ddx = io.MousePos.x - h.pos.x, ddy = io.MousePos.y - h.pos.y;
+        if (ddx*ddx + ddy*ddy < 12.f * 12.f) {
+          begin_drag(sel_prim, h.mode);
+          hit_handle = true;
+          break;
+        }
+      }
     }
-    if (hit >= 0) {
-      sel_prim      = hit;
-      drag_prim     = hit;
-      drag_origin   = io.MousePos;
-      drag_start_px = def.prims[hit].px;
-      drag_start_py = def.prims[hit].py;
-      drag_start_pz = def.prims[hit].pz;
-    } else {
-      drag_prim = -1;
+    if (!hit_handle) {
+      int hit = pick_prim(def, big_ctr, big_cw2, big_ch2, facing, io.MousePos);
+      sel_prim = hit;
+      if (hit >= 0) begin_drag(hit, DragMode::Move);
+      else          drag_prim = -1;
     }
   }
 
@@ -150,20 +168,36 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
     float dx = io.MousePos.x - drag_origin.x;
     float dy = io.MousePos.y - drag_origin.y;
     auto& dp = def.prims[drag_prim];
-    if (io.KeyShift) {
-      dp.pz = std::max(0.f, drag_start_pz - dy / big_ch2);
-    } else {
-      float dtx_rot = ( dx / big_cw2 + dy / big_ch2) * 0.5f;
-      float dty_rot = ( dy / big_ch2 - dx / big_cw2) * 0.5f;
-      float dpx_m, dpy_m;
-      switch (facing & 3) {
-      case 1:  dpx_m = -dty_rot; dpy_m =  dtx_rot; break;
-      case 2:  dpx_m = -dtx_rot; dpy_m = -dty_rot; break;
-      case 3:  dpx_m =  dty_rot; dpy_m = -dtx_rot; break;
-      default: dpx_m =  dtx_rot; dpy_m =  dty_rot; break;
+
+    if (drag_mode == DragMode::ResizeWidth) {
+      // Right vertex of top face moves +dx when rfw increases.
+      // rfw = fw at facing 0/2, rfw = fd at facing 1/3.
+      float delta = dx / big_cw2;
+      if ((facing & 1) == 0) dp.fw = std::clamp(drag_start_fw + delta, 0.05f, 1.20f);
+      else                   dp.fd = std::clamp(drag_start_fd + delta, 0.05f, 1.20f);
+    } else if (drag_mode == DragMode::ResizeDepth) {
+      // Front vertex of top face moves +dy when rfd increases.
+      // rfd = fd at facing 0/2, rfd = fw at facing 1/3.
+      float delta = dy / big_ch2;
+      if ((facing & 1) == 0) dp.fd = std::clamp(drag_start_fd + delta, 0.05f, 1.20f);
+      else                   dp.fw = std::clamp(drag_start_fw + delta, 0.05f, 1.20f);
+    } else if (drag_mode == DragMode::ResizeHeight) {
+      dp.h = std::clamp(drag_start_h - dy / big_ch2, 0.05f, 3.00f);
+    } else if (drag_mode == DragMode::ResizeDiameter) {
+      dp.fw = std::clamp(drag_start_fw + dx / big_cw2, 0.05f, 1.20f);
+    } else if (drag_mode == DragMode::ResizeRadius) {
+      dp.r = std::clamp(drag_start_r + dx / big_cw2, 0.05f, 0.60f);
+    } else { // Move
+      if (io.KeyShift) {
+        dp.pz = std::max(0.f, drag_start_pz - dy / big_ch2);
+      } else {
+        // Screen delta -> rotated tile delta -> unrotated model delta.
+        ImVec2 rot = {( dx / big_cw2 + dy / big_ch2) * 0.5f,
+                      ( dy / big_ch2 - dx / big_cw2) * 0.5f};
+        ImVec2 m = rotate_facing((4 - facing) & 3, rot);
+        dp.px = std::clamp(drag_start_px + m.x, -2.f, 2.f);
+        dp.py = dp.sym ? dp.px : std::clamp(drag_start_py + m.y, -2.f, 2.f);
       }
-      dp.px = std::clamp(drag_start_px + dpx_m, -2.f, 2.f);
-      dp.py = std::clamp(drag_start_py + dpy_m, -2.f, 2.f);
     }
   }
   if (!big_active) drag_prim = -1;
@@ -185,43 +219,84 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
   draw_unit_from_def(dl, big_ctr, big_cw2, big_ch2, def, kUCol, facing);
 
   if (sel_prim >= 0 && sel_prim < static_cast<int>(def.prims.size())) {
-    const auto& sp = def.prims[sel_prim];
-    float rpx, rpy, rfw, rfd;
-    apply_facing(facing, sp.px, sp.py, sp.fw, sp.fd, rpx, rpy, rfw, rfd);
-    ImVec2 anch = { big_ctr.x + (rpx - rpy) * big_cw2,
-                    big_ctr.y + (rpx + rpy) * big_ch2 - sp.pz * big_ch2 };
     static const ImU32 kHiCol = IM_COL32(255, 220, 60, 200);
-    if (sp.kind == PrimKind::Box) {
-      float h_px = big_ch2 * sp.h;
-      ImVec2 s_tt = {anch.x,               anch.y - rfd*big_ch2 - h_px};
-      ImVec2 s_tr = {anch.x + rfw*big_cw2,  anch.y - h_px};
-      ImVec2 s_tb = {anch.x,               anch.y + rfd*big_ch2 - h_px};
-      ImVec2 s_tl = {anch.x - rfw*big_cw2,  anch.y - h_px};
-      ImVec2 s_bb = {anch.x,               anch.y + rfd*big_ch2};
-      ImVec2 s_br = {anch.x + rfw*big_cw2,  anch.y};
-      ImVec2 s_bl = {anch.x - rfw*big_cw2,  anch.y};
-      dl->AddQuad(s_tt, s_tr, s_tb, s_tl, kHiCol, 1.5f);
-      dl->AddLine(s_tl, s_bl, kHiCol, 1.0f);
-      dl->AddLine(s_tb, s_bb, kHiCol, 1.0f);
-      dl->AddLine(s_tr, s_br, kHiCol, 1.0f);
-    } else {
-      dl->AddCircle(anch, big_cw2 * sp.r + 3.f, kHiCol, 0, 1.5f);
+    const auto& sp = def.prims[sel_prim];
+    draw_prim_outline(dl, build_prim_geom(sp, big_ctr, big_cw2, big_ch2, facing), kHiCol, 1.5f);
+    for (const auto& h : handles_for(sp)) {
+      ImVec2 p = h.pos;
+      dl->AddRectFilled({p.x-5.f, p.y-5.f}, {p.x+5.f, p.y+5.f}, h.col);
+      dl->AddRect({p.x-5.f, p.y-5.f}, {p.x+5.f, p.y+5.f}, IM_COL32(0,0,0,200), 0, 0, 1.0f);
     }
-    const char* hint = io.KeyShift ? "shift+drag: pz" : "drag: px/py  shift+drag: pz";
+  }
+  {
+    const char* hint = "click: select  drag: move  shift+drag: pz  "
+                       "[cyan]=width  [green]=depth  [purple]=height";
     ImVec2 hsz = ImGui::CalcTextSize(hint);
     dl->AddText({big_p0.x + (preview_w - hsz.x) * 0.5f, big_p0.y + 6.f},
                 IM_COL32(160, 160, 160, 180), hint);
   }
 
-  // -- Direction buttons --
-  ImVec2 dir_bar_pos = {big_p0.x, big_p0.y + big_h + 2.f};
-  ImGui::SetCursorScreenPos({dir_bar_pos.x + (preview_w - 4 * 78.f) * 0.5f, dir_bar_pos.y});
-  for (int d = 0; d < 4; ++d) {
-    if (d > 0) ImGui::SameLine(0, 4);
-    bool active = (facing == d);
-    if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-    if (ImGui::Button(kFacingLabels[d], {76.f, 30.f})) facing = d;
-    if (active) ImGui::PopStyleColor();
+  // -- Game-scale strip: every unit, both factions, at the viewer's tile size --
+  {
+    const float g_cw2 = game_cs * 0.5f, g_ch2 = game_cs * 0.25f;
+    const float slot_w = preview_w / kUnitTypeCount;
+    ImVec2 bar0 = {big_p0.x, big_p0.y + big_h + 2.f};
+    const ImU32 fcol[2] = {ImGui::ColorConvertFloat4ToU32(kFactionA),
+                           ImGui::ColorConvertFloat4ToU32(kFactionB)};
+    for (int u = 0; u < kUnitTypeCount; ++u) {
+      ImVec2 sp0 = {bar0.x + u * slot_w, bar0.y};
+      ImVec2 sp1 = {sp0.x + slot_w - 2.f, sp0.y + game_bar_h - 2.f};
+      ImGui::SetCursorScreenPos(sp0);
+      ImGui::PushID(u + 200);
+      if (ImGui::InvisibleButton("##gs", {slot_w - 2.f, game_bar_h - 2.f})) sel = u;
+      ImGui::PopID();
+      bool active = (sel == u);
+      dl->AddRectFilled(sp0, sp1, IM_COL32(14, 14, 20, 255));
+      dl->AddRect(sp0, sp1, active ? IM_COL32(255,220,60,200) : IM_COL32(60,60,80,120),
+                  0, 0, active ? 1.5f : 0.8f);
+      // Two diagonal neighbours, the way units stand next to each other in a match.
+      for (int fct = 0; fct < 2; ++fct) {
+        ImVec2 c = {sp0.x + (slot_w - 2.f) * 0.5f + (fct == 0 ? -g_cw2 : g_cw2),
+                    sp0.y + game_bar_h * 0.62f};
+        ImVec2 t_top = {c.x, c.y - g_ch2}, t_rt = {c.x + g_cw2, c.y};
+        ImVec2 t_bot = {c.x, c.y + g_ch2}, t_lt = {c.x - g_cw2, c.y};
+        dl->AddTriangleFilled(t_top, t_rt, t_lt, kTileT);
+        dl->AddTriangleFilled(t_rt, t_bot, t_lt, kTileS);
+        dl->AddQuad(t_top, t_rt, t_bot, t_lt, kTileE, 0.5f);
+        draw_unit_from_def(dl, c, g_cw2, g_ch2, defs[u], fcol[fct], facing);
+      }
+      const char* nm = game::unit_type_name(static_cast<game::UnitType>(u));
+      dl->AddText({sp0.x + 4.f, sp0.y + 3.f},
+                  active ? IM_COL32(255,220,60,220) : IM_COL32(140,140,160,200), nm);
+    }
+  }
+
+  // -- 4-up facing selector (mini-previews) --
+  {
+    const float mini_w   = preview_w / 4.f;
+    const float mini_cs  = std::min(mini_w * 0.45f, (dir_bar_h - 24.f) * 2.4f);
+    const float mini_cw2 = mini_cs * 0.5f;
+    const float mini_ch2 = mini_cs * 0.25f;
+    ImVec2 bar0 = {big_p0.x, big_p0.y + big_h + game_bar_h + 6.f};
+    for (int d = 0; d < 4; ++d) {
+      ImVec2 mp0 = {bar0.x + d * mini_w, bar0.y};
+      ImVec2 mp1 = {mp0.x + mini_w - 2.f, mp0.y + dir_bar_h - 2.f};
+      ImGui::SetCursorScreenPos(mp0);
+      ImGui::PushID(d + 100);
+      if (ImGui::InvisibleButton("##mf", {mini_w - 2.f, dir_bar_h - 2.f})) facing = d;
+      ImGui::PopID();
+      bool active = (facing == d);
+      dl->AddRectFilled(mp0, mp1, active ? IM_COL32(50,50,80,255) : IM_COL32(20,20,30,255));
+      dl->AddRect(mp0, mp1,
+                  active ? IM_COL32(255,220,60,200) : IM_COL32(60,60,80,120),
+                  0, 0, active ? 1.5f : 0.8f);
+      ImVec2 mctr = {mp0.x + (mini_w - 2.f) * 0.5f, mp0.y + (dir_bar_h - 2.f) * 0.65f};
+      draw_unit_from_def(dl, mctr, mini_cw2, mini_ch2, def, kUCol, d);
+      ImVec2 lsz = ImGui::CalcTextSize(kFacingLabels[d]);
+      dl->AddText({mp0.x + ((mini_w - 2.f) - lsz.x) * 0.5f, mp0.y + 4.f},
+                  active ? IM_COL32(255,220,60,220) : IM_COL32(140,140,160,200),
+                  kFacingLabels[d]);
+    }
   }
 
   ImGui::EndChild();
@@ -230,8 +305,9 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
   // ---- Controls pane -------------------------------------------------------
   ImGui::BeginChild("##se_ctrl", {ctrl_w, content_h}, false);
 
-  ImGui::Text("Editing: %s  |  Facing: %s",
-              game::unit_type_name(static_cast<game::UnitType>(sel)), kFacingLabels[facing]);
+  ImGui::Text("Facing: %s", kFacingLabels[facing]);
+  ImGui::SetNextItemWidth(140.f);
+  ImGui::SliderFloat("game zoom", &game_cs, 16.f, 64.f, "%.0f px");
   ImGui::Separator();
 
   int remove_idx = -1;
@@ -241,9 +317,7 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
     ImGui::PushID(pi);
 
     bool is_sel    = (pi == sel_prim);
-    bool is_box    = (p.kind == PrimKind::Box);
-    bool is_sphere = (p.kind == PrimKind::Sphere);
-    const char* kind_name = is_box ? "Box" : (is_sphere ? "Sphere" : "Circle");
+    const char* kind_name = prim_kind_name(p.kind);
 
     if (is_sel) ImGui::PushStyleColor(ImGuiCol_Header, ImVec4{0.35f, 0.32f, 0.10f, 1.f});
     ImVec4 hdr_col = is_sel ? ImVec4{1.f, 0.88f, 0.25f, 1.f} : ImVec4{0.8f, 0.8f, 0.4f, 1.f};
@@ -254,15 +328,31 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
     if (ImGui::SmallButton("Remove") && def.prims.size() > 1)
       remove_idx = pi;
 
-    if (is_box) {
+    switch (p.kind) {
+    case PrimKind::Box:
       ImGui::SliderFloat("fw",  &p.fw, 0.05f, 1.20f, "%.3f");
       ImGui::SliderFloat("fd",  &p.fd, 0.05f, 1.20f, "%.3f");
       ImGui::SliderFloat("h",   &p.h,  0.05f, 3.00f, "%.3f");
-    } else {
+      break;
+    case PrimKind::Wedge:
+      ImGui::SliderFloat("width",  &p.fw, 0.05f, 1.20f, "%.3f");
+      ImGui::SliderFloat("length", &p.fd, 0.05f, 1.20f, "%.3f");
+      ImGui::SliderFloat("h",      &p.h,  0.05f, 3.00f, "%.3f");
+      break;
+    case PrimKind::Cylinder:
+      ImGui::SliderFloat("diam", &p.fw, 0.05f, 1.20f, "%.3f");
+      ImGui::SliderFloat("h",    &p.h,  0.05f, 3.00f, "%.3f");
+      break;
+    case PrimKind::Circle:
+    case PrimKind::Sphere:
       ImGui::SliderFloat("r",   &p.r,  0.05f, 0.60f, "%.3f");
+      break;
     }
     ImGui::SliderFloat("px",  &p.px, -1.0f, 1.0f, "%.3f");
+    if (p.sym && ImGui::IsItemEdited()) p.py = p.px;
     ImGui::SliderFloat("py",  &p.py, -1.0f, 1.0f, "%.3f");
+    if (p.sym && ImGui::IsItemEdited()) p.px = p.py;
+    ImGui::SameLine(); ImGui::Checkbox("sym", &p.sym);
     ImGui::SliderFloat("pz",  &p.pz,  0.0f, 3.0f, "%.3f");
     ImGui::SliderFloat("dim", &p.dim, 0.3f,  1.0f, "%.2f");
     ImGui::Separator();
@@ -276,7 +366,12 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
   if (ImGui::Button("+ Box"))
     def.prims.push_back({PrimKind::Box, 0.f, 0.f, 0.f, 0.40f, 0.40f, 0.50f, 0.f, 1.0f});
   ImGui::SameLine();
-  if (ImGui::Button("+ Circle"))
+  if (ImGui::Button("+ Wedge"))
+    def.prims.push_back({PrimKind::Wedge, 0.f, 0.f, 0.f, 0.40f, 0.60f, 0.40f, 0.f, 1.0f});
+  ImGui::SameLine();
+  if (ImGui::Button("+ Cylinder"))
+    def.prims.push_back({PrimKind::Cylinder, 0.f, 0.f, 0.f, 0.40f, 0.f, 0.50f, 0.f, 1.0f});
+  if (ImGui::Button("+ Disc"))
     def.prims.push_back({PrimKind::Circle, 0.f, 0.f, 0.5f, 0.f, 0.f, 0.f, 0.16f, 1.0f});
   ImGui::SameLine();
   if (ImGui::Button("+ Sphere"))
@@ -289,10 +384,11 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
 // ---- App state ------------------------------------------------------------
 
 struct App {
-  UnitShapeDef shape_defs[5];
+  UnitShapeDef shape_defs[kUnitTypeCount];
   int          sel_shape  = 0;
   int          sel_prim   = 0;
   int          facing     = 0;
+  float        game_cs    = 48.f; // ud_viz_imgui default tile size
   char         shape_path[512] = "shapes.udshapes";
   std::string  shape_status;
 } g;
@@ -304,7 +400,7 @@ int main(int argc, char** argv) {
     strncpy(g.shape_path, argv[1], sizeof(g.shape_path) - 1);
 
   if (!load_shapes(g.shape_defs, g.shape_path))
-    for (int i = 0; i < 5; ++i)
+    for (int i = 0; i < kUnitTypeCount; ++i)
       g.shape_defs[i] = make_default_shape(static_cast<game::UnitType>(i));
 
   if (!glfwInit()) { fprintf(stderr, "glfwInit failed\n"); return 1; }
@@ -330,14 +426,15 @@ int main(int argc, char** argv) {
     glfwPollEvents();
     ImGuiIO& io = ImGui::GetIO();
 
-    if (ImGui::IsKeyPressed(ImGuiKey_Q)) glfwSetWindowShouldClose(win, GLFW_TRUE);
+    // Without the WantTextInput check, typing 'q' into the path box quits and drops edits.
+    if (!io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Q)) glfwSetWindowShouldClose(win, GLFW_TRUE);
 
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
     draw_shape_editor(io, g.shape_defs, g.sel_shape, g.facing,
-                      g.sel_prim, g.shape_path, g.shape_status);
+                      g.sel_prim, g.game_cs, g.shape_path, g.shape_status);
 
     ImGui::Render();
     int fb_w, fb_h;
