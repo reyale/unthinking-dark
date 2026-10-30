@@ -18,8 +18,6 @@
 // Plain ASCII: ImGui's default font has no arrow glyphs.
 static const char* kFacingLabels[4] = {"NE", "SE", "SW", "NW"};
 
-static constexpr int kUnitTypeCount = 5;
-
 static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, int& facing,
                                int& sel_prim, float& game_cs, char* save_path,
                                std::string& status) {
@@ -30,10 +28,8 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
     ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus);
 
   // Header bar
-  ImGui::SetNextItemWidth(120.f);
-  ImGui::Combo("##unit", &sel, [](void*, int i) {
-    return game::unit_type_name(static_cast<game::UnitType>(i));
-  }, nullptr, kUnitTypeCount);
+  ImGui::SetNextItemWidth(140.f);
+  ImGui::Combo("##unit", &sel, [](void*, int i) { return shape_name(i); }, nullptr, kShapeCount);
   ImGui::SameLine();
   ImGui::SetNextItemWidth(280.f);
   ImGui::InputText("##sp", save_path, 512);
@@ -45,8 +41,8 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
     status = load_shapes(defs, save_path) ? "Loaded." : "Load failed.";
   ImGui::SameLine();
   if (ImGui::Button("Defaults")) {
-    for (int i = 0; i < kUnitTypeCount; ++i)
-      defs[i] = make_default_shape(static_cast<game::UnitType>(i));
+    for (int i = 0; i < kShapeCount; ++i)
+      defs[i] = make_default_shape(i);
     status = "Reset to defaults.";
   }
   if (!status.empty()) {
@@ -125,6 +121,7 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
       hs.push_back({{anch.x,                 anch.y - h_px}, DragMode::ResizeHeight,   kHhCol});
       break;
     case PrimKind::Wedge:
+    case PrimKind::Block:
       hs.push_back({{anch.x, anch.y - h_px}, DragMode::ResizeHeight, kHhCol});
       break;
     case PrimKind::Circle:
@@ -236,14 +233,14 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
                 IM_COL32(160, 160, 160, 180), hint);
   }
 
-  // -- Game-scale strip: every unit, both factions, at the viewer's tile size --
+  // -- Game-scale strip: every shape, both factions, at the viewer's tile size --
   {
     const float g_cw2 = game_cs * 0.5f, g_ch2 = game_cs * 0.25f;
-    const float slot_w = preview_w / kUnitTypeCount;
+    const float slot_w = preview_w / kShapeCount;
     ImVec2 bar0 = {big_p0.x, big_p0.y + big_h + 2.f};
     const ImU32 fcol[2] = {ImGui::ColorConvertFloat4ToU32(kFactionA),
                            ImGui::ColorConvertFloat4ToU32(kFactionB)};
-    for (int u = 0; u < kUnitTypeCount; ++u) {
+    for (int u = 0; u < kShapeCount; ++u) {
       ImVec2 sp0 = {bar0.x + u * slot_w, bar0.y};
       ImVec2 sp1 = {sp0.x + slot_w - 2.f, sp0.y + game_bar_h - 2.f};
       ImGui::SetCursorScreenPos(sp0);
@@ -265,7 +262,7 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
         dl->AddQuad(t_top, t_rt, t_bot, t_lt, kTileE, 0.5f);
         draw_unit_from_def(dl, c, g_cw2, g_ch2, defs[u], fcol[fct], facing);
       }
-      const char* nm = game::unit_type_name(static_cast<game::UnitType>(u));
+      const char* nm = shape_name(u);
       dl->AddText({sp0.x + 4.f, sp0.y + 3.f},
                   active ? IM_COL32(255,220,60,220) : IM_COL32(140,140,160,200), nm);
     }
@@ -335,6 +332,7 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
       ImGui::SliderFloat("h",   &p.h,  0.05f, 3.00f, "%.3f");
       break;
     case PrimKind::Wedge:
+    case PrimKind::Block:
       ImGui::SliderFloat("width",  &p.fw, 0.05f, 1.20f, "%.3f");
       ImGui::SliderFloat("length", &p.fd, 0.05f, 1.20f, "%.3f");
       ImGui::SliderFloat("h",      &p.h,  0.05f, 3.00f, "%.3f");
@@ -366,6 +364,9 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
   if (ImGui::Button("+ Box"))
     def.prims.push_back({PrimKind::Box, 0.f, 0.f, 0.f, 0.40f, 0.40f, 0.50f, 0.f, 1.0f});
   ImGui::SameLine();
+  if (ImGui::Button("+ Block"))
+    def.prims.push_back({PrimKind::Block, 0.f, 0.f, 0.f, 0.30f, 0.50f, 0.40f, 0.f, 1.0f});
+  ImGui::SameLine();
   if (ImGui::Button("+ Wedge"))
     def.prims.push_back({PrimKind::Wedge, 0.f, 0.f, 0.f, 0.40f, 0.60f, 0.40f, 0.f, 1.0f});
   ImGui::SameLine();
@@ -384,7 +385,7 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
 // ---- App state ------------------------------------------------------------
 
 struct App {
-  UnitShapeDef shape_defs[kUnitTypeCount];
+  UnitShapeDef shape_defs[kShapeCount];
   int          sel_shape  = 0;
   int          sel_prim   = 0;
   int          facing     = 0;
@@ -400,8 +401,8 @@ int main(int argc, char** argv) {
     strncpy(g.shape_path, argv[1], sizeof(g.shape_path) - 1);
 
   if (!load_shapes(g.shape_defs, g.shape_path))
-    for (int i = 0; i < kUnitTypeCount; ++i)
-      g.shape_defs[i] = make_default_shape(static_cast<game::UnitType>(i));
+    for (int i = 0; i < kShapeCount; ++i)
+      g.shape_defs[i] = make_default_shape(i);
 
   if (!glfwInit()) { fprintf(stderr, "glfwInit failed\n"); return 1; }
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);

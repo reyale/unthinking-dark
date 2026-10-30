@@ -82,6 +82,7 @@ struct CellData {
   char    glyph{'\0'};
   bool    is_unit{false};
   game::UnitType unit_type{game::UnitType::Drone};
+  int     shape{-1}; // index into shape_defs; -1 = nothing to draw
   ImVec4  fg{};
   int32_t hp{-1}, max_hp{-1};
   int     facing{0};
@@ -121,7 +122,10 @@ static CellData make_cell(const game::Map& map, const game::FrameState& fr,
     char g = s.type == game::StructureType::CommandCore ? 'C' :
              s.type == game::StructureType::Factory     ? 'T' : 'N';
     ImVec4 fg = s.faction.value == 0 ? kFactionA : kFactionB;
-    return {bg, g, false, game::UnitType::Drone, fg, s.hp, s.max_hp};
+    // Structures never move; turn them toward the map centre so bases face each other.
+    int facing = facing_from_step(map.width / 2 - x, map.height / 2 - y);
+    return {bg, g, false, game::UnitType::Drone, shape_index(s.type), fg, s.hp, s.max_hp,
+            facing < 0 ? 0 : facing};
   }
 
   int top = -1;
@@ -131,7 +135,7 @@ static CellData make_cell(const game::Map& map, const game::FrameState& fr,
     const auto& u = fr.units[top];
     ImVec4 fg = u.faction.value == 0 ? kFactionA : kFactionB;
     int facing = top < static_cast<int>(facings.size()) ? facings[top] : 0;
-    return {bg, '\0', true, u.type, fg, u.hp, u.max_hp, facing};
+    return {bg, '\0', true, u.type, shape_index(u.type), fg, u.hp, u.max_hp, facing};
   }
 
   return {bg};
@@ -159,7 +163,7 @@ struct App {
   game::UnitId      sel_id{};
   game::StructureId sel_struct_id{};
   game::Vec2        sel_tile{};
-  UnitShapeDef      shape_defs[5];
+  UnitShapeDef      shape_defs[kShapeCount];
   // unit_facing[f][i]: facing of frames[f].units[i], from its last move.
   std::vector<std::vector<uint8_t>> unit_facing;
   std::string       shapes_path = "shapes.udshapes";
@@ -169,8 +173,8 @@ struct App {
 
 static void load_shape_defs() {
   if (!load_shapes(g.shape_defs, g.shapes_path.c_str()))
-    for (int i = 0; i < 5; ++i)
-      g.shape_defs[i] = make_default_shape(static_cast<game::UnitType>(i));
+    for (int i = 0; i < kShapeCount; ++i)
+      g.shape_defs[i] = make_default_shape(i);
   std::error_code ec;
   g.shapes_mtime = std::filesystem::last_write_time(g.shapes_path, ec);
 }
@@ -359,17 +363,15 @@ static void draw_tile_cell(ImDrawList* dl, ImVec2 ctr, float cw2, float ch2,
   dl->AddTriangleFilled(right, bottom, left, u32(dim_vec(cd.bg, 0.70f)));
   dl->AddQuad(top, right, bottom, left, u32({0.0f, 0.0f, 0.0f, 0.40f}), 0.5f);
 
+  if (cd.shape >= 0)
+    draw_unit_from_def(dl, ctr, cw2, ch2, g.shape_defs[cd.shape], u32(cd.fg), cd.facing);
+
   if (cd.glyph) {
-    char   buf[2] = {cd.glyph, '\0'};
-    ImVec2 tsz    = ImGui::CalcTextSize(buf);
-    dl->AddText({ctr.x - tsz.x * 0.5f, ctr.y - tsz.y * 0.5f}, u32(cd.fg), buf);
     if (g.has_sel && g.sel_type == SelType::Structure)
       for (const auto& s : fr.structures)
         if (s.id == g.sel_struct_id && s.pos.x == x && s.pos.y == y)
           dl->AddQuad(top, right, bottom, left, IM_COL32(255, 255, 80, 220), 2.0f);
   } else if (cd.is_unit) {
-    draw_unit_from_def(dl, ctr, cw2, ch2, g.shape_defs[static_cast<int>(cd.unit_type)], u32(cd.fg),
-                       cd.facing);
     if (g.has_sel && g.sel_type == SelType::Unit)
       for (const auto& u : fr.units)
         if (u.id == g.sel_id && u.pos.x == x && u.pos.y == y)

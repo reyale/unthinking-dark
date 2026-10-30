@@ -14,16 +14,16 @@
 // ---- Shape model -----------------------------------------------------------
 
 // Append only: values are not persisted, but keep existing kinds stable.
-enum class PrimKind : uint8_t { Box, Circle, Sphere, Wedge, Cylinder };
+enum class PrimKind : uint8_t { Box, Circle, Sphere, Wedge, Cylinder, Block };
 
 struct ShapePrim {
   PrimKind kind = PrimKind::Box;
   float px  = 0.0f;  // tile-space offset along NE-SW axis
   float py  = 0.0f;  // tile-space offset along NW-SE axis
   float pz  = 0.0f;  // height above tile in ch2 units
-  float fw  = 0.5f;  // [Box] screen-x extent; [Wedge] width; [Cylinder] diameter
-  float fd  = 0.5f;  // [Box] screen-y extent; [Wedge] length (nose points NE)
-  float h   = 0.5f;  // [Box/Wedge/Cylinder] height in ch2 units
+  float fw  = 0.5f;  // [Box] screen-x extent; [Wedge/Block] width; [Cylinder] diameter
+  float fd  = 0.5f;  // [Box] screen-y extent; [Wedge/Block] length along the heading (NE)
+  float h   = 0.5f;  // [prisms] height in ch2 units
   float r   = 0.16f; // [Circle/Sphere] radius in cw2 units
   float dim = 1.0f;  // colour multiplier
   bool  sym = false; // editor: constrain px == py for facing symmetry
@@ -32,6 +32,20 @@ struct ShapePrim {
 struct UnitShapeDef {
   std::vector<ShapePrim> prims;
 };
+
+// One shape per unit type, then one per structure type.
+inline constexpr int kUnitShapeCount   = 5;
+inline constexpr int kStructShapeCount = 3;
+inline constexpr int kShapeCount       = kUnitShapeCount + kStructShapeCount;
+
+inline int shape_index(game::UnitType t) { return static_cast<int>(t); }
+inline int shape_index(game::StructureType t) { return kUnitShapeCount + static_cast<int>(t); }
+
+inline const char* shape_name(int i) {
+  return i < kUnitShapeCount
+           ? game::unit_type_name(static_cast<game::UnitType>(i))
+           : game::structure_type_name(static_cast<game::StructureType>(i - kUnitShapeCount));
+}
 
 // ---- Colour helper ---------------------------------------------------------
 
@@ -81,7 +95,8 @@ inline void apply_facing(int facing, float px, float py, float fw, float fd,
 }
 
 inline bool prim_is_prism(PrimKind k) {
-  return k == PrimKind::Box || k == PrimKind::Wedge || k == PrimKind::Cylinder;
+  return k == PrimKind::Box || k == PrimKind::Wedge || k == PrimKind::Cylinder ||
+         k == PrimKind::Block;
 }
 
 inline const char* prim_kind_name(PrimKind k) {
@@ -91,14 +106,16 @@ inline const char* prim_kind_name(PrimKind k) {
   case PrimKind::Sphere:   return "Sphere";
   case PrimKind::Wedge:    return "Wedge";
   case PrimKind::Cylinder: return "Cylinder";
+  case PrimKind::Block:    return "Block";
   }
   return "?";
 }
 
 // Footprint at facing 0, relative to the prim's position. Box keeps its legacy
 // diamond (fw spans screen-x, fd spans screen-y) so existing .udshapes files look
-// the same. Wedge points NE (tile -y): fd = length, fw = width. Cylinder: fw =
-// screen width as a fraction of tile width, matching Box.
+// the same. Wedge points NE (tile -y): fd = length, fw = width. Block is a
+// rectangle on the same axes as Wedge. Cylinder: fw = screen width as a fraction
+// of tile width, matching Box.
 inline void prim_footprint(const ShapePrim& p, std::vector<ImVec2>& out) {
   out.clear();
   switch (p.kind) {
@@ -109,8 +126,12 @@ inline void prim_footprint(const ShapePrim& p, std::vector<ImVec2>& out) {
   case PrimKind::Wedge:
     out = {{0.f, -p.fd * 0.5f}, {p.fw * 0.5f, p.fd * 0.5f}, {-p.fw * 0.5f, p.fd * 0.5f}};
     break;
+  case PrimKind::Block:
+    out = {{-p.fw * 0.5f, -p.fd * 0.5f}, {p.fw * 0.5f, -p.fd * 0.5f},
+           {p.fw * 0.5f, p.fd * 0.5f},   {-p.fw * 0.5f, p.fd * 0.5f}};
+    break;
   case PrimKind::Cylinder: {
-    constexpr int kSegs = 20;
+    constexpr int kSegs = 28;
     const float rad = p.fw * 0.70710678f;
     for (int i = 0; i < kSegs; ++i) {
       float a = 6.2831853f * static_cast<float>(i) / kSegs;
@@ -252,6 +273,10 @@ inline void draw_prim_geom(ImDrawList* dl, const PrimGeom& g, ImU32 col) {
     return;
   }
   const bool smooth = g.kind == PrimKind::Cylinder;
+  // Anti-aliased fringes on adjacent facets leave visible seams, which make a
+  // cylinder look ribbed; the silhouette lines below cover the jagged outer edge.
+  const ImDrawListFlags saved_flags = dl->Flags;
+  if (smooth) dl->Flags &= ~ImDrawListFlags_AntiAliasedFill;
   for (const auto& s : g.sides) {
     fill_convex(dl, s.q, 4, dim_col(col, s.shade));
     dl->AddLine(s.q[0], s.q[1], edge, lw);
@@ -260,6 +285,7 @@ inline void draw_prim_geom(ImDrawList* dl, const PrimGeom& g, ImU32 col) {
       dl->AddLine(s.q[1], s.q[2], edge, lw);
     }
   }
+  dl->Flags = saved_flags;
   if (smooth && !g.sides.empty()) {
     // Silhouette verticals only, so the cylinder doesn't look faceted.
     dl->AddLine(g.sides.front().q[0], g.sides.front().q[3], edge, lw);
@@ -397,26 +423,102 @@ inline int pick_prim(const UnitShapeDef& def, ImVec2 ctr, float cw2, float ch2, 
 
 // ---- Default shapes --------------------------------------------------------
 
-inline UnitShapeDef make_default_shape(game::UnitType t) {
+// Ships are authored facing NE: forward is -py, starboard is +px. They hover, so
+// each has a dim ground disc as a shadow. Structures sit on the tile.
+inline UnitShapeDef make_default_shape(int shape) {
   UnitShapeDef d;
-  // fields: kind, px, py, pz, fw, fd, h, r, dim
-  switch (t) {
-  case game::UnitType::Drone:
-    d.prims.push_back({PrimKind::Box,    0.f, 0.f, 0.00f, 0.42f, 0.42f, 0.30f, 0.f,   1.0f});
-    d.prims.push_back({PrimKind::Circle, 0.f, 0.f, 0.30f, 0.f,   0.f,   0.f,   0.16f, 1.0f});
+  auto add = [&](PrimKind k, float px, float py, float pz, float fw, float fd, float h,
+                 float r, float dim) {
+    d.prims.push_back({k, px, py, pz, fw, fd, h, r, dim});
+  };
+  auto block  = [&](float px, float py, float pz, float w, float l, float h, float dim) {
+    add(PrimKind::Block, px, py, pz, w, l, h, 0.f, dim);
+  };
+  auto wedge  = [&](float px, float py, float pz, float w, float l, float h, float dim) {
+    add(PrimKind::Wedge, px, py, pz, w, l, h, 0.f, dim);
+  };
+  auto cyl    = [&](float px, float py, float pz, float diam, float h, float dim) {
+    add(PrimKind::Cylinder, px, py, pz, diam, 0.f, h, 0.f, dim);
+  };
+  auto sphere = [&](float px, float py, float pz, float r, float dim) {
+    add(PrimKind::Sphere, px, py, pz, 0.f, 0.f, 0.f, r, dim);
+  };
+  auto shadow = [&](float r) { add(PrimKind::Circle, 0.f, 0.f, 0.f, 0.f, 0.f, 0.f, r, 0.22f); };
+
+  switch (shape) {
+  case 0: // Drone: stubby mining tug with side ore pods
+    shadow(0.26f);
+    block(0.f, 0.07f, 0.22f, 0.32f, 0.36f, 0.38f, 1.0f);
+    wedge(0.f, -0.20f, 0.22f, 0.32f, 0.20f, 0.38f, 0.9f);
+    cyl(-0.23f, 0.07f, 0.20f, 0.17f, 0.36f, 0.65f);
+    cyl( 0.23f, 0.07f, 0.20f, 0.17f, 0.36f, 0.65f);
+    sphere(0.f, 0.03f, 0.74f, 0.08f, 1.0f);
     break;
-  case game::UnitType::Interceptor:
-    d.prims.push_back({PrimKind::Box, 0.f, 0.f, 0.0f, 0.44f, 0.44f, 1.05f, 0.f, 1.0f});
+  case 1: // Interceptor: narrow dart with swept wings
+    shadow(0.24f);
+    wedge(0.f, -0.02f, 0.40f, 0.24f, 0.78f, 0.24f, 1.0f);
+    wedge(-0.17f, 0.16f, 0.40f, 0.20f, 0.40f, 0.08f, 0.75f);
+    wedge( 0.17f, 0.16f, 0.40f, 0.20f, 0.40f, 0.08f, 0.75f);
+    cyl(-0.07f, 0.30f, 0.38f, 0.10f, 0.24f, 0.55f);
+    cyl( 0.07f, 0.30f, 0.38f, 0.10f, 0.24f, 0.55f);
+    sphere(0.f, 0.02f, 0.70f, 0.07f, 1.0f);
     break;
-  case game::UnitType::Frigate:
-    d.prims.push_back({PrimKind::Box, 0.f, 0.f, 0.0f, 0.76f, 0.76f, 0.80f, 0.f, 1.0f});
+  case 2: // Frigate: bowed hull, bridge aft, forward turret
+    shadow(0.36f);
+    block(0.f, 0.10f, 0.25f, 0.42f, 0.50f, 0.42f, 1.0f);
+    wedge(0.f, -0.29f, 0.25f, 0.42f, 0.28f, 0.42f, 0.95f);
+    block(0.f, 0.20f, 0.67f, 0.24f, 0.22f, 0.40f, 0.8f);
+    cyl(0.f, -0.10f, 0.67f, 0.20f, 0.18f, 0.9f);
+    block(0.f, -0.30f, 0.76f, 0.05f, 0.26f, 0.06f, 0.7f);
+    cyl(-0.13f, 0.38f, 0.28f, 0.13f, 0.32f, 0.55f);
+    cyl( 0.13f, 0.38f, 0.28f, 0.13f, 0.32f, 0.55f);
     break;
-  case game::UnitType::Artillery:
-    d.prims.push_back({PrimKind::Box, 0.f, 0.f, 0.00f, 0.46f, 0.46f, 0.75f, 0.f, 1.0f});
-    d.prims.push_back({PrimKind::Box, 0.f, 0.f, 0.75f, 0.20f, 0.20f, 1.20f, 0.f, 0.85f});
+  case 3: // Artillery: squat platform carrying one very long gun
+    shadow(0.32f);
+    block(0.f, 0.12f, 0.20f, 0.44f, 0.42f, 0.34f, 0.9f);
+    cyl(0.f, 0.10f, 0.54f, 0.30f, 0.24f, 1.0f);
+    block(0.f, -0.24f, 0.70f, 0.07f, 0.62f, 0.08f, 0.75f);
+    block(0.f, 0.30f, 0.54f, 0.22f, 0.12f, 0.22f, 0.6f);
     break;
-  case game::UnitType::Battleship:
-    d.prims.push_back({PrimKind::Box, 0.f, 0.f, 0.0f, 0.84f, 0.84f, 1.30f, 0.f, 1.0f});
+  case 4: // Battleship: long armoured hull, twin forward guns, tall bridge
+    shadow(0.48f);
+    block(0.f, 0.10f, 0.22f, 0.62f, 0.66f, 0.50f, 1.0f);
+    wedge(0.f, -0.38f, 0.22f, 0.62f, 0.32f, 0.50f, 0.95f);
+    block(0.f, 0.16f, 0.72f, 0.42f, 0.42f, 0.34f, 0.85f);
+    block(0.f, 0.26f, 1.06f, 0.20f, 0.16f, 0.50f, 0.9f);
+    cyl(0.f, -0.20f, 0.72f, 0.24f, 0.16f, 0.9f);
+    block(-0.04f, -0.40f, 0.80f, 0.04f, 0.26f, 0.06f, 0.7f);
+    block( 0.04f, -0.40f, 0.80f, 0.04f, 0.26f, 0.06f, 0.7f);
+    cyl(-0.15f, 0.44f, 0.30f, 0.12f, 0.30f, 0.55f);
+    cyl( 0.15f, 0.44f, 0.30f, 0.12f, 0.30f, 0.55f);
+    break;
+  case 5: // Command Core: plinth, corner pylons, tiered tower, domed top, spire
+    block(0.f, 0.f, 0.f, 0.86f, 0.86f, 0.30f, 0.65f);
+    cyl(-0.31f, -0.31f, 0.30f, 0.11f, 0.55f, 0.8f);
+    cyl( 0.31f, -0.31f, 0.30f, 0.11f, 0.55f, 0.8f);
+    cyl(-0.31f,  0.31f, 0.30f, 0.11f, 0.55f, 0.8f);
+    cyl( 0.31f,  0.31f, 0.30f, 0.11f, 0.55f, 0.8f);
+    cyl(0.f, 0.f, 0.30f, 0.62f, 0.70f, 1.0f);
+    cyl(0.f, 0.f, 1.00f, 0.44f, 0.30f, 0.85f);
+    sphere(0.f, 0.f, 1.42f, 0.19f, 1.0f);
+    cyl(0.f, 0.f, 1.55f, 0.05f, 0.75f, 0.9f);
+    break;
+  case 6: // Factory: hall with an annexe and two smokestacks
+    block(0.f, 0.f, 0.f, 0.86f, 0.86f, 0.18f, 0.6f);
+    block(-0.08f, 0.06f, 0.18f, 0.56f, 0.60f, 0.55f, 1.0f);
+    block(0.27f, 0.14f, 0.18f, 0.22f, 0.40f, 0.32f, 0.8f);
+    cyl(0.20f, -0.26f, 0.18f, 0.13f, 1.10f, 0.75f);
+    cyl(0.02f, -0.30f, 0.18f, 0.11f, 0.85f, 0.75f);
+    break;
+  case 7: // Claim Node: tripod base, slim pylon, glowing beacon
+    cyl(0.f, 0.f, 0.f, 0.46f, 0.14f, 0.65f);
+    cyl(-0.16f, 0.10f, 0.14f, 0.07f, 0.35f, 0.75f);
+    cyl( 0.16f, 0.10f, 0.14f, 0.07f, 0.35f, 0.75f);
+    cyl( 0.f,  -0.19f, 0.14f, 0.07f, 0.35f, 0.75f);
+    cyl(0.f, 0.f, 0.14f, 0.10f, 1.25f, 0.9f);
+    sphere(0.f, 0.f, 1.52f, 0.13f, 1.0f);
+    break;
+  default:
     break;
   }
   return d;
@@ -431,15 +533,20 @@ inline bool save_shapes(const UnitShapeDef* defs, const char* path) {
   FILE* f = fopen(tmp.c_str(), "w");
   if (!f) return false;
   fprintf(f, "version 1\n");
-  for (int i = 0; i < 5; ++i) {
-    fprintf(f, "unit %d %s\n", i, game::unit_type_name(static_cast<game::UnitType>(i)));
+  for (int i = 0; i < kShapeCount; ++i) {
+    if (i < kUnitShapeCount)
+      fprintf(f, "unit %d %s\n", i, shape_name(i));
+    else
+      fprintf(f, "structure %d %s\n", i - kUnitShapeCount, shape_name(i));
     for (const auto& p : defs[i].prims) {
       switch (p.kind) {
       case PrimKind::Box:
       case PrimKind::Wedge:
       case PrimKind::Cylinder:
+      case PrimKind::Block:
         fprintf(f, "%s px=%.4f py=%.4f pz=%.4f fw=%.4f fd=%.4f h=%.4f dim=%.4f sym=%d\n",
-                p.kind == PrimKind::Box ? "box" : p.kind == PrimKind::Wedge ? "wedge" : "cylinder",
+                p.kind == PrimKind::Box   ? "box"   : p.kind == PrimKind::Wedge ? "wedge" :
+                p.kind == PrimKind::Block ? "block" : "cylinder",
                 p.px, p.py, p.pz, p.fw, p.fd, p.h, p.dim, p.sym ? 1 : 0);
         break;
       case PrimKind::Circle:
@@ -459,15 +566,25 @@ inline bool save_shapes(const UnitShapeDef* defs, const char* path) {
   return true;
 }
 
+// Shapes the file doesn't mention keep their defaults, so older files (written
+// before structures had shapes) still give every structure something to draw.
 inline bool load_shapes(UnitShapeDef* defs, const char* path) {
   FILE* f = fopen(path, "r");
   if (!f) return false;
+  for (int i = 0; i < kShapeCount; ++i)
+    defs[i] = make_default_shape(i);
   char line[256];
   int cur = -1;
   while (fgets(line, sizeof(line), f)) {
     int uid; char name[64];
-    if (sscanf(line, "unit %d %63s", &uid, name) == 2 && uid >= 0 && uid < 5) {
+    if (sscanf(line, "unit %d %63s", &uid, name) == 2 && uid >= 0 && uid < kUnitShapeCount) {
       cur = uid;
+      defs[cur].prims.clear();
+      continue;
+    }
+    if (sscanf(line, "structure %d %63s", &uid, name) == 2 && uid >= 0 &&
+        uid < kStructShapeCount) {
+      cur = kUnitShapeCount + uid;
       defs[cur].prims.clear();
       continue;
     }
@@ -482,6 +599,7 @@ inline bool load_shapes(UnitShapeDef* defs, const char* path) {
       {"box px=%f py=%f pz=%f fw=%f fd=%f h=%f dim=%f",      PrimKind::Box},
       {"wedge px=%f py=%f pz=%f fw=%f fd=%f h=%f dim=%f",    PrimKind::Wedge},
       {"cylinder px=%f py=%f pz=%f fw=%f fd=%f h=%f dim=%f", PrimKind::Cylinder},
+      {"block px=%f py=%f pz=%f fw=%f fd=%f h=%f dim=%f",    PrimKind::Block},
     };
     struct { const char* fmt; PrimKind kind; } kRoundFmts[] = {
       {"circle px=%f py=%f pz=%f r=%f dim=%f", PrimKind::Circle},
