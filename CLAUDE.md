@@ -106,8 +106,11 @@ must be true before use.
 | `ud_viz` | Terminal renderer (raw ANSI) |
 | `ud_viz_nc` | ncurses renderer (optional, requires libncurses) |
 | `ud_viz_imgui` | Dear ImGui, isometric 2:1 projection (optional, requires libglfw3-dev) |
-| `ud_shape_editor` | ImGui editor for unit render shapes; reads/writes `.udshapes` files (`shape_model.hpp`) |
+| `ud_shape_editor` | ImGui editor for unit/structure render shapes; reads/writes `.udshapes` files (`shape_model.hpp`) |
 | `Makefile.em` | Emscripten browser build → `viz/web/index.html`; drag-and-drop `.ud` files |
+
+Both ImGui apps default to the repo's `shapes.udshapes` (path baked in via the `UD_SHAPES_FILE`
+CMake cache variable); override per run with `--shapes <file>`. `ud_viz_imgui` hot-reloads it on save.
 
 ImGui build fetches Dear ImGui v1.91.6 via CMake FetchContent. The browser build uses the same
 source; run `cmake -B build && cmake --build build` first to populate `build/_deps/`.

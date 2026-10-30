@@ -166,17 +166,19 @@ struct App {
   UnitShapeDef      shape_defs[kShapeCount];
   // unit_facing[f][i]: facing of frames[f].units[i], from its last move.
   std::vector<std::vector<uint8_t>> unit_facing;
-  std::string       shapes_path = "shapes.udshapes";
+  std::string       shapes_path = UD_DEFAULT_SHAPES_PATH;
   std::filesystem::file_time_type shapes_mtime{};
   double            shapes_checked_t = 0.0;
 } g;
 
-static void load_shape_defs() {
-  if (!load_shapes(g.shape_defs, g.shapes_path.c_str()))
+static bool load_shape_defs() {
+  bool ok = load_shapes(g.shape_defs, g.shapes_path.c_str());
+  if (!ok)
     for (int i = 0; i < kShapeCount; ++i)
       g.shape_defs[i] = make_default_shape(i);
   std::error_code ec;
   g.shapes_mtime = std::filesystem::last_write_time(g.shapes_path, ec);
+  return ok;
 }
 
 // Polls rather than using inotify so it works the same everywhere; twice a second is
@@ -529,7 +531,10 @@ int main(int argc, char** argv) {
     else if (!replay_arg)
       replay_arg = argv[i];
   }
-  load_shape_defs();
+  if (load_shape_defs())
+    fprintf(stderr, "Shapes: %s\n", g.shapes_path.c_str());
+  else
+    fprintf(stderr, "Shapes: %s not found, using built-in shapes\n", g.shapes_path.c_str());
 
   if (replay_arg) {
     strncpy(g.path_buf, replay_arg, sizeof(g.path_buf) - 1);

@@ -390,7 +390,7 @@ struct App {
   int          sel_prim   = 0;
   int          facing     = 0;
   float        game_cs    = 48.f; // ud_viz_imgui default tile size
-  char         shape_path[512] = "shapes.udshapes";
+  char         shape_path[512] = UD_DEFAULT_SHAPES_PATH;
   std::string  shape_status;
 } g;
 

@@ -13,6 +13,12 @@
 
 // ---- Shape model -----------------------------------------------------------
 
+// CMake sets this to the repo's shapes.udshapes; builds without it (the browser
+// build) fall back to the working directory.
+#ifndef UD_DEFAULT_SHAPES_PATH
+#define UD_DEFAULT_SHAPES_PATH "shapes.udshapes"
+#endif
+
 // Append only: values are not persisted, but keep existing kinds stable.
 enum class PrimKind : uint8_t { Box, Circle, Sphere, Wedge, Cylinder, Block };
 

@@ -49,17 +49,24 @@ if(OpenGL_FOUND AND glfw3_FOUND)
   target_link_libraries(ud_imgui PUBLIC glfw OpenGL::GL)
   target_compile_options(ud_imgui PRIVATE -w)  # imgui ships with minor warnings
 
+  # Baked-in default so the apps find the repo's shapes from any working directory;
+  # override per run with --shapes, or per build with -DUD_SHAPES_FILE=<path>.
+  set(UD_SHAPES_FILE "${CMAKE_SOURCE_DIR}/shapes.udshapes" CACHE FILEPATH
+      "Default shapes file for ud_viz_imgui and ud_shape_editor")
+
   add_executable(ud_viz_imgui imgui_main.cpp)
   target_include_directories(ud_viz_imgui PRIVATE
     ${CMAKE_SOURCE_DIR}/engine/src
   )
   target_link_libraries(ud_viz_imgui PRIVATE engine ud_imgui)
+  target_compile_definitions(ud_viz_imgui PRIVATE UD_DEFAULT_SHAPES_PATH="${UD_SHAPES_FILE}")
 
   add_executable(ud_shape_editor shape_editor_main.cpp)
   target_include_directories(ud_shape_editor PRIVATE
     ${CMAKE_SOURCE_DIR}/engine/src
   )
   target_link_libraries(ud_shape_editor PRIVATE engine ud_imgui)
+  target_compile_definitions(ud_shape_editor PRIVATE UD_DEFAULT_SHAPES_PATH="${UD_SHAPES_FILE}")
 
 else()
   message(STATUS "OpenGL or GLFW not found — skipping ud_viz_imgui (apt install libglfw3-dev)")
