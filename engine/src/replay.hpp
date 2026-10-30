@@ -1,4 +1,5 @@
 #pragma once
+#include "bot_iface.hpp"
 #include "command.hpp"
 #include "grid.hpp"
 #include "wincheck.hpp"
@@ -22,6 +23,9 @@ struct TickEntry {
   uint64_t fuel_b{0};
   uint64_t mem_bytes_a{0};
   uint64_t mem_bytes_b{0};
+  // Non-None when that bot forfeited this tick (its raw commands are then empty).
+  TickFault fault_a{TickFault::None};
+  TickFault fault_b{TickFault::None};
 };
 
 // Initial entity placement recorded in spawn order.

@@ -49,7 +49,7 @@ struct SnapshotHeader {
   uint32_t my_faction_id;
   int32_t energy;
   int32_t alloy;
-  uint32_t territory_pct;     // 0..100 integer; 0 until Phase 3 (territory)
+  uint32_t territory_pct;     // 0..100 integer
   uint32_t win_threshold;     // 0..100 integer
   uint32_t map_w;
   uint32_t map_h;

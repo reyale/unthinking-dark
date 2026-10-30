@@ -4,6 +4,7 @@
 #include <wasmtime.h>
 #include <algorithm>
 #include <cstring>
+#include <sys/mman.h>
 #include <fstream>
 #include <stdexcept>
 
@@ -25,6 +26,20 @@ static std::string drain_error(wasmtime_error_t* err, wasm_trap_t* trap) {
   std::string s(msg.data, msg.size);
   wasm_byte_vec_delete(&msg);
   return s;
+}
+
+// Classify a call. Must run before drain_error(), which deletes the trap. A refused
+// over-cap grow wins even if the call then completed or trapped: it's the root cause
+// (a bot whose allocation failed often crashes on the null pointer right after).
+static game::TickFault classify_fault(wasmtime_error_t* err, wasm_trap_t* trap, bool over_cap) {
+  if (over_cap)
+    return game::TickFault::OutOfMemory;
+  if (!err && !trap)
+    return game::TickFault::None;
+  wasmtime_trap_code_t code;
+  if (trap && wasmtime_trap_code(trap, &code) && code == WASMTIME_TRAP_CODE_OUT_OF_FUEL)
+    return game::TickFault::OutOfFuel;
+  return game::TickFault::Trap;
 }
 
 // Maximum sizes for validation at load time.
@@ -58,6 +73,81 @@ std::vector<uint8_t> load_wasm_file(const std::string& path) {
   return {std::istreambuf_iterator<char>(f), {}};
 }
 
+// ---- Capped linear memory ---------------------------------------------------
+//
+// The bot's linear memory is supplied by the runner through Wasmtime's host memory
+// creator. That is the only C API hook that sees grow requests: a grow past
+// cfg::MEMORY_CAP_MB is refused (memory.grow returns -1 to the bot, as at any limit)
+// and the attempt is noted, so on_tick can forfeit that tick. The bot's memory never
+// actually exceeds the cap, so its next tick plays normally.
+//
+// The full reservation Wasmtime asks for is mapped up front (PROT_NONE) and pages are
+// made accessible as the memory grows, so the memory never moves and Wasmtime's
+// bounds-check strategy (and therefore generated code) is unchanged.
+
+static constexpr size_t kMemoryCapBytes = static_cast<size_t>(game::cfg::MEMORY_CAP_MB) << 20;
+
+struct MemoryGate {
+  bool over_cap = false; // set when a grow past the cap was refused; reset per call
+};
+
+struct CappedMemory {
+  MemoryGate* gate;
+  uint8_t*    base;
+  size_t      mapped;   // reservation + guard, for munmap
+  size_t      capacity; // bytes the memory may reach without moving
+  size_t      size;
+};
+
+static uint8_t* capped_get(void* env, size_t* byte_size, size_t* byte_capacity) {
+  auto* m = static_cast<CappedMemory*>(env);
+  *byte_size     = m->size;
+  *byte_capacity = m->capacity;
+  return m->base;
+}
+
+static wasmtime_error_t* capped_grow(void* env, size_t new_size) {
+  auto* m = static_cast<CappedMemory*>(env);
+  if (new_size > kMemoryCapBytes) {
+    m->gate->over_cap = true;
+    return wasmtime_error_new("linear memory would exceed MEMORY_CAP_MB");
+  }
+  if (new_size > m->size &&
+      mprotect(m->base + m->size, new_size - m->size, PROT_READ | PROT_WRITE) != 0)
+    return wasmtime_error_new("mprotect failed while growing linear memory");
+  m->size = new_size;
+  return nullptr;
+}
+
+static void capped_free(void* env) {
+  auto* m = static_cast<CappedMemory*>(env);
+  munmap(m->base, m->mapped);
+  delete m;
+}
+
+static wasmtime_error_t* capped_new(void* env, const wasm_memorytype_t*, size_t minimum,
+                                    size_t /*maximum*/, size_t reserved, size_t guard,
+                                    wasmtime_linear_memory_t* out) {
+  if (minimum > kMemoryCapBytes)
+    return wasmtime_error_new("initial linear memory exceeds MEMORY_CAP_MB");
+  const size_t capacity = std::max(reserved, kMemoryCapBytes);
+  const size_t mapped   = capacity + guard;
+  void* base = mmap(nullptr, mapped, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+  if (base == MAP_FAILED)
+    return wasmtime_error_new("could not reserve address space for linear memory");
+  if (minimum > 0 && mprotect(base, minimum, PROT_READ | PROT_WRITE) != 0) {
+    munmap(base, mapped);
+    return wasmtime_error_new("mprotect failed for initial linear memory");
+  }
+  auto* m = new CappedMemory{static_cast<MemoryGate*>(env), static_cast<uint8_t*>(base), mapped,
+                             capacity, minimum};
+  out->env         = m;
+  out->get_memory  = capped_get;
+  out->grow_memory = capped_grow;
+  out->finalizer   = capped_free;
+  return nullptr;
+}
+
 // ---- WasmBot::Impl ----------------------------------------------------------
 
 struct WasmBot::Impl {
@@ -71,6 +161,7 @@ struct WasmBot::Impl {
   wasmtime_func_t     fn_on_tick{};
   uint32_t snapshot_addr{0};
   uint32_t command_addr{0};
+  MemoryGate memory_gate; // outlives the store: members are destroyed after ~Impl's body
 
   wasmtime_context_t* ctx() { return wasmtime_store_context(store); }
 
@@ -93,6 +184,8 @@ WasmBot::WasmBot(const std::vector<uint8_t>& wasm)
   wasmtime_config_wasm_simd_set(cfg, false);
   wasmtime_config_wasm_relaxed_simd_set(cfg, false); // relaxed SIMD requires SIMD
   wasmtime_config_cranelift_nan_canonicalization_set(cfg, true);
+  wasmtime_memory_creator_t creator{&impl_->memory_gate, capped_new, nullptr};
+  wasmtime_config_host_memory_creator_set(cfg, &creator); // copied into the config
   impl_->engine = wasm_engine_new_with_config(cfg); // config ownership transferred
 
   impl_->store  = wasmtime_store_new(impl_->engine, nullptr, nullptr);
@@ -188,6 +281,7 @@ void WasmBot::on_init(const game::Map& /*map*/, uint32_t faction_id) {
 
   auto* ctx = impl_->ctx();
   wasmtime_context_set_fuel(ctx, game::cfg::FUEL_STARTUP);
+  impl_->memory_gate.over_cap = false;
 
   wasmtime_val_t arg{};
   arg.kind   = WASMTIME_I32;
@@ -201,10 +295,15 @@ void WasmBot::on_init(const game::Map& /*map*/, uint32_t faction_id) {
   wasmtime_context_get_fuel(ctx, &remaining);
   last_metrics_.fuel_consumed = game::cfg::FUEL_STARTUP - remaining;
   last_metrics_.memory_bytes  = wasmtime_memory_data_size(ctx, &impl_->memory);
+  last_metrics_.fault         = classify_fault(err, trap, impl_->memory_gate.over_cap);
 
-  if (err || trap) {
-    last_error_ = drain_error(err, trap);
-    healthy_ = false; // init failure is permanent
+  // Any init overrun, memory included, is a load failure: the bot cannot play.
+  if (last_metrics_.fault != game::TickFault::None) {
+    std::string detail = drain_error(err, trap); // also frees err/trap
+    last_error_ = last_metrics_.fault == game::TickFault::OutOfMemory
+                      ? "init exceeded the memory cap"
+                      : detail;
+    healthy_ = false;
   }
 }
 
@@ -240,6 +339,7 @@ std::vector<game::Command> WasmBot::on_tick(const game::Snapshot& snap) {
 
   // Refuel and call on_tick.
   wasmtime_context_set_fuel(ctx, game::cfg::FUEL_PER_TICK);
+  impl_->memory_gate.over_cap = false;
 
   wasmtime_val_t result{};
   wasm_trap_t* trap = nullptr;
@@ -250,10 +350,12 @@ std::vector<game::Command> WasmBot::on_tick(const game::Snapshot& snap) {
   wasmtime_context_get_fuel(ctx, &remaining);
   last_metrics_.fuel_consumed = game::cfg::FUEL_PER_TICK - remaining;
   last_metrics_.memory_bytes  = wasmtime_memory_data_size(ctx, &impl_->memory);
+  last_metrics_.fault         = classify_fault(err, trap, impl_->memory_gate.over_cap);
 
-  if (err || trap) {
-    // Tick forfeit — log but stay healthy for next tick.
-    last_error_ = drain_error(err, trap);
+  if (last_metrics_.fault != game::TickFault::None) {
+    // Tick forfeit: commands are discarded, even if the call completed after a refused
+    // grow. The bot stays healthy and is called again next tick.
+    last_error_ = (err || trap) ? drain_error(err, trap) : "memory cap exceeded";
     return {};
   }
 

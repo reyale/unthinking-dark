@@ -4,8 +4,10 @@
 #include <array>
 #include <string>
 
-// Binary format (little-endian, all integers native-endian on x86-64):
-//   8 bytes  magic "UDREPLAY"
+// Binary format (little-endian, all integers native-endian on x86-64). The magic is
+// the format version: bump it ("UDREPLY3", ...) whenever the layout changes, so old
+// files are refused with a clear message instead of misread.
+//   8 bytes  magic "UDREPLY2"
 //   4 bytes  abi_version  (uint32_t)
 //   8 bytes  seed         (uint64_t)
 //   4 bytes  map_w        (int32_t)
@@ -19,16 +21,21 @@
 //   1 byte   name_a_len + name_a_len bytes (UTF-8, max cfg::MAX_PLAYER_NAME_LEN)
 //   1 byte   name_b_len + name_b_len bytes
 //   4 bytes  tick_cap   (uint32_t)
+//   8+8+8+8  init_fuel_a, init_fuel_b, init_mem_bytes_a, init_mem_bytes_b (uint64_t)
 //   --- tick stream (tag-byte framing, enables streaming writes) ---
 //   per tick: 0x01 (uint8_t) + 4 tick + 4 cmd_count_a + (cmd_count_a * sizeof(Command))
 //                                      + 4 cmd_count_b + (cmd_count_b * sizeof(Command))
+//             + 8 fuel_a + 8 fuel_b + 8 mem_bytes_a + 8 mem_bytes_b
+//             + 1 fault_a + 1 fault_b (TickFault)
 //   end:      0x00 (uint8_t) + 8 expected_hash + 4 outcome.winner.value + 1 outcome.reason
 
 namespace game {
 
 namespace {
 
-constexpr std::array<uint8_t, 8> MAGIC    = {'U', 'D', 'R', 'E', 'P', 'L', 'A', 'Y'};
+constexpr std::array<uint8_t, 8> MAGIC    = {'U', 'D', 'R', 'E', 'P', 'L', 'Y', '2'};
+// Format 1: before per-tick forfeit causes were recorded.
+constexpr std::array<uint8_t, 8> MAGIC_V1 = {'U', 'D', 'R', 'E', 'P', 'L', 'A', 'Y'};
 constexpr uint8_t TAG_TICK = 0x01;
 constexpr uint8_t TAG_END  = 0x00;
 
@@ -80,6 +87,8 @@ void write_tick_entry(FileWriter& out, const TickEntry& entry) {
   out.write_val(entry.fuel_b);
   out.write_val(entry.mem_bytes_a);
   out.write_val(entry.mem_bytes_b);
+  out.write_val(static_cast<uint8_t>(entry.fault_a));
+  out.write_val(static_cast<uint8_t>(entry.fault_b));
 }
 
 void write_footer(FileWriter& out, uint64_t expected_hash, const MatchResult& outcome) {
@@ -120,7 +129,12 @@ void write_replay(const ReplayLog& log, FileWriter& out) {
 
 ReplayLog read_replay(FileReader& in) {
   std::array<uint8_t, 8> magic{};
-  if (!in.read(magic.data(), 8) || magic != MAGIC)
+  if (!in.read(magic.data(), 8))
+    throw std::runtime_error("not a valid replay file (bad magic)");
+  if (magic == MAGIC_V1)
+    throw ReplayVersionError("replay uses an older file format (no forfeit records); "
+                             "re-record it with ud_run");
+  if (magic != MAGIC)
     throw std::runtime_error("not a valid replay file (bad magic)");
 
   ReplayLog log;
@@ -190,6 +204,8 @@ ReplayLog read_replay(FileReader& in) {
     entry.fuel_b      = in.read_val<uint64_t>();
     entry.mem_bytes_a = in.read_val<uint64_t>();
     entry.mem_bytes_b = in.read_val<uint64_t>();
+    entry.fault_a     = static_cast<TickFault>(in.read_val<uint8_t>());
+    entry.fault_b     = static_cast<TickFault>(in.read_val<uint8_t>());
     log.ticks.push_back(std::move(entry));
   }
 

@@ -145,6 +145,40 @@ TEST(ReplayIO, VersionMismatchThrows) {
   EXPECT_THROW(game::read_replay(mr), game::ReplayVersionError);
 }
 
+TEST(ReplayIO, OldFormatRefusedWithClearMessage) {
+  game::World w = make_test_world(1);
+  game::IdleBot a, b;
+  auto rec = game::run_match(w, a, 0, b, 1, 10);
+  game::MemoryWriter mw;
+  game::write_replay(rec.replay, mw);
+  const char v1[] = "UDREPLAY"; // format 1, before forfeits were recorded
+  std::copy(v1, v1 + 8, mw.data.begin());
+  game::MemoryReader mr(mw.data);
+  try {
+    game::read_replay(mr);
+    FAIL() << "format-1 replay should be refused";
+  } catch (const game::ReplayVersionError& e) {
+    EXPECT_NE(std::string(e.what()).find("re-record"), std::string::npos) << e.what();
+  }
+}
+
+TEST(ReplayIO, ForfeitsSurviveRoundTrip) {
+  game::World w = make_test_world(1);
+  game::IdleBot a, b;
+  auto rec = game::run_match(w, a, 0, b, 1, 10);
+  rec.replay.ticks[3].fault_a = game::TickFault::OutOfMemory;
+  rec.replay.ticks[5].fault_b = game::TickFault::OutOfFuel;
+  rec.replay.ticks[7].fault_a = game::TickFault::Trap;
+  game::MemoryWriter mw;
+  game::write_replay(rec.replay, mw);
+  game::MemoryReader mr(mw.data);
+  auto back = game::read_replay(mr);
+  for (size_t i = 0; i < back.ticks.size(); ++i) {
+    EXPECT_EQ(back.ticks[i].fault_a, rec.replay.ticks[i].fault_a) << i;
+    EXPECT_EQ(back.ticks[i].fault_b, rec.replay.ticks[i].fault_b) << i;
+  }
+}
+
 // ---- ReplayWriter streaming -------------------------------------------------
 
 TEST(ReplayWriter, StreamingMatchOutputRoundtrips) {

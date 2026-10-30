@@ -1,4 +1,5 @@
 #pragma once
+#include "bot_iface.hpp"
 #include "combat.hpp"
 #include "entity.hpp"
 #include "ids.hpp"
@@ -39,6 +40,9 @@ struct FrameState {
   // Combat during the tick that produced this frame (empty on the initial frame).
   std::vector<ShotEvent> shots;
   std::vector<KillEvent> kills;
+  // Per faction: non-None if that side forfeited the tick that produced this frame
+  // (its units stood still: commands discarded for fuel, memory or a trap).
+  std::array<TickFault, MAX_FACTIONS> forfeits{};
 };
 
 // Re-simulate a replay log and collect one FrameState per completed tick, plus

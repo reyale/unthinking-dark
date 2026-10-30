@@ -14,6 +14,7 @@ enum class UnitType : uint16_t {
   Interceptor = 1,
   Frigate     = 2,
   Artillery   = 3,
+  Battleship  = 4,
 };
 
 // Mirrors entity.hpp StructureType.

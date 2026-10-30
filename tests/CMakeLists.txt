@@ -32,6 +32,12 @@ target_compile_definitions(runner_tests PRIVATE
     SDK_EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/sdk/cpp/examples"
 )
 
+add_executable(profiler_tests test_profiler.cpp)
+target_link_libraries(profiler_tests PRIVATE profiler_lib GTest::gtest_main)
+target_compile_definitions(profiler_tests PRIVATE
+    SDK_EXAMPLES_DIR="${CMAKE_SOURCE_DIR}/sdk/cpp/examples"
+)
+
 # ---- SDK wasm bot compilation ------------------------------------------------
 # Compiles sdk/cpp/examples/*.cpp → *.wasm via clang++-18 as part of the normal
 # build. runner_tests depends on these outputs so they are always fresh before
@@ -47,10 +53,14 @@ if(CLANGPP18)
     OUTPUT
       ${_EX}/rush_bot.wasm
       ${_EX}/idle_bot.wasm
+      ${_EX}/quadratic_bot.wasm
+      ${_EX}/leaky_bot.wasm
     COMMAND ${CMAKE_MAKE_PROGRAM} -C ${_SDK} examples
     DEPENDS
       ${_EX}/rush_bot.cpp
       ${_EX}/idle_bot.cpp
+      ${_EX}/quadratic_bot.cpp
+      ${_EX}/leaky_bot.cpp
       ${_SDK}/include/ud/types.hpp
       ${_SDK}/include/cstddef
       ${_SDK}/include/cstdint
@@ -64,9 +74,12 @@ if(CLANGPP18)
   add_custom_target(sdk_bots_wasm DEPENDS
     ${_EX}/rush_bot.wasm
     ${_EX}/idle_bot.wasm
+    ${_EX}/quadratic_bot.wasm
+    ${_EX}/leaky_bot.wasm
   )
 
   add_dependencies(runner_tests sdk_bots_wasm)
+  add_dependencies(profiler_tests sdk_bots_wasm)
 else()
   message(WARNING "clang++-18 not found — SDK wasm bots will not be compiled; WasmBot.Sdk* tests will skip")
 endif()
@@ -86,3 +99,4 @@ include(GoogleTest)
 gtest_discover_tests(engine_tests)
 gtest_discover_tests(runner_tests)
 gtest_discover_tests(map_tests)
+gtest_discover_tests(profiler_tests)

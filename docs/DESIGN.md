@@ -56,15 +56,21 @@ These are non-negotiable; each one silently breaks replay if violated.
   initialize = upload/validation failure (it cannot play). Distinct from a per-tick forfeit.
 - **Linear memory cap** per instance, fixed and identical for both bots, pinned in match
   config. (v1 placeholder: ~64 MB — tune.) Remember total server budget ≈ N_instances × cap.
+  Enforced by the runner: a `memory.grow` past the cap is refused (returns -1 to the bot,
+  so memory never exceeds the cap) and counts as a memory violation for that call. During
+  init that is a startup overrun (cannot play); during a tick it is a forfeit (§2.4).
 
 ### 2.4 Resource-violation handling (MUST be unified)
 - Any in-match fuel exhaustion, OOM, panic, or trap → **the bot forfeits that tick**:
-  its commands for the tick are treated as empty. Units fall back to **repeat-last-order
-  / idle**. The match continues. No hard loss.
+  its commands for the tick are discarded (even if the call went on to return some), so
+  that side **stalls** — its units don't move, attack or build that tick. The match
+  continues. No hard loss. Only that tick is lost; the bot is called normally next tick.
 - Loss is always **emergent** from board state (a perpetually idle fleet gets
   out-maneuvered and loses), never a direct rules penalty for resource use.
 - **Forfeited ticks are first-class statistics.** Per forfeited tick, record:
-  `tick`, `faction_id`, `cause ∈ {fuel, memory, trap}`, `units_affected`. Aggregate per
+  `tick`, `faction_id`, `cause ∈ {fuel, memory, trap}`, `units_affected`. (Recorded per
+  tick in the replay as each bot's `TickFault`; `units_affected` is that side's unit count
+  in the frame, derived at playback rather than stored.) Aggregate per
   bot over time. Used for author feedback, spectator drama, and balance tuning.
 - **Inspection of game state is free** (no fuel surcharge): the snapshot is bulk-copied
   into linear memory, so reading it is ordinary memory access. Fuel meters *reasoning*,

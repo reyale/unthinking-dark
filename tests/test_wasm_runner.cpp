@@ -598,3 +598,158 @@ TEST(SdkLifecycle, FuelAndMemoryRecordedInReplay) {
     EXPECT_EQ(entry.mem_bytes_b, rec.replay.init_mem_bytes_b);
   }
 }
+
+// ---- Memory cap (cfg::MEMORY_CAP_MB) ----------------------------------------
+//
+// A grow past the cap is refused (memory.grow returns -1) and that tick is forfeited:
+// its commands are discarded even if the call completed. Only that tick: the bot's
+// memory never actually exceeds the cap, so the next tick plays normally.
+
+static constexpr uint32_t kCapPages = game::cfg::MEMORY_CAP_MB * 16; // 64 KiB pages
+
+// Writes a command, then asks for `@PAGES@` more pages, then returns 1 command.
+// Records memory.grow's result in a global and reports it as ax on the next call.
+static std::string grow_wat(uint32_t pages, bool only_even_ticks) {
+  std::string wat = R"wat(
+(module
+  (memory (export "memory") 6)
+  (global (export "SNAPSHOT_ADDR") i32 (i32.const 0))
+  (global (export "COMMAND_ADDR")  i32 (i32.const 327680))
+  (global $last (mut i32) (i32.const 12345))
+  (func (export "abi_version") (result i32) i32.const @ABI@)
+  (func (export "init") (param i32))
+  (func (export "on_tick") (result i32)
+    (i32.store (i32.const 327680) (i32.const 57005))   ;; unit_id
+    (i32.store (i32.const 327688) (global.get $last))  ;; ax = previous grow result
+    (if (i32.or (i32.const @ALWAYS@) (i32.eqz (i32.rem_u (i32.load (i32.const 0)) (i32.const 2))))
+      (then (global.set $last (memory.grow (i32.const @PAGES@)))))
+    (i32.const 1))
+)
+)wat";
+  wat.replace(wat.find("@PAGES@"), 7, std::to_string(pages));
+  wat.replace(wat.find("@ALWAYS@"), 8, only_even_ticks ? "0" : "1");
+  return wat;
+}
+
+TEST(WasmBot, GrowPastMemoryCapForfeitsTheTick) {
+  runner::WasmBot bot(to_wasm(grow_wat(kCapPages, false)));
+  ASSERT_TRUE(bot.healthy()) << bot.last_error();
+  bot.on_init(make_world().map, 0);
+  const uint64_t before = bot.last_metrics().memory_bytes;
+
+  auto cmds = bot.on_tick(make_snap());
+  EXPECT_TRUE(cmds.empty()) << "commands discarded even though the call completed";
+  EXPECT_EQ(bot.last_metrics().fault, game::TickFault::OutOfMemory);
+  EXPECT_EQ(bot.last_metrics().memory_bytes, before) << "the grow was refused";
+  EXPECT_TRUE(bot.healthy());
+}
+
+TEST(WasmBot, MemoryForfeitIsOnlyForThatTick) {
+  runner::WasmBot bot(to_wasm(grow_wat(kCapPages, true)));
+  ASSERT_TRUE(bot.healthy()) << bot.last_error();
+  bot.on_init(make_world().map, 0);
+
+  EXPECT_TRUE(bot.on_tick(make_snap(0)).empty());
+  EXPECT_EQ(bot.last_metrics().fault, game::TickFault::OutOfMemory);
+
+  auto cmds = bot.on_tick(make_snap(1)); // odd tick: no grow attempt
+  ASSERT_EQ(cmds.size(), 1u);
+  EXPECT_EQ(bot.last_metrics().fault, game::TickFault::None);
+  EXPECT_EQ(cmds[0].unit_id, 57005u);
+  EXPECT_EQ(cmds[0].ax, -1) << "the bot saw memory.grow fail with -1 and kept running";
+}
+
+TEST(WasmBot, GrowingExactlyToTheCapIsAllowed) {
+  runner::WasmBot bot(to_wasm(grow_wat(kCapPages - 6, false))); // 6 initial pages
+  ASSERT_TRUE(bot.healthy()) << bot.last_error();
+  bot.on_init(make_world().map, 0);
+  EXPECT_EQ(bot.on_tick(make_snap()).size(), 1u);
+  EXPECT_EQ(bot.last_metrics().fault, game::TickFault::None);
+  EXPECT_EQ(bot.last_metrics().memory_bytes, uint64_t{game::cfg::MEMORY_CAP_MB} << 20);
+
+  EXPECT_TRUE(bot.on_tick(make_snap()).empty()) << "now at the cap, any further grow is over";
+  EXPECT_EQ(bot.last_metrics().fault, game::TickFault::OutOfMemory);
+}
+
+TEST(WasmBot, SmallGrowIsNotAFault) {
+  runner::WasmBot bot(to_wasm(grow_wat(10, false)));
+  ASSERT_TRUE(bot.healthy()) << bot.last_error();
+  bot.on_init(make_world().map, 0);
+  EXPECT_EQ(bot.on_tick(make_snap()).size(), 1u);
+  EXPECT_EQ(bot.last_metrics().fault, game::TickFault::None);
+  EXPECT_EQ(bot.last_metrics().memory_bytes, 16u * 65536);
+}
+
+TEST(WasmBot, InitGrowPastMemoryCapFailsLoad) {
+  std::string wat = grow_wat(kCapPages, false);
+  wat.replace(wat.find("(func (export \"init\") (param i32))"),
+              std::string("(func (export \"init\") (param i32))").size(),
+              "(func (export \"init\") (param i32) (drop (memory.grow (i32.const " +
+                  std::to_string(kCapPages) + "))))");
+  runner::WasmBot bot(to_wasm(wat));
+  ASSERT_TRUE(bot.healthy()) << bot.last_error();
+  bot.on_init(make_world().map, 0);
+  EXPECT_FALSE(bot.healthy()) << "an init overrun is a load failure";
+  EXPECT_EQ(bot.last_metrics().fault, game::TickFault::OutOfMemory);
+}
+
+TEST(WasmBot, InitialMemoryOverCapRejectedAtLoad) {
+  std::string wat(IDLE_WAT);
+  wat.replace(wat.find("(memory (export \"memory\") 6)"), 28,
+              "(memory (export \"memory\") " + std::to_string(kCapPages + 1) + ")");
+  runner::WasmBot bot(to_wasm(wat));
+  EXPECT_FALSE(bot.healthy());
+  EXPECT_FALSE(bot.last_error().empty());
+}
+
+TEST(WasmBot, FuelAndTrapForfeitsCarryTheirCause) {
+  runner::WasmBot hog(to_wasm(TICK_FUEL_HOG_WAT));
+  hog.on_init(make_world().map, 0);
+  hog.on_tick(make_snap());
+  EXPECT_EQ(hog.last_metrics().fault, game::TickFault::OutOfFuel);
+
+  runner::WasmBot crash(to_wasm(TRAP_WAT));
+  crash.on_init(make_world().map, 0);
+  crash.on_tick(make_snap());
+  EXPECT_EQ(crash.last_metrics().fault, game::TickFault::Trap);
+
+  runner::WasmBot fine(to_wasm(IDLE_WAT));
+  fine.on_init(make_world().map, 0);
+  fine.on_tick(make_snap());
+  EXPECT_EQ(fine.last_metrics().fault, game::TickFault::None);
+}
+
+// End to end: the over-cap side stalls every tick, and the forfeit is recorded in the
+// replay log, survives the replay file, and reaches the frames the viewer draws.
+TEST(WasmBot, MemoryForfeitsAreRecordedThroughReplayAndFrames) {
+  auto w = make_world();
+  runner::WasmBot hog(to_wasm(grow_wat(kCapPages, false)));
+  game::IdleBot idle;
+  ASSERT_TRUE(hog.healthy()) << hog.last_error();
+  auto rec = game::run_match(w, hog, 0, idle, 1, 20);
+
+  ASSERT_EQ(rec.replay.ticks.size(), 20u);
+  for (const auto& t : rec.replay.ticks) {
+    EXPECT_EQ(t.fault_a, game::TickFault::OutOfMemory) << "tick " << t.tick;
+    EXPECT_TRUE(t.raw_a.empty()) << "stalled: no commands reach the engine";
+    EXPECT_EQ(t.fault_b, game::TickFault::None);
+  }
+
+  game::MemoryWriter mw;
+  game::write_replay(rec.replay, mw);
+  game::MemoryReader mr(mw.data);
+  const auto back = game::read_replay(mr);
+  ASSERT_EQ(back.ticks.size(), rec.replay.ticks.size());
+  for (size_t i = 0; i < back.ticks.size(); ++i) {
+    EXPECT_EQ(back.ticks[i].fault_a, game::TickFault::OutOfMemory);
+    EXPECT_EQ(back.ticks[i].fault_b, game::TickFault::None);
+  }
+  EXPECT_EQ(game::replay(back), rec.replay.expected_hash);
+
+  const auto frames = game::replay_frames(back);
+  EXPECT_EQ(frames[0].forfeits[0], game::TickFault::None) << "initial frame has no tick";
+  for (size_t f = 1; f < frames.size(); ++f) {
+    EXPECT_EQ(frames[f].forfeits[0], game::TickFault::OutOfMemory) << "frame " << f;
+    EXPECT_EQ(frames[f].forfeits[1], game::TickFault::None);
+  }
+}

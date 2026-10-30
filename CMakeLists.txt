@@ -81,6 +81,7 @@ add_subdirectory(maps)
 add_subdirectory(viz)
 add_subdirectory(tools)
 add_subdirectory(runner)
+add_subdirectory(profiler)
 
 # ---------------------------------------------------------------------------
 # Tests

@@ -30,7 +30,8 @@ all: $(OUT)
 $(OUT): $(BOT) $(HEADERS)
 	$(CLANG) $(CXXFLAGS) $(LDFLAGS) -o $@ $<
 
-examples: examples/idle_bot.wasm examples/rush_bot.wasm
+examples: examples/idle_bot.wasm examples/rush_bot.wasm \
+          examples/quadratic_bot.wasm examples/leaky_bot.wasm
 
 HEADERS = include/ud/types.hpp ../../engine/src/abi.hpp ../../engine/src/config.hpp
 

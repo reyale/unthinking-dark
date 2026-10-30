@@ -61,17 +61,31 @@ MatchRecord run_match(World& world, Bot& bot_a, uint32_t faction_a, Bot& bot_b, 
     Snapshot snap_a = build_snapshot(world, faction_a, tick_cap);
     Snapshot snap_b = build_snapshot(world, faction_b, tick_cap);
 
-    std::vector<Command> raw_a = bot_a.healthy() ? bot_a.on_tick(snap_a) : std::vector<Command>{};
-    std::vector<Command> raw_b = bot_b.healthy() ? bot_b.on_tick(snap_b) : std::vector<Command>{};
+    // Metrics only from bots actually called this tick; an unhealthy bot isn't called
+    // and would otherwise report its previous call's numbers.
+    auto call = [](Bot& bot, const Snapshot& snap, BotMetrics& m) {
+      if (!bot.healthy()) {
+        m = {};
+        return std::vector<Command>{};
+      }
+      auto cmds = bot.on_tick(snap);
+      m = bot.last_metrics();
+      return cmds;
+    };
+    BotMetrics ma, mb;
+    std::vector<Command> raw_a = call(bot_a, snap_a, ma);
+    std::vector<Command> raw_b = call(bot_b, snap_b, mb);
 
     TickEntry entry;
     entry.tick        = world.tick;
     entry.raw_a       = raw_a;
     entry.raw_b       = raw_b;
-    entry.fuel_a      = bot_a.last_metrics().fuel_consumed;
-    entry.fuel_b      = bot_b.last_metrics().fuel_consumed;
-    entry.mem_bytes_a = bot_a.last_metrics().memory_bytes;
-    entry.mem_bytes_b = bot_b.last_metrics().memory_bytes;
+    entry.fuel_a      = ma.fuel_consumed;
+    entry.fuel_b      = mb.fuel_consumed;
+    entry.mem_bytes_a = ma.memory_bytes;
+    entry.mem_bytes_b = mb.memory_bytes;
+    entry.fault_a     = ma.fault;
+    entry.fault_b     = mb.fault;
     rec.replay.ticks.push_back(entry);
     if (writer)
       writer->write_tick(entry);

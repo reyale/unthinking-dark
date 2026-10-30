@@ -8,7 +8,12 @@ Wasmtime host that executes untrusted `.wasm` bots inside the engine.
 module and running it under [Wasmtime](https://wasmtime.dev/) with:
 
 - **Fuel metering** — each tick is budgeted; exhaustion forfeits that tick
+- **Memory cap** — `MEMORY_CAP_MB` enforced via a host memory creator; a grow past it is
+  refused and forfeits that tick
 - **Determinism flags** — threads off, SIMD off, relaxed SIMD off, NaN canonicalization on
+
+**Linux only.** The capped linear memory is reserved and committed with `mmap`/`mprotect`.
+`runner/CMakeLists.txt` stops configuration on any other platform.
 - **Buffer validation** — export addresses and memory size checked at load time
 
 ## Bot ABI contract

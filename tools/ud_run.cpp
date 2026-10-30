@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <stdexcept>
 #include <string>
 
@@ -166,6 +167,28 @@ int main(int argc, char** argv) {
         (unsigned long long)peak_fa, (unsigned long long)peak_fb);
     printf("  Memory peak:   A=%-10llu B=%llu bytes\n",
         (unsigned long long)peak_ma, (unsigned long long)peak_mb);
+
+    // Forfeited ticks: that side's commands were discarded and its units stood still.
+    auto forfeits = [&](game::TickFault game::TickEntry::*fault, const char* side) {
+      std::map<game::TickFault, uint32_t> by_cause;
+      uint32_t first = 0, total = 0;
+      for (const auto& t : log.ticks) {
+        if (t.*fault == game::TickFault::None) continue;
+        if (total++ == 0) first = t.tick;
+        ++by_cause[t.*fault];
+      }
+      printf("  Forfeits:      %s=", side);
+      if (total == 0) { printf("none\n"); return; }
+      printf("%u ticks (", total);
+      const char* sep = "";
+      for (const auto& [cause, n] : by_cause) {
+        printf("%s%u %s", sep, n, game::tick_fault_name(cause));
+        sep = ", ";
+      }
+      printf("), first at tick %u\n", first);
+    };
+    forfeits(&game::TickEntry::fault_a, "A");
+    forfeits(&game::TickEntry::fault_b, "B");
   }
 
   // Write replay

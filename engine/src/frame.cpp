@@ -73,6 +73,8 @@ std::vector<FrameState> replay_frames(const ReplayLog& log) {
     FrameState fs = capture(world, result);
     fs.shots = std::move(combat.shots);
     fs.kills = std::move(combat.kills);
+    if (log.faction_a < MAX_FACTIONS) fs.forfeits[log.faction_a] = entry.fault_a;
+    if (log.faction_b < MAX_FACTIONS) fs.forfeits[log.faction_b] = entry.fault_b;
     frames.push_back(std::move(fs));
     if (result)
       break;

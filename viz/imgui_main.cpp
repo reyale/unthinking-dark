@@ -214,6 +214,7 @@ struct App {
   // unit_facing[f][i]: facing of frames[f].units[i], from its last move.
   std::vector<std::vector<uint8_t>> unit_facing;
   FxState           fx;
+  uint32_t          forfeit_total[game::MAX_FACTIONS]{}; // stalled ticks per side, whole replay
   std::string       shapes_path = UD_DEFAULT_SHAPES_PATH;
   std::filesystem::file_time_type shapes_mtime{};
   double            shapes_checked_t = 0.0;
@@ -292,6 +293,10 @@ static void try_load(const char* path) {
     g.frames = game::replay_frames(log);
     compute_unit_facings();
     g.fx     = FxState{};
+    for (auto& n : g.forfeit_total) n = 0;
+    for (const auto& f : g.frames)
+      for (int i = 0; i < game::MAX_FACTIONS; ++i)
+        if (f.forfeits[static_cast<size_t>(i)] != game::TickFault::None) ++g.forfeit_total[i];
     g.cur    = 0;
     g.total  = static_cast<int>(g.frames.size());
     g.loaded = true;
@@ -735,6 +740,15 @@ static void draw_playback_bar(const game::FrameState& fr) {
   ImGui::SameLine();
   ImGui::TextColored(kFactionB, "B  e:%-4d a:%d",
       fr.resources[1].energy, fr.resources[1].alloy);
+
+  // A side that forfeited this tick had its commands discarded: its units stood still.
+  for (int i = 0; i < game::MAX_FACTIONS; ++i) {
+    const auto fault = fr.forfeits[static_cast<size_t>(i)];
+    if (fault == game::TickFault::None) continue;
+    ImGui::SameLine();
+    ImGui::TextColored({1.0f, 0.3f, 0.25f, 1.0f}, " | %s STALLED (%s) [%u in replay]",
+                       i == 0 ? "A" : "B", game::tick_fault_name(fault), g.forfeit_total[i]);
+  }
 
   if (fr.result.has_value()) {
     const auto& res = *fr.result;

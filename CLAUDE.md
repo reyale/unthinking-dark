@@ -10,7 +10,7 @@ Build order and acceptance criteria: `docs/IMPLEMENTATION_PLAN.md`.
 
 ## Current State
 
-**Phases 1–4 complete. Phase 5 partially complete. 192/192 tests passing.**
+**Phases 1–5 complete. 236/236 tests passing.**
 
 | Phase | Status | Notes |
 |-------|--------|-------|
@@ -18,7 +18,7 @@ Build order and acceptance criteria: `docs/IMPLEMENTATION_PLAN.md`.
 | 2 — Visualizer | ✅ Done | Terminal, ncurses, Dear ImGui (isometric), browser WASM |
 | 3 — Territory | ✅ Done | Voronoi partition, descending win threshold, Claim Node fragility |
 | 4 — WASM runner | ✅ Done | Wasmtime C API in `runner/`; `ud_run` CLI in `tools/` |
-| 5 — Bot SDK | 🔲 Partial | C++ template + ABI headers in `sdk/cpp/`; no profiler yet |
+| 5 — Bot SDK | ✅ Done | C++ template + ABI headers in `sdk/cpp/`; `ud_profile` deterministic profiler in `profiler/` |
 | 6 — Tournament | 🔲 Not started | |
 | 7 — Calibration | 🔲 Not started | |
 
@@ -37,6 +37,10 @@ cd build && ctest --output-on-failure
 ```
 
 Requires CMake ≥ 3.20 (system cmake is 3.16; use `~/.local/bin/cmake` which is 4.x).
+
+**Linux only** for the native build: the WASM runner's capped bot memory uses `mmap`/`mprotect`, and
+`runner/CMakeLists.txt` fails configuration elsewhere. (The Emscripten viewer build doesn't include
+the runner and is unaffected.)
 
 ASan + UBSan are enabled in Debug builds. Never suppress them — a sanitizer failure is a
 determinism bug, not a false positive.
@@ -90,6 +94,17 @@ For LSP support: `ln -s build/compile_commands.json compile_commands.json`
 validates ABI version before first tick. `load_wasm_file()` reads bytes; `WasmBot::healthy()`
 must be true before use.
 
+**Forfeits:** a tick where a bot runs out of fuel, traps, or tries to grow memory past
+`cfg::MEMORY_CAP_MB` is forfeited: its commands are discarded and that side stalls for the tick.
+The cap is enforced by a host memory creator in `wasm_bot.cpp` (the only C API hook that sees grow
+requests); the refused grow returns -1 and the memory never exceeds the cap. The cause is
+`BotMetrics::fault` (`TickFault::{None,OutOfFuel,OutOfMemory,Trap}`), stored per tick per bot in
+`TickEntry::fault_a/b`, carried into `FrameState::forfeits`, shown in the viewer as "STALLED", and
+summarised by `ud_run`. `TickFault` values are written to replay files: append only.
+
+**Replay file format** is versioned by its magic (`UDREPLY2`), separately from `ABI_VERSION`.
+Change the layout → bump the magic and refuse the old one with a clear message (see `replay_io.cpp`).
+
 ### tools/ — CLI utilities
 
 | Binary | Purpose |
@@ -118,9 +133,21 @@ CMake cache variable); override per run with `--shapes <file>`. `ud_viz_imgui` h
 ImGui build fetches Dear ImGui v1.91.6 via CMake FetchContent. The browser build uses the same
 source; run `cmake -B build && cmake --build build` first to populate `build/_deps/`.
 
+### profiler/ — deterministic fuel/memory profiler (DESIGN §10)
+
+`profiler_lib` + `ud_profile <bot.wasm> [--scenario NAME]... [--ticks] [--list]`. Each scenario
+is a real match through `game::run_match` with a `runner::WasmBot`, so reported fuel equals the
+match meter exactly (`Profiler.FuelAndMemoryMatchARealMatchExactly` guards this — never fork the
+metering path). The opponent is passive and its Command Core sits in an asteroid ring beyond
+every weapon's range, so scenarios always run their full length. Suite: `early_game`,
+`army_scaling/{10,50,200,256}`, `dense_battle`, `wide_visibility`, `max_legal`, `long_running`
+(memory curve for leaks). Exit status 2 on any forfeit.
+
 ### sdk/cpp/ — C++ bot template
 
-ABI headers in `sdk/cpp/include/`. Bot template in `sdk/cpp/bot_template.cpp`. Build with the
+ABI headers in `sdk/cpp/include/`. Bot template in `sdk/cpp/bot_template.cpp`. Examples:
+`idle_bot`, `rush_bot`, plus profiler demonstrations `quadratic_bot` (deliberately O(n²)) and
+`leaky_bot` (deliberately leaks memory). Build with the
 `sdk/cpp/Makefile` (requires `wasm32` clang toolchain). Exports `abi_version` symbol for runner
 version check.
 
@@ -173,7 +200,6 @@ Compile flags enforcing these: `-ffp-contract=off -fno-fast-math` (in `cmake/Com
 
 ## What Is NOT Built Yet
 
-- **Phase 5 remainder:** deterministic profiler, local tester CLI
 - **Phase 6:** Tournament/ladder harness, stats aggregation
 - **Phase 7:** Balance calibration pass
 
