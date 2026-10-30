@@ -92,6 +92,11 @@ static void spend(World& world, const ValidatedCommands& cmds_a, const Validated
         cost_a = cfg::FACTORY_COST_A;
       } else
         continue;
+      // Checked here, after movement, rather than in validation: a tile vacated this
+      // tick is buildable, and one just moved onto is not. Commands run in unit-id
+      // order, so of two builds on one tile the lower id wins.
+      if (!world.tile_free({cmd.ax, cmd.ay}))
+        continue;
       auto& res = world.res(builder->faction);
       if (res.energy < cost_e || res.alloy < cost_a)
         continue;
@@ -102,6 +107,8 @@ static void spend(World& world, const ValidatedCommands& cmds_a, const Validated
     } else if (kind == CommandKind::DeployClaim) {
       const Unit* builder = world.find_unit(uid);
       if (!builder)
+        continue;
+      if (!world.tile_free({cmd.ax, cmd.ay}))
         continue;
       auto& res = world.res(builder->faction);
       if (res.alloy < cfg::CLAIM_COST_A)

@@ -1,4 +1,7 @@
 #include <gtest/gtest.h>
+#include <optional>
+#include "statehash.hpp"
+#include "tick.hpp"
 #include "command.hpp"
 #include "config.hpp"
 #include "economy.hpp"
@@ -328,6 +331,153 @@ TEST(Economy, DeployClaimNodeSpawnsClaimNode) {
   for (const auto& [sid, s] : w.structures)
     if (s.type == game::StructureType::ClaimNode) found = true;
   EXPECT_TRUE(found);
+}
+
+// ---- Build / DeployClaim need a free tile ----------------------------------
+
+static game::Command place_cmd(game::UnitId builder, game::CommandKind kind, game::Vec2 at) {
+  game::Command c = make_cmd(builder.value, kind);
+  c.ax = at.x;
+  c.ay = at.y;
+  if (kind == game::CommandKind::Build)
+    c.aux = static_cast<uint16_t>(game::StructureType::Factory);
+  return c;
+}
+
+static int count_structures(const game::World& w, game::StructureType t) {
+  int n = 0;
+  for (const auto& [sid, s] : w.structures)
+    n += (s.type == t);
+  return n;
+}
+
+struct PlaceCase {
+  game::CommandKind   kind;
+  game::StructureType made;
+  int32_t             alloy_cost;
+};
+static const PlaceCase kPlaceCases[] = {
+  {game::CommandKind::Build,       game::StructureType::Factory,   game::cfg::FACTORY_COST_A},
+  {game::CommandKind::DeployClaim, game::StructureType::ClaimNode, game::cfg::CLAIM_COST_A},
+};
+
+TEST(Economy, PlacementOnUnitTileRejectedAndFree) {
+  for (const auto& pc : kPlaceCases) {
+    auto w = make_world();
+    game::UnitId builder = w.spawn_unit({0}, game::UnitType::Drone, {3, 3}).id;
+    w.spawn_unit({1}, game::UnitType::Interceptor, {4, 3}); // squatter, any faction
+    w.res({0}).alloy = 100;
+    game::ValidatedCommands cmds, empty;
+    cmds.emplace(builder, place_cmd(builder, pc.kind, {4, 3}));
+    game::run_economy(w, cmds, empty);
+    EXPECT_EQ(count_structures(w, pc.made), 0);
+    EXPECT_EQ(w.res({0}).alloy, 100) << "a refused placement costs nothing";
+  }
+}
+
+TEST(Economy, PlacementOnBuilderOwnTileRejected) {
+  for (const auto& pc : kPlaceCases) {
+    auto w = make_world();
+    game::UnitId builder = w.spawn_unit({0}, game::UnitType::Drone, {3, 3}).id;
+    w.res({0}).alloy = 100;
+    game::ValidatedCommands cmds, empty;
+    cmds.emplace(builder, place_cmd(builder, pc.kind, {3, 3}));
+    game::run_economy(w, cmds, empty);
+    EXPECT_EQ(count_structures(w, pc.made), 0);
+    EXPECT_EQ(w.res({0}).alloy, 100);
+  }
+}
+
+TEST(Economy, PlacementOnStructureTileRejectedAndLookupIntact) {
+  for (const auto& pc : kPlaceCases) {
+    auto w = make_world();
+    game::StructureId core = w.spawn_structure({1}, game::StructureType::CommandCore, {4, 3}).id;
+    game::UnitId builder = w.spawn_unit({0}, game::UnitType::Drone, {3, 3}).id;
+    w.res({0}).alloy = 100;
+    game::ValidatedCommands cmds, empty;
+    cmds.emplace(builder, place_cmd(builder, pc.kind, {4, 3}));
+    game::run_economy(w, cmds, empty);
+    EXPECT_EQ(w.structures.size(), 1u);
+    EXPECT_EQ(w.res({0}).alloy, 100);
+    ASSERT_EQ(w.structure_by_pos.count({4, 3}), 1u);
+    EXPECT_EQ(w.structure_by_pos.at({4, 3}), core);
+  }
+}
+
+TEST(Economy, PlacementOnAsteroidRejected) {
+  for (const auto& pc : kPlaceCases) {
+    auto w = make_world();
+    w.map.set_terrain({4, 3}, game::Terrain::Asteroid, 0);
+    game::UnitId builder = w.spawn_unit({0}, game::UnitType::Drone, {3, 3}).id;
+    w.res({0}).alloy = 100;
+    game::ValidatedCommands cmds, empty;
+    cmds.emplace(builder, place_cmd(builder, pc.kind, {4, 3}));
+    game::run_economy(w, cmds, empty);
+    EXPECT_EQ(count_structures(w, pc.made), 0);
+    EXPECT_EQ(w.res({0}).alloy, 100);
+  }
+}
+
+TEST(Economy, TwoPlacementsOnOneTileLowerIdWins) {
+  for (const auto& pc : kPlaceCases) {
+    auto w = make_world();
+    game::UnitId first  = w.spawn_unit({0}, game::UnitType::Drone, {3, 3}).id;
+    game::UnitId second = w.spawn_unit({0}, game::UnitType::Drone, {5, 3}).id;
+    w.res({0}).alloy = 100;
+    game::ValidatedCommands cmds, empty;
+    cmds.emplace(first,  place_cmd(first,  pc.kind, {4, 3}));
+    cmds.emplace(second, place_cmd(second, pc.kind, {4, 3}));
+    game::run_economy(w, cmds, empty);
+    EXPECT_EQ(count_structures(w, pc.made), 1);
+    EXPECT_EQ(w.res({0}).alloy, 100 - pc.alloy_cost) << "only the winner pays";
+  }
+}
+
+TEST(Economy, BuildAcrossFactionsSameTileOnlyOneStands) {
+  auto w = make_world();
+  game::UnitId a = w.spawn_unit({0}, game::UnitType::Drone, {3, 3}).id;
+  game::UnitId b = w.spawn_unit({1}, game::UnitType::Drone, {5, 3}).id;
+  w.res({0}).alloy = 100;
+  w.res({1}).alloy = 100;
+  game::ValidatedCommands cmds_a, cmds_b;
+  cmds_a.emplace(a, place_cmd(a, game::CommandKind::DeployClaim, {4, 3}));
+  cmds_b.emplace(b, place_cmd(b, game::CommandKind::DeployClaim, {4, 3}));
+  game::run_economy(w, cmds_a, cmds_b);
+  ASSERT_EQ(w.structures.size(), 1u);
+  EXPECT_EQ(w.structures.begin()->second.faction.value, 0u) << "lower unit id resolves first";
+  EXPECT_EQ(w.res({0}).alloy, 100 - game::cfg::CLAIM_COST_A);
+  EXPECT_EQ(w.res({1}).alloy, 100);
+}
+
+// Free-tile check happens after movement, inside the same tick.
+static std::optional<game::MatchResult> tick_raw(game::World& w, std::vector<game::Command> a) {
+  game::StateHash h;
+  return game::run_tick_phases(w, a, 0, {}, 1, game::cfg::TICK_CAP, h);
+}
+
+TEST(Economy, BuildOnTileVacatedThisTickSucceeds) {
+  auto w = make_world();
+  game::UnitId mover   = w.spawn_unit({0}, game::UnitType::Frigate, {4, 3}).id;
+  game::UnitId builder = w.spawn_unit({0}, game::UnitType::Drone, {3, 3}).id;
+  w.res({0}).alloy = 100;
+  game::Command mv = make_cmd(mover.value, game::CommandKind::Move);
+  mv.ax = 4; mv.ay = 6;
+  tick_raw(w, {mv, place_cmd(builder, game::CommandKind::Build, {4, 3})});
+  EXPECT_NE(w.find_unit(mover)->pos, (game::Vec2{4, 3}));
+  EXPECT_EQ(count_structures(w, game::StructureType::Factory), 1);
+}
+
+TEST(Economy, BuildOnTileEnteredThisTickFails) {
+  auto w = make_world();
+  game::UnitId mover   = w.spawn_unit({0}, game::UnitType::Frigate, {4, 4}).id;
+  game::UnitId builder = w.spawn_unit({0}, game::UnitType::Drone, {3, 3}).id;
+  w.res({0}).alloy = 100;
+  game::Command mv = make_cmd(mover.value, game::CommandKind::Move);
+  mv.ax = 4; mv.ay = 3;
+  tick_raw(w, {mv, place_cmd(builder, game::CommandKind::Build, {4, 3})});
+  EXPECT_EQ(w.find_unit(mover)->pos, (game::Vec2{4, 3}));
+  EXPECT_EQ(count_structures(w, game::StructureType::Factory), 0);
+  EXPECT_EQ(w.res({0}).alloy, 100);
 }
 
 TEST(Economy, FactoryWithoutQueueDoesNothing) {

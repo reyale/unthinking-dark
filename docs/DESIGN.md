@@ -187,6 +187,8 @@ for step in 1..=N:
 - Harvest (Drones on/adjacent to resource nodes) credits `energy` / `alloy`.
 - Spend resolves in deterministic id order: builds, production, claim deployment; costs
   deducted. Insufficient resources → action fails (logged).
+- Build and DeployClaim need a free target tile at this point (after movement): passable,
+  no structure, no living unit. Otherwise the action fails and nothing is deducted.
 
 ### Phase 5 — Spawn / Upkeep
 - Newly produced ships appear on the first free tile adjacent to their Factory, checked
