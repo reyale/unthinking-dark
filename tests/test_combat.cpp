@@ -261,3 +261,91 @@ TEST(Combat, ArtilleryTargetsStructureWithSplash) {
 
   EXPECT_LT(fac.hp, game::cfg::FACTORY_HP);
 }
+
+// ---- Combat log (presentation only) --------------------------------------
+
+TEST(CombatLog, RecordsFirstStrikeBeforeSimultaneous) {
+  auto w = make_combat_world();
+  game::UnitId frigate_id = w.spawn_unit({0}, game::UnitType::Frigate, {5, 5}).id;
+  game::UnitId inter_id = w.spawn_unit({1}, game::UnitType::Interceptor, {6, 5}).id;
+
+  game::CombatLog log;
+  game::run_combat(w, attack_cmd(frigate_id), attack_cmd(inter_id), &log);
+
+  ASSERT_EQ(log.shots.size(), 2u);
+  const auto& fs = log.shots[0];
+  EXPECT_EQ(fs.attacker, frigate_id);
+  EXPECT_TRUE(fs.first_strike);
+  EXPECT_FALSE(fs.splash);
+  EXPECT_EQ(fs.target_unit, inter_id);
+  EXPECT_TRUE(fs.target_struct.is_null());
+  EXPECT_EQ(fs.from, (game::Vec2{5, 5}));
+  EXPECT_EQ(fs.to, (game::Vec2{6, 5}));
+  EXPECT_EQ(fs.damage, game::cfg::FRIGATE_DMG);
+
+  const auto& is = log.shots[1];
+  EXPECT_EQ(is.attacker, inter_id);
+  EXPECT_FALSE(is.first_strike);
+  EXPECT_EQ(is.target_unit, frigate_id);
+  EXPECT_EQ(is.damage, game::cfg::INTERCEPTOR_DMG);
+  EXPECT_TRUE(log.kills.empty());
+}
+
+TEST(CombatLog, FirstStrikeKillStopsReturnFire) {
+  auto w = make_combat_world();
+  game::UnitId frigate_id = w.spawn_unit({0}, game::UnitType::Frigate, {5, 5}).id;
+  game::UnitId inter_id = w.spawn_unit({1}, game::UnitType::Interceptor, {6, 5}).id;
+  w.find_unit(inter_id)->hp = 1;
+
+  game::CombatLog log;
+  game::run_combat(w, attack_cmd(frigate_id), attack_cmd(inter_id), &log);
+
+  ASSERT_EQ(log.shots.size(), 1u);
+  EXPECT_EQ(log.shots[0].attacker, frigate_id);
+  ASSERT_EQ(log.kills.size(), 1u);
+  EXPECT_EQ(log.kills[0].unit, inter_id);
+  EXPECT_EQ(log.kills[0].faction.value, 1u);
+  EXPECT_EQ(log.kills[0].unit_type, game::UnitType::Interceptor);
+  EXPECT_EQ(log.kills[0].pos, (game::Vec2{6, 5}));
+}
+
+TEST(CombatLog, SplashKillsIncludeFriendlyFire) {
+  auto w = make_combat_world();
+  game::UnitId arty_id = w.spawn_unit({0}, game::UnitType::Artillery, {5, 5}).id;
+  game::UnitId enemy_id = w.spawn_unit({1}, game::UnitType::Interceptor, {7, 5}).id;
+  game::UnitId friend_id = w.spawn_unit({0}, game::UnitType::Drone, {7, 6}).id;
+  w.find_unit(enemy_id)->hp = 1;
+  w.find_unit(friend_id)->hp = 1;
+
+  game::CombatLog log;
+  game::ValidatedCommands empty_b;
+  game::run_combat(w, attack_cmd(arty_id), empty_b, &log);
+
+  ASSERT_EQ(log.shots.size(), 1u);
+  EXPECT_TRUE(log.shots[0].splash);
+  EXPECT_EQ(log.shots[0].to, (game::Vec2{7, 5}));
+  ASSERT_EQ(log.kills.size(), 2u); // ascending unit-id: enemy spawned first
+  EXPECT_EQ(log.kills[0].unit, enemy_id);
+  EXPECT_EQ(log.kills[1].unit, friend_id);
+  EXPECT_EQ(log.kills[1].faction.value, 0u);
+  EXPECT_EQ(log.kills[1].pos, (game::Vec2{7, 6}));
+}
+
+TEST(CombatLog, StructureKillRecorded) {
+  auto w = make_combat_world();
+  game::UnitId frigate_id = w.spawn_unit({0}, game::UnitType::Frigate, {5, 5}).id;
+  auto& core = w.spawn_structure({1}, game::StructureType::CommandCore, {6, 5});
+  game::StructureId core_id = core.id;
+  core.hp = 1;
+
+  game::CombatLog log;
+  game::ValidatedCommands empty_b;
+  game::run_combat(w, attack_cmd(frigate_id), empty_b, &log);
+
+  ASSERT_EQ(log.shots.size(), 1u);
+  EXPECT_EQ(log.shots[0].target_struct, core_id);
+  EXPECT_TRUE(log.shots[0].target_unit.is_null());
+  ASSERT_EQ(log.kills.size(), 1u);
+  EXPECT_EQ(log.kills[0].structure, core_id);
+  EXPECT_EQ(log.kills[0].structure_type, game::StructureType::CommandCore);
+}

@@ -1,4 +1,5 @@
 #pragma once
+#include "combat.hpp"
 #include "entity.hpp"
 #include "ids.hpp"
 #include "wincheck.hpp"
@@ -35,6 +36,9 @@ struct FrameState {
   std::vector<StructureFrame> structures;
   std::array<Resources, MAX_FACTIONS> resources{};
   std::optional<MatchResult> result; // non-empty on the final frame only
+  // Combat during the tick that produced this frame (empty on the initial frame).
+  std::vector<ShotEvent> shots;
+  std::vector<KillEvent> kills;
 };
 
 // Re-simulate a replay log and collect one FrameState per completed tick, plus

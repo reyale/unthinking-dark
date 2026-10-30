@@ -93,7 +93,27 @@ static void apply_splash(World& world, Vec2 center, int32_t dmg,
   }
 }
 
-void run_combat(World& world, const ValidatedCommands& cmds_a, const ValidatedCommands& cmds_b) {
+static void log_shot(CombatLog* log, const Unit& attacker, const CombatTarget& tgt, Vec2 to,
+                     bool first_strike) {
+  if (!log)
+    return;
+  const UnitStats& st = attacker.stats();
+  log->shots.push_back({attacker.id, attacker.faction, attacker.type, attacker.pos,
+                        tgt.unit_id, tgt.struct_id, to, st.dmg, first_strike, st.splash});
+}
+
+static void log_kill(CombatLog* log, const Unit& u) {
+  if (log)
+    log->kills.push_back({u.id, {}, u.faction, u.type, StructureType::CommandCore, u.pos});
+}
+
+static void log_kill(CombatLog* log, const Structure& s) {
+  if (log)
+    log->kills.push_back({{}, s.id, s.faction, UnitType::Drone, s.type, s.pos});
+}
+
+void run_combat(World& world, const ValidatedCommands& cmds_a, const ValidatedCommands& cmds_b,
+                CombatLog* log) {
   ValidatedCommands all_cmds;
   for (const auto& [k, v] : cmds_a)
     all_cmds.emplace(k, v);
@@ -121,14 +141,21 @@ void run_combat(World& world, const ValidatedCommands& cmds_a, const ValidatedCo
     world.rng.next(); // maintain consistent draw count
     if (!tgt.struct_id.is_null()) {
       Structure* s = world.find_structure(tgt.struct_id);
-      if (s)
+      if (s) {
+        log_shot(log, unit, tgt, s->pos, true);
         s->hp -= unit.stats().dmg;
+        if (!s->alive())
+          log_kill(log, *s);
+      }
     } else {
       Unit* t = world.find_unit(tgt.unit_id);
       if (t) {
+        log_shot(log, unit, tgt, t->pos, true);
         t->hp -= unit.stats().dmg;
-        if (!t->alive())
+        if (!t->alive()) {
           t->hp = 0;
+          log_kill(log, *t);
+        }
       }
     }
   }
@@ -156,6 +183,7 @@ void run_combat(World& world, const ValidatedCommands& cmds_a, const ValidatedCo
       Structure* s = world.find_structure(tgt.struct_id);
       if (!s)
         continue;
+      log_shot(log, unit, tgt, s->pos, false);
       if (unit.stats().splash)
         apply_splash(world, s->pos, unit.stats().dmg, pending_units, pending_structs);
       else
@@ -164,6 +192,7 @@ void run_combat(World& world, const ValidatedCommands& cmds_a, const ValidatedCo
       Unit* t = world.find_unit(tgt.unit_id);
       if (!t)
         continue;
+      log_shot(log, unit, tgt, t->pos, false);
       if (unit.stats().splash)
         apply_splash(world, t->pos, unit.stats().dmg, pending_units, pending_structs);
       else
@@ -173,13 +202,21 @@ void run_combat(World& world, const ValidatedCommands& cmds_a, const ValidatedCo
 
   for (auto& [uid, dmg] : pending_units) {
     Unit* u = world.find_unit(uid);
-    if (u)
-      u->hp -= dmg;
+    if (!u)
+      continue;
+    const bool was_alive = u->alive();
+    u->hp -= dmg;
+    if (was_alive && !u->alive())
+      log_kill(log, *u);
   }
   for (auto& [sid, dmg] : pending_structs) {
     Structure* s = world.find_structure(sid);
-    if (s)
-      s->hp -= dmg;
+    if (!s)
+      continue;
+    const bool was_alive = s->alive();
+    s->hp -= dmg;
+    if (was_alive && !s->alive())
+      log_kill(log, *s);
   }
   world.purge_dead();
 }

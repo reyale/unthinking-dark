@@ -1,5 +1,6 @@
 // Usage: ud_viz_imgui [replay.ud] [--shapes file.udshapes]   (shapes hot-reload on save)
 // Controls: Space=play/pause  ←/→=step  U=union  G=god  0/1=faction view  scroll=zoom  Q=quit
+//           R=replay this frame's shots  T=toggle static shot lines while paused
 
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
@@ -96,24 +97,25 @@ static int structure_facing(const game::Map& map, int32_t x, int32_t y) {
   return facing < 0 ? 0 : facing;
 }
 
+// view: -1 = god (everything), -2 = union of both factions, 0/1 = that faction.
+static bool tile_visible(const game::FrameState& fr, int view, int32_t x, int32_t y) {
+  if (view == -1) return true;
+  for (const auto& u : fr.units) {
+    if (view >= 0 && static_cast<int>(u.faction.value) != view) continue;
+    if (std::abs(x - u.pos.x) + std::abs(y - u.pos.y) <= game::stats_for(u.type).sight)
+      return true;
+  }
+  for (const auto& s : fr.structures) {
+    if (view >= 0 && static_cast<int>(s.faction.value) != view) continue;
+    if (s.pos.x == x && s.pos.y == y) return true;
+  }
+  return false;
+}
+
 static CellData make_cell(const game::Map& map, const game::FrameState& fr,
                            const std::vector<uint8_t>& facings,
                            int view, int32_t x, int32_t y) {
-  bool vis = (view == -1);
-  if (!vis) {
-    for (const auto& u : fr.units) {
-      if (view >= 0 && static_cast<int>(u.faction.value) != view) continue;
-      if (std::abs(x - u.pos.x) + std::abs(y - u.pos.y) <= game::stats_for(u.type).sight)
-        { vis = true; break; }
-    }
-    if (!vis) {
-      for (const auto& s : fr.structures) {
-        if (view >= 0 && static_cast<int>(s.faction.value) != view) continue;
-        if (s.pos.x == x && s.pos.y == y) { vis = true; break; }
-      }
-    }
-  }
-  if (!vis) return {kFogBg};
+  if (!tile_visible(fr, view, x, y)) return {kFogBg};
 
   ImVec4 bg;
   switch (map.tile_at({x, y}).terrain) {
@@ -145,6 +147,36 @@ static CellData make_cell(const game::Map& map, const game::FrameState& fr,
   return {bg};
 }
 
+// ---- Combat effects types --------------------------------------------------
+//
+// Shots and kills are short wall-clock effects spawned when the displayed frame
+// changes; they are not extra frames, so the tick counter and slider are unaffected.
+// Frame N's effects are the combat that produced frame N, so stepping in either
+// direction shows how the current frame came about.
+
+enum class FxKind : uint8_t { Tracer, Hit, Burst };
+
+struct Effect {
+  FxKind     kind;
+  game::Vec2 from, to; // tiles; Hit and Burst only use `to`
+  ImVec4     col;
+  double     start, dur;
+  // Burst only: the victim, drawn until the explosion covers it. The frame being
+  // shown is post-combat, so without this the target vanishes before it is hit.
+  int        ghost_shape  = -1;
+  int        ghost_facing = 0;
+  ImVec4     ghost_col{};
+};
+
+struct FxState {
+  std::vector<Effect> live;
+  int    seen_frame  = -1;    // last g.cur observed
+  double changed_t   = 0.0;   // when g.cur last changed
+  bool   pending     = false; // seen_frame's effects not yet spawned
+  bool   scrubbing   = false; // tick slider is being dragged
+  bool   show_static = true;  // faint lines for the current frame's shots while paused
+};
+
 // ---- App state ------------------------------------------------------------
 
 enum class SelType : uint8_t { Unit, Structure, Terrain };
@@ -170,6 +202,7 @@ struct App {
   UnitShapeDef      shape_defs[kShapeCount];
   // unit_facing[f][i]: facing of frames[f].units[i], from its last move.
   std::vector<std::vector<uint8_t>> unit_facing;
+  FxState           fx;
   std::string       shapes_path = UD_DEFAULT_SHAPES_PATH;
   std::filesystem::file_time_type shapes_mtime{};
   double            shapes_checked_t = 0.0;
@@ -238,6 +271,7 @@ static void try_load(const char* path) {
     g.map    = map_from_log(log);
     g.frames = game::replay_frames(log);
     compute_unit_facings();
+    g.fx     = FxState{};
     g.cur    = 0;
     g.total  = static_cast<int>(g.frames.size());
     g.loaded = true;
@@ -251,6 +285,141 @@ static void try_load(const char* path) {
 }
 
 // ---- Per-frame draw functions ---------------------------------------------
+
+// ---- Combat effects ---------------------------------------------------------
+
+// Base timings in seconds, used as-is when stepping. During playback they are
+// compressed so an effect lasts at most kFxMaxTicks ticks and effects can't pile up.
+static constexpr double kFxDelayNormal = 0.08; // first-strike shots go at t=0
+static constexpr double kFxTracer      = 0.22;
+static constexpr double kFxHit         = 0.18;
+static constexpr double kFxBurstDelay  = kFxDelayNormal + kFxTracer;
+static constexpr double kFxBurst       = 0.40;
+static constexpr double kFxTotal       = kFxBurstDelay + kFxBurst;
+static constexpr double kFxMaxTicks    = 3.0;
+static constexpr double kFxScrubSettle = 0.10; // slider must rest this long before spawning
+
+static ImVec4 mix_white(ImVec4 c, float t) {
+  return {c.x + (1.0f - c.x) * t, c.y + (1.0f - c.y) * t, c.z + (1.0f - c.z) * t, c.w};
+}
+
+static void spawn_fx(int frame, double now) {
+  const auto& fr = g.frames[static_cast<size_t>(frame)];
+  const double k = g.playing ? std::min(1.0, kFxMaxTicks / g.fps / kFxTotal) : 1.0;
+  for (const auto& sh : fr.shots) {
+    if (!tile_visible(fr, g.view, sh.from.x, sh.from.y) &&
+        !tile_visible(fr, g.view, sh.to.x, sh.to.y))
+      continue;
+    const ImVec4 fc = sh.faction.value == 0 ? kFactionA : kFactionB;
+    const double t0 = now + (sh.first_strike ? 0.0 : kFxDelayNormal) * k;
+    g.fx.live.push_back({FxKind::Tracer, sh.from, sh.to, mix_white(fc, 0.45f), t0, kFxTracer * k});
+    g.fx.live.push_back({FxKind::Hit, sh.to, sh.to, {1, 1, 1, 1}, t0 + kFxTracer * k, kFxHit * k});
+  }
+  for (const auto& kl : fr.kills) {
+    if (!tile_visible(fr, g.view, kl.pos.x, kl.pos.y)) continue;
+    Effect e{FxKind::Burst, kl.pos, kl.pos, {1.0f, 0.62f, 0.22f, 1.0f},
+             now + kFxBurstDelay * k, kFxBurst * k};
+    const bool is_unit = !kl.unit.is_null();
+    e.ghost_shape = is_unit ? shape_index(kl.unit_type) : shape_index(kl.structure_type);
+    e.ghost_col   = kl.faction.value == 0 ? kFactionA : kFactionB;
+    if (is_unit && frame > 0) {
+      const auto& prev = g.frames[static_cast<size_t>(frame - 1)];
+      for (size_t i = 0; i < prev.units.size(); ++i)
+        if (prev.units[i].id == kl.unit)
+          e.ghost_facing = g.unit_facing[static_cast<size_t>(frame - 1)][i];
+    } else if (!is_unit) {
+      e.ghost_facing = structure_facing(g.map, kl.pos.x, kl.pos.y);
+    }
+    g.fx.live.push_back(e);
+  }
+}
+
+// Called once per UI frame, after input and playback have settled g.cur.
+static void update_fx(double now) {
+  auto& fx = g.fx;
+  if (g.cur != fx.seen_frame) {
+    const bool continuing = g.playing && g.cur == fx.seen_frame + 1;
+    if (!continuing) fx.live.clear();
+    fx.seen_frame = g.cur;
+    fx.changed_t  = now;
+    fx.pending    = true;
+  }
+  if (fx.pending && !(fx.scrubbing && now - fx.changed_t < kFxScrubSettle)) {
+    spawn_fx(g.cur, now);
+    fx.pending = false;
+  }
+  std::erase_if(fx.live, [&](const Effect& e) { return now > e.start + e.dur; });
+}
+
+static void draw_fx(ImDrawList* dl, ImVec2 iso_org, float cw2, float ch2, double now) {
+  auto ctr = [&](game::Vec2 t, float lift) -> ImVec2 {
+    return {iso_org.x + (t.x - t.y) * cw2, iso_org.y + (t.x + t.y) * ch2 - lift * ch2};
+  };
+  auto with_a = [](ImVec4 c, float a) { return u32({c.x, c.y, c.z, c.w * a}); };
+  const float muzzle = 0.8f, impact = 0.5f; // heights in ch2 units, roughly hull top
+
+  const bool idle = !g.playing && g.fx.live.empty() && !g.fx.pending;
+  if (idle && g.fx.show_static) {
+    const auto& fr = g.frames[static_cast<size_t>(g.cur)];
+    for (const auto& sh : fr.shots) {
+      if (!tile_visible(fr, g.view, sh.from.x, sh.from.y) &&
+          !tile_visible(fr, g.view, sh.to.x, sh.to.y))
+        continue;
+      const ImVec4 fc = sh.faction.value == 0 ? kFactionA : kFactionB;
+      const ImVec2 a = ctr(sh.from, muzzle), b = ctr(sh.to, impact);
+      dl->AddLine(a, b, with_a(mix_white(fc, 0.3f), 0.45f), 1.5f);
+      dl->AddCircleFilled(b, std::max(2.0f, ch2 * 0.12f), with_a(mix_white(fc, 0.3f), 0.6f));
+    }
+  }
+
+  // Victims first, so tracers and explosions draw over them.
+  for (const auto& e : g.fx.live) {
+    if (e.ghost_shape < 0 || now > e.start + e.dur * 0.15) continue;
+    draw_unit_from_def(dl, ctr(e.to, 0.0f), cw2, ch2, g.shape_defs[e.ghost_shape],
+                       u32(e.ghost_col), e.ghost_facing);
+  }
+
+  for (const auto& e : g.fx.live) {
+    if (now < e.start) continue;
+    const float p = static_cast<float>(std::clamp((now - e.start) / e.dur, 0.0, 1.0));
+    switch (e.kind) {
+    case FxKind::Tracer: {
+      const ImVec2 a = ctr(e.from, muzzle), b = ctr(e.to, impact);
+      const float head = 1.0f - (1.0f - p) * (1.0f - p); // ease-out
+      const float tail = std::max(0.0f, head - 0.45f);
+      const ImVec2 h = {a.x + (b.x - a.x) * head, a.y + (b.y - a.y) * head};
+      const ImVec2 t = {a.x + (b.x - a.x) * tail, a.y + (b.y - a.y) * tail};
+      const float w = std::max(1.5f, ch2 * 0.12f);
+      dl->AddLine(t, h, with_a(e.col, 0.25f), w * 3.0f);
+      dl->AddLine(t, h, with_a(e.col, 0.95f), w);
+      dl->AddCircleFilled(h, w * 1.1f, with_a(mix_white(e.col, 0.6f), 1.0f));
+      break;
+    }
+    case FxKind::Hit: {
+      const ImVec2 c = ctr(e.to, impact);
+      const float r = ch2 * (0.25f + 0.55f * p);
+      dl->AddEllipseFilled(c, {r, r * 0.7f}, with_a(e.col, 0.55f * (1.0f - p)));
+      dl->AddEllipse(c, {r * 1.2f, r * 0.84f}, with_a(e.col, 0.8f * (1.0f - p)), 0.0f, 0, 1.5f);
+      break;
+    }
+    case FxKind::Burst: {
+      const ImVec2 c = ctr(e.to, impact);
+      const float r = ch2 * (0.4f + 1.1f * p);
+      const ImVec4 hot = mix_white(e.col, 0.5f * (1.0f - p));
+      dl->AddEllipseFilled(c, {r, r * 0.65f}, with_a(hot, 0.7f * (1.0f - p) * (1.0f - p)));
+      dl->AddEllipse(c, {r * 1.25f, r * 0.8f}, with_a(e.col, 0.9f * (1.0f - p)), 0.0f, 0, 2.0f);
+      for (int i = 0; i < 8; ++i) {
+        const float ang = 0.785398f * static_cast<float>(i) + 0.3f;
+        const float r0 = r * 0.6f, r1 = r * 1.5f;
+        dl->AddLine({c.x + std::cos(ang) * r0, c.y + std::sin(ang) * r0 * 0.6f},
+                    {c.x + std::cos(ang) * r1, c.y + std::sin(ang) * r1 * 0.6f},
+                    with_a(hot, 0.8f * (1.0f - p)), 1.5f);
+      }
+      break;
+    }
+    }
+  }
+}
 
 static void handle_input(const ImGuiIO& io, GLFWwindow* win) {
   if (!io.WantCaptureMouse)
@@ -266,6 +435,11 @@ static void handle_input(const ImGuiIO& io, GLFWwindow* win) {
         { ++g.cur; g.playing = false; }
       if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) && g.cur > 0)
         { --g.cur; g.playing = false; }
+      if (ImGui::IsKeyPressed(ImGuiKey_R)) {
+        g.fx.live.clear();
+        spawn_fx(g.cur, glfwGetTime());
+      }
+      if (ImGui::IsKeyPressed(ImGuiKey_T)) g.fx.show_static = !g.fx.show_static;
     }
     if (ImGui::IsKeyPressed(ImGuiKey_U)) g.view = -2;
     if (ImGui::IsKeyPressed(ImGuiKey_G)) g.view = -1;
@@ -303,6 +477,7 @@ static void draw_playback_bar(const game::FrameState& fr) {
   char tick_fmt[32];
   snprintf(tick_fmt, sizeof(tick_fmt), "%%d / %d", g.total - 1);
   if (ImGui::SliderInt("##t", &g.cur, 0, g.total - 1, tick_fmt)) g.playing = false;
+  g.fx.scrubbing = ImGui::IsItemActive();
   ImGui::SameLine();
   if (ImGui::Button(g.playing ? "Pause" : " Play "))
     { g.playing = !g.playing; g.last_t = glfwGetTime(); }
@@ -416,6 +591,8 @@ static void draw_grid(const game::FrameState& fr) {
     for (int32_t x = 0; x < g.map.width; ++x)
       draw_tile_cell(dl, tile_ctr(x, y), cw2, ch2,
                      make_cell(g.map, fr, g.unit_facing[g.cur], g.view, x, y), x, y, fr);
+
+  draw_fx(dl, iso_org, cw2, ch2, glfwGetTime());
 
   if (ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
     ImVec2  mp  = ImGui::GetMousePos();
@@ -620,6 +797,7 @@ int main(int argc, char** argv) {
     ImGui::NewFrame();
 
     handle_input(io, win);
+    if (g.loaded) update_fx(glfwGetTime());
 
     ImGui::SetNextWindowPos({0, 0});
     ImGui::SetNextWindowSize(io.DisplaySize);

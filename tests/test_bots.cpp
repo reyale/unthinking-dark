@@ -1,5 +1,8 @@
 #include <gtest/gtest.h>
+#include <map>
+#include "frame.hpp"
 #include "match.hpp"
+#include "tick.hpp"
 #include "world.hpp"
 #include "grid.hpp"
 #include "../../fixtures/rush_bot.hpp"
@@ -75,6 +78,88 @@ TEST(RushBot, VsAggroIssuesCommands) {
   }
   EXPECT_TRUE(any_a);
   EXPECT_TRUE(any_b);
+}
+
+// ---- Combat log through replay frames -------------------------------------
+
+// Collecting the combat log must not change the simulation: re-run the recorded
+// commands on twin worlds, one with a log and one without, and compare per-tick hashes.
+TEST(RushBot, CombatLogDoesNotChangeHash) {
+  auto w = make_bot_world(13);
+  game::RushBot a, b;
+  auto rec = game::run_match(w, a, 0, b, 1, 200);
+
+  auto plain = make_bot_world(13);
+  auto logged = make_bot_world(13);
+  game::StateHash h_plain, h_logged;
+  size_t total_shots = 0;
+  for (const auto& entry : rec.replay.ticks) {
+    game::CombatLog log;
+    auto r1 = game::run_tick_phases(plain, entry.raw_a, rec.replay.faction_a, entry.raw_b,
+                                    rec.replay.faction_b, rec.replay.tick_cap, h_plain);
+    auto r2 = game::run_tick_phases(logged, entry.raw_a, rec.replay.faction_a, entry.raw_b,
+                                    rec.replay.faction_b, rec.replay.tick_cap, h_logged, &log);
+    total_shots += log.shots.size();
+    ASSERT_EQ(h_plain.current, h_logged.current) << "diverged at tick " << logged.tick;
+    if (r1 || r2) break;
+  }
+  EXPECT_EQ(h_logged.per_tick, rec.hash.per_tick);
+  EXPECT_GT(total_shots, 0u) << "fixture never fought; test proves nothing";
+}
+
+// Every hp change in the replay frames is explained by that frame's shots.
+TEST(RushBot, ReplayFrameShotsAccountForDamage) {
+  auto w = make_bot_world(13);
+  game::RushBot a, b;
+  auto rec = game::run_match(w, a, 0, b, 1, 200);
+  auto frames = game::replay_frames(rec.replay);
+
+  ASSERT_FALSE(frames.empty());
+  EXPECT_TRUE(frames[0].shots.empty());
+  EXPECT_TRUE(frames[0].kills.empty());
+
+  size_t total_shots = 0, total_kills = 0;
+  for (size_t f = 1; f < frames.size(); ++f) {
+    const auto& prev = frames[f - 1];
+    const auto& cur = frames[f];
+    total_shots += cur.shots.size();
+    total_kills += cur.kills.size();
+    bool any_splash = false;
+    std::map<game::UnitId, int32_t> unit_dmg;
+    std::map<game::StructureId, int32_t> struct_dmg;
+    for (const auto& s : cur.shots) {
+      any_splash |= s.splash;
+      if (!s.target_unit.is_null()) unit_dmg[s.target_unit] += s.damage;
+      else struct_dmg[s.target_struct] += s.damage;
+    }
+    if (any_splash) continue; // splash damage isn't attributed per victim
+
+    std::map<game::UnitId, int32_t> prev_hp;
+    for (const auto& u : prev.units) prev_hp[u.id] = u.hp;
+    std::map<game::UnitId, int32_t> cur_hp;
+    for (const auto& u : cur.units) cur_hp[u.id] = u.hp;
+    for (const auto& [id, hp] : prev_hp) {
+      auto it = cur_hp.find(id);
+      if (it != cur_hp.end()) {
+        EXPECT_EQ(hp - it->second, unit_dmg[id]) << "unit " << id.value << " frame " << f;
+      } else {
+        bool logged = false;
+        for (const auto& k : cur.kills) logged |= (k.unit == id);
+        EXPECT_TRUE(logged) << "unit " << id.value << " vanished without a kill event";
+        EXPECT_GE(unit_dmg[id], hp);
+      }
+    }
+    for (const auto& ps : prev.structures) {
+      if (ps.type == game::StructureType::ClaimNode) continue; // territory caps claim hp
+      for (const auto& cs : cur.structures) {
+        if (cs.id == ps.id) {
+          EXPECT_EQ(ps.hp - cs.hp, struct_dmg[ps.id]) << "structure " << ps.id.value;
+        }
+      }
+    }
+  }
+  EXPECT_GT(total_shots, 0u);
+  EXPECT_GT(total_kills, 0u);
 }
 
 // ---- EconBot ----------------------------------------------------------------

@@ -14,7 +14,8 @@ namespace game {
 
 std::optional<MatchResult> run_tick_phases(World& world, const std::vector<Command>& raw_a,
                                            uint32_t faction_a, const std::vector<Command>& raw_b,
-                                           uint32_t faction_b, uint32_t tick_cap, StateHash& hash) {
+                                           uint32_t faction_b, uint32_t tick_cap, StateHash& hash,
+                                           CombatLog* combat_log) {
   // Phase 1 — Validate
   ValidatedCommands cmds_a = validate_commands(world, faction_a, raw_a);
   ValidatedCommands cmds_b = validate_commands(world, faction_b, raw_b);
@@ -23,7 +24,7 @@ std::optional<MatchResult> run_tick_phases(World& world, const std::vector<Comma
   run_movement(world, cmds_a, cmds_b);
 
   // Phase 3 — Combat
-  run_combat(world, cmds_a, cmds_b);
+  run_combat(world, cmds_a, cmds_b, combat_log);
 
   // Phase 4 — Economy
   run_economy(world, cmds_a, cmds_b);
