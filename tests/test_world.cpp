@@ -363,6 +363,59 @@ TEST(Economy, ProductionCompletionSpawnsUnit) {
   EXPECT_TRUE(found);
 }
 
+TEST(Economy, ProducedUnitSpawnsOnFirstFreeNeighbour) {
+  auto w = make_world();
+  auto& fac = w.spawn_structure({0}, game::StructureType::Factory, {5, 5});
+  game::UnitId blocker = w.spawn_unit({0}, game::UnitType::Drone, {5, 4}).id; // N taken
+  fac.production_queue      = game::UnitType::Frigate;
+  fac.production_ticks_left = 1;
+  game::ValidatedCommands empty;
+  game::run_economy(w, empty, empty);
+  EXPECT_FALSE(fac.production_queue.has_value());
+  int spawned = 0;
+  for (const auto& [uid, u] : w.units) {
+    if (uid == blocker) continue;
+    ++spawned;
+    EXPECT_EQ(u.pos, (game::Vec2{6, 5})) << "should take E, the next free tile in DIRS order";
+  }
+  EXPECT_EQ(spawned, 1);
+}
+
+TEST(Economy, ProductionWaitsWhileFactoryIsBoxedIn) {
+  auto w = make_world();
+  auto& fac = w.spawn_structure({0}, game::StructureType::Factory, {5, 5});
+  std::vector<game::UnitId> ring;
+  for (const auto& d : game::DIRS)
+    ring.push_back(w.spawn_unit({0}, game::UnitType::Drone, fac.pos + d).id);
+  fac.production_queue      = game::UnitType::Interceptor;
+  fac.production_ticks_left = 1;
+  game::ValidatedCommands empty;
+  for (int t = 0; t < 5; ++t)
+    game::run_economy(w, empty, empty);
+  EXPECT_EQ(w.units.size(), 4u) << "nothing spawns while every neighbour is taken";
+  EXPECT_TRUE(fac.production_queue.has_value()) << "the finished unit waits in the factory";
+
+  w.find_unit(ring[2])->pos = {5, 8}; // S moves away
+  game::run_economy(w, empty, empty);
+  EXPECT_FALSE(fac.production_queue.has_value());
+  EXPECT_EQ(w.units.size(), 5u);
+  bool on_south = false;
+  for (const auto& [uid, u] : w.units)
+    on_south |= (u.type == game::UnitType::Interceptor && u.pos == game::Vec2{5, 6});
+  EXPECT_TRUE(on_south);
+}
+
+TEST(World, TileFreeChecksTerrainStructuresAndUnits) {
+  auto w = make_world();
+  w.map.set_terrain({1, 1}, game::Terrain::Asteroid, 0);
+  w.spawn_structure({0}, game::StructureType::Factory, {2, 2});
+  w.spawn_unit({1}, game::UnitType::Drone, {3, 3});
+  EXPECT_FALSE(w.tile_free({1, 1}));
+  EXPECT_FALSE(w.tile_free({2, 2}));
+  EXPECT_FALSE(w.tile_free({3, 3}));
+  EXPECT_TRUE(w.tile_free({4, 4}));
+}
+
 // ---- Movement -----------------------------------------------------------
 
 static game::ValidatedCommands move_cmd(game::UnitId uid, int32_t tx, int32_t ty,

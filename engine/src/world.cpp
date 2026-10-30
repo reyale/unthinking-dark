@@ -75,6 +75,15 @@ const Structure* World::command_core(FactionId f) const {
   return nullptr;
 }
 
+bool World::tile_free(Vec2 pos) const {
+  if (!map.passable(pos) || structure_by_pos.count(pos))
+    return false;
+  for (const auto& [uid, u] : units)
+    if (u.alive() && u.pos == pos)
+      return false;
+  return true;
+}
+
 void World::purge_dead() {
   for (auto it = units.begin(); it != units.end();) {
     it = it->second.alive() ? std::next(it) : units.erase(it);

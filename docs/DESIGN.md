@@ -189,8 +189,11 @@ for step in 1..=N:
   deducted. Insufficient resources → action fails (logged).
 
 ### Phase 5 — Spawn / Upkeep
-- Newly produced ships appear at deterministic spawn tiles (blocked → queue/delay by
-  fixed rule).
+- Newly produced ships appear on the first free tile adjacent to their Factory, checked
+  in N, E, S, W order (free = passable, no structure, no living unit). If all four are
+  taken, the finished ship waits in the Factory (its queue stays blocked) and placement
+  is retried every tick; if nothing moves out of the way it is never produced. Factories
+  resolve in ascending structure-id order.
 - **Claim Node hp recomputed against the game-progress clock** (claims grow fragile over
   the match; see §7).
 - Per-tick upkeep/decay if any.

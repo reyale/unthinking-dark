@@ -71,10 +71,11 @@ else()
   message(WARNING "clang++-18 not found — SDK wasm bots will not be compiled; WasmBot.Sdk* tests will skip")
 endif()
 
-add_executable(map_tests test_map_io.cpp)
+add_executable(map_tests test_map_io.cpp test_match_setup.cpp)
 target_include_directories(map_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/engine/src
     ${CMAKE_SOURCE_DIR}/maps
+    ${CMAKE_SOURCE_DIR}/fixtures
 )
 target_link_libraries(map_tests PRIVATE maps_lib GTest::gtest_main)
 target_compile_definitions(map_tests PRIVATE

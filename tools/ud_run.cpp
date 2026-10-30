@@ -7,6 +7,7 @@
 #include "grid.hpp"
 #include "map_gen.hpp"
 #include "map_io.hpp"
+#include "match_setup.hpp"
 #include "match.hpp"
 #include "replay.hpp"
 #include "replay_io.hpp"
@@ -31,46 +32,6 @@ static std::string basename_noext(const std::string& path) {
   auto dot = name.rfind('.');
   if (dot != std::string::npos) name = name.substr(0, dot);
   return name;
-}
-
-// ---- World setup ------------------------------------------------------------
-
-static void place_faction(game::World& w, game::FactionId faction, game::Vec2 spawn) {
-  w.spawn_structure(faction, game::StructureType::CommandCore, spawn);
-
-  // Bias unit placement inward toward the map centre.
-  int32_t dx = (spawn.x * 2 < w.map.width)  ? +1 : -1;
-  int32_t dy = (spawn.y * 2 < w.map.height) ? +1 : -1;
-
-  const game::Vec2 offsets[] = {
-    {dx, 0}, {dx*2, 0}, {0, dy}, {dx, dy}, {dx*3, 0}, {0, dy*2},
-  };
-
-  const game::UnitType roster[] = {
-    game::UnitType::Drone,
-    game::UnitType::Interceptor,
-    game::UnitType::Frigate,
-  };
-
-  for (auto type : roster) {
-    for (auto [ox, oy] : offsets) {
-      game::Vec2 pos = {spawn.x + ox, spawn.y + oy};
-      if (w.map.passable(pos)) {
-        w.spawn_unit(faction, type, pos);
-        break;
-      }
-    }
-  }
-}
-
-static game::World world_from_map(const maps::MapData& md, uint64_t seed) {
-  game::World w;
-  w.map      = md.map;
-  w.rng      = game::Rng{seed};
-  w.rng_seed = seed;
-  place_faction(w, {0}, md.spawn[0]);
-  place_faction(w, {1}, md.spawn[1]);
-  return w;
 }
 
 // ---- Argument parsing -------------------------------------------------------
@@ -172,7 +133,7 @@ int main(int argc, char** argv) {
   printf("Ticks: %u cap\n\n", args.ticks);
 
   // Run match
-  game::World w = world_from_map(md, args.seed);
+  game::World w = maps::world_from_map(md, args.seed);
   auto rec = game::run_match(w, bot_a, 0, bot_b, 1, args.ticks, name_a, name_b);
 
   // Print result

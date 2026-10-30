@@ -38,6 +38,9 @@ struct World {
   Unit& spawn_unit(FactionId faction, UnitType type, Vec2 pos);
   Structure& spawn_structure(FactionId faction, StructureType type, Vec2 pos);
 
+  // Passable terrain with no structure and no living unit on it.
+  bool tile_free(Vec2 pos) const;
+
   // ---- Accessors --------------------------------------------------------
 
   // Returns nullptr if dead or nonexistent.

@@ -97,6 +97,9 @@ must be true before use.
 | `ud_run` | Run a 1v1 match: `ud_run <a.wasm> <b.wasm> [--map f] [--out f] [--seed N] [--ticks N]` |
 | `ud_mapgen` | Generate a map JSON |
 | `ud_mapcheck` | Validate a map JSON |
+
+Standard match setup (Command Core + starting units on free tiles near each spawn) lives in
+`maps/match_setup.hpp` as `maps::world_from_map()`, shared by `ud_run` and the map tests.
 | `gen_example_replay` | Generate a fixture replay for tests |
 
 ### viz/ — replay renderers

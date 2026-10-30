@@ -118,14 +118,22 @@ static void tick_production(World& world) {
       continue;
     if (!s.production_queue.has_value())
       continue;
-    if (--s.production_ticks_left > 0)
+    if (s.production_ticks_left > 0 && --s.production_ticks_left > 0)
       continue;
 
-    // Spawn at factory tile if passable, otherwise drop production
-    if (world.map.passable(s.pos)) {
-      world.spawn_unit(s.faction, *s.production_queue, s.pos);
+    // Spawn on the first free neighbour in DIRS order. If every neighbour is taken
+    // the finished unit stays in the factory (blocking the queue) and is retried
+    // each tick; if nothing ever moves out of the way it is never produced.
+    // Factories are iterated in id order, so two sharing a free tile resolve
+    // deterministically: the lower id spawns first and the tile is then taken.
+    for (const Vec2& d : DIRS) {
+      const Vec2 tile = s.pos + d;
+      if (world.tile_free(tile)) {
+        world.spawn_unit(s.faction, *s.production_queue, tile);
+        s.production_queue.reset();
+        break;
+      }
     }
-    s.production_queue.reset();
   }
 }
 
