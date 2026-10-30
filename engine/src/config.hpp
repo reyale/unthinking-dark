@@ -63,6 +63,20 @@ inline constexpr int32_t BATTLESHIP_SPEED = 1;
 inline constexpr int32_t CMD_CORE_HP = 600;
 inline constexpr int32_t FACTORY_HP = 150;
 
+// ---- Economy (v1 placeholders — tune in sim) ---------------------------
+// Harvest yield per Drone per tick
+inline constexpr int32_t HARVEST_ENERGY = 2;
+inline constexpr int32_t HARVEST_ALLOY = 1;
+
+// Production costs (energy, alloy)
+inline constexpr int32_t DRONE_COST_E = 5,        DRONE_COST_A = 0;
+inline constexpr int32_t INTERCEPTOR_COST_E = 10, INTERCEPTOR_COST_A = 5;
+inline constexpr int32_t FRIGATE_COST_E = 40,     FRIGATE_COST_A = 5;
+inline constexpr int32_t ARTILLERY_COST_E = 10,   ARTILLERY_COST_A = 25;
+inline constexpr int32_t BATTLESHIP_COST_E = 120, BATTLESHIP_COST_A = 15;
+inline constexpr int32_t FACTORY_COST_E = 0,      FACTORY_COST_A = 50;
+inline constexpr int32_t CLAIM_COST_E = 0,        CLAIM_COST_A = 20;
+
 // ---- WASM budgets (v1 placeholders — tune in sim) ----------------------
 inline constexpr uint64_t FUEL_STARTUP = 1'000'000'000ULL;
 inline constexpr uint64_t FUEL_PER_TICK = 10'000'000ULL;

@@ -10,13 +10,13 @@ Build order and acceptance criteria: `docs/IMPLEMENTATION_PLAN.md`.
 
 ## Current State
 
-**Phases 1, 2, and 4 complete. Phase 5 partially complete. 188/188 tests passing.**
+**Phases 1–4 complete. Phase 5 partially complete. 192/192 tests passing.**
 
 | Phase | Status | Notes |
 |-------|--------|-------|
 | 1 — Engine | ✅ Done | Deterministic core, full test suite |
 | 2 — Visualizer | ✅ Done | Terminal, ncurses, Dear ImGui (isometric), browser WASM |
-| 3 — Territory | 🔲 Stubbed | `territory.cpp` returns zeros; threshold/fragility not implemented |
+| 3 — Territory | ✅ Done | Voronoi partition, descending win threshold, Claim Node fragility |
 | 4 — WASM runner | ✅ Done | Wasmtime C API in `runner/`; `ud_run` CLI in `tools/` |
 | 5 — Bot SDK | 🔲 Partial | C++ template + ABI headers in `sdk/cpp/`; no profiler yet |
 | 6 — Tournament | 🔲 Not started | |
@@ -24,7 +24,7 @@ Build order and acceptance criteria: `docs/IMPLEMENTATION_PLAN.md`.
 
 Additional work:
 - `WinReason::Draw` — tick-cap result when territory difference ≤ `cfg::DRAW_TERRITORY_MARGIN` (5%).
-- `ABI_VERSION` is 5; bumping it invalidates all existing replay files.
+- `ABI_VERSION` is 7; bumping it invalidates all existing replay files.
 
 ---
 
@@ -58,21 +58,26 @@ For LSP support: `ln -s build/compile_commands.json compile_commands.json`
 | File | Role |
 |------|------|
 | `abi.hpp` | **Single source of truth for all bot/engine wire structs.** Locked with `offsetof`/`sizeof` static_asserts. Do not define ABI structs anywhere else. |
-| `config.hpp` | Every balance constant and hard cap. No magic numbers anywhere else. |
+| `config.hpp` | Every balance constant and hard cap (unit stats, production costs, harvest yields, territory). No magic numbers anywhere else. |
 | `ids.hpp` | Strong typed `UnitId`, `StructureId`, `FactionId`. Never raw `uint32_t` for ids. |
 | `rng.hpp/.cpp` | xoshiro256** PRNG. Hand-rolled — `std::uniform_int_distribution` is not portable. |
-| `entity.hpp` | `UnitType`, `StructureType`, `OrderType` enums; `UnitStats` table; core structs. |
+| `fixed.hpp/.cpp` | Q32.32 fixed-point. `isqrt()` seeds from `std::sqrt` (currently unused by game logic — make it integer-only before relying on it). |
+| `grid.hpp/.cpp` | `Vec2`, `Terrain`, 4-connected grid helpers (`manhattan()`, `is_passable()`). |
+| `stats.hpp/.cpp` | `UnitStats` and `stats_for(UnitType)`, built from `config.hpp`. |
+| `entity.hpp` | `UnitType`, `StructureType`, `OrderType` enums; core structs. |
 | `world.hpp/.cpp` | Authoritative game state. `std::map` for units/structures (never unordered). |
 | `snapshot.hpp/.cpp` | Fog-masked snapshot builder. LoS = Manhattan distance ≤ sight_radius only. |
 | `command.hpp/.cpp` | `ValidatedCommands` and `validate_commands()`. |
 | `movement.hpp/.cpp` | Stepped simultaneous movement. Blocked unit stays put, no retry. |
 | `combat.hpp/.cpp` | Sub-phase A: first-strike (Frigates). Sub-phase B: simultaneous; splash has friendly fire. |
 | `economy.hpp/.cpp` | Harvest (Drones adjacent to ResourceNode), spend, production. |
-| `territory.hpp/.cpp` | **Stubbed.** Returns `TerritoryState{}` with zeros. |
+| `territory.hpp/.cpp` | Voronoi territory (squared-Euclidean nearest Claim Node, cross-faction ties → neutral, `CLAIM_INFLUENCE` radius), Claim Node hp fragility, `win_threshold()`. |
 | `wincheck.hpp/.cpp` | Fixed-order checks: base destruction → territory threshold → tick cap. |
 | `statehash.hpp/.cpp` | Rolling xxh3 via xxhash (`XXH_INLINE_ALL`). |
 | `tick.hpp/.cpp` | Phase pipeline. `run_tick_phases()` (raw commands) and `run_tick()` (calls bots). |
 | `replay.hpp/.cpp` | Input-log model. `replay()` re-simulates; `replay_frames()` builds `FrameState` vector. |
+| `replay_io.hpp/.cpp` | `write_replay`/`read_replay` (+ `_file` variants) for `ReplayLog`. |
+| `bot_iface.hpp` | `game::Bot` interface implemented by native fixtures and `WasmBot`. |
 | `frame.hpp/.cpp` | `FrameState` (renderable snapshot) and `replay_frames()`. |
 | `match.hpp/.cpp` | `run_match()`: drives tick loop, records replay log. |
 | `file_io.cpp` | Raw + Zstd file I/O. Zstd sections are `#ifdef`'d out under `__EMSCRIPTEN__`. |
@@ -101,6 +106,7 @@ must be true before use.
 | `ud_viz` | Terminal renderer (raw ANSI) |
 | `ud_viz_nc` | ncurses renderer (optional, requires libncurses) |
 | `ud_viz_imgui` | Dear ImGui, isometric 2:1 projection (optional, requires libglfw3-dev) |
+| `ud_shape_editor` | ImGui editor for unit render shapes; reads/writes `.udshapes` files (`shape_model.hpp`) |
 | `Makefile.em` | Emscripten browser build → `viz/web/index.html`; drag-and-drop `.ud` files |
 
 ImGui build fetches Dear ImGui v1.91.6 via CMake FetchContent. The browser build uses the same
@@ -147,7 +153,7 @@ Compile flags enforcing these: `-ffp-contract=off -fno-fast-math` (in `cmake/Com
 - **No magic numbers.** Every tunable goes in `config.hpp`.
 - **No bare `int` or `size_t` in state structs.** Use fixed-width types.
 - **`std::map` for anything iterated in game logic.**
-- C++20 (`set(CMAKE_CXX_STANDARD 20)`). Headers using `operator<=>` must `#include <compare>` — libc++ (Emscripten) does not pull it in transitively.
+- C++23 (`set(CMAKE_CXX_STANDARD 23)`; googletest is built at C++20). Headers using `operator<=>` must `#include <compare>` — libc++ (Emscripten) does not pull it in transitively.
 - clang-format configured at root: 2-space indent, 100 column limit.
 
 ---
@@ -161,7 +167,6 @@ Compile flags enforcing these: `-ffp-contract=off -fno-fast-math` (in `cmake/Com
 
 ## What Is NOT Built Yet
 
-- **Phase 3:** Voronoi territory (`territory.cpp` stubbed), descending win threshold, Claim Node fragility
 - **Phase 5 remainder:** deterministic profiler, local tester CLI
 - **Phase 6:** Tournament/ladder harness, stats aggregation
 - **Phase 7:** Balance calibration pass
