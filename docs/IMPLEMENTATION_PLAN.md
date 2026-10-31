@@ -166,7 +166,8 @@ struct StructureView {       // my structures: all of them, regardless of fog (A
 struct UnitView {            // my units: full info
   uint32_t id; uint16_t type; uint16_t _pad;
   int32_t x, y; int32_t hp;
-  uint16_t cooldown; uint16_t current_order; // order enum (Move/MoveAttack/Attack/Idle/...)
+  uint16_t current_order; uint16_t _pad2; // order enum (Move/MoveAttack/Attack/Idle/...)
+  int32_t cargo_energy, cargo_alloy;      // Drones: carried, not yet deposited
 };
 struct EnemyView {           // visible enemies: observable info only
   uint32_t id; uint16_t type; uint16_t _pad;

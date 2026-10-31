@@ -52,12 +52,18 @@ public:
       }
     }
 
+    const StructureView* core = find_structure(snap, StructureType::CommandCore);
+    if (core && core->producing == PRODUCING_NONE && snap.header.energy >= cfg::DRONE_COST_E) {
+      Command c = move_cmd(core->id, CommandKind::Produce, {0, 0});
+      c.aux = static_cast<uint16_t>(UnitType::Drone);
+      out.push_back(c); // refused at no cost once at the Drone cap
+    }
+
     for (const auto& u : snap.my_units) {
       if (u.id == deployer) continue;
       const Vec2 pos{u.x, u.y};
       if (static_cast<UnitType>(u.type) == UnitType::Drone) {
-        const Vec2 step =
-            router_.next_step(pos, [&](Vec2 p) { return near_resource(map_, p); });
+        const Vec2 step = harvest_step(router_, map_, snap, u);
         if (step != pos) out.push_back(move_cmd(u.id, CommandKind::Move, step));
         continue;
       }

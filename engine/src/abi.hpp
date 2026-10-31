@@ -74,6 +74,8 @@ struct UnitView { // my units: full info
   int32_t hp;
   uint16_t current_order;
   uint16_t _pad2;
+  int32_t cargo_energy; // Drones: carried, not yet deposited (always 0 for other types)
+  int32_t cargo_alloy;
 };
 
 // StructureView::producing when a Factory's queue is empty (and always, for other types).
@@ -149,7 +151,7 @@ static_assert(offsetof(SnapshotHeader, my_structures_off)    == 60,  "SnapshotHe
 static_assert(offsetof(SnapshotHeader, visible_enemy_structure_count) == 64, "SnapshotHeader layout changed");
 static_assert(offsetof(SnapshotHeader, enemy_structures_off) == 68,  "SnapshotHeader layout changed");
 
-static_assert(sizeof(UnitView) == 24,                    "UnitView ABI size changed");
+static_assert(sizeof(UnitView) == 32,                    "UnitView ABI size changed");
 static_assert(offsetof(UnitView, id)            ==  0,   "UnitView layout changed");
 static_assert(offsetof(UnitView, type)          ==  4,   "UnitView layout changed");
 static_assert(offsetof(UnitView, _pad)          ==  6,   "UnitView layout changed");
@@ -158,6 +160,8 @@ static_assert(offsetof(UnitView, y)             == 12,   "UnitView layout change
 static_assert(offsetof(UnitView, hp)            == 16,   "UnitView layout changed");
 static_assert(offsetof(UnitView, current_order) == 20,   "UnitView layout changed");
 static_assert(offsetof(UnitView, _pad2)         == 22,   "UnitView layout changed");
+static_assert(offsetof(UnitView, cargo_energy)  == 24,   "UnitView layout changed");
+static_assert(offsetof(UnitView, cargo_alloy)   == 28,   "UnitView layout changed");
 
 static_assert(sizeof(StructureView) == 24,                             "StructureView ABI size changed");
 static_assert(offsetof(StructureView, id)                    ==  0,   "StructureView layout changed");

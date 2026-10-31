@@ -67,6 +67,8 @@ Snapshot build_snapshot(const World& world, uint32_t faction_id, uint32_t tick_c
     uv.y = unit.pos.y;
     uv.hp = unit.hp;
     uv.current_order = static_cast<uint16_t>(unit.current_order);
+    uv.cargo_energy = unit.cargo_energy;
+    uv.cargo_alloy = unit.cargo_alloy;
     snap.my_units.push_back(uv);
   }
 

@@ -74,6 +74,9 @@ struct Unit {
 
   int32_t move_steps_remaining{0}; // steps left this tick's movement phase
 
+  int32_t cargo_energy{0}; // Drones: harvested, not yet deposited
+  int32_t cargo_alloy{0};
+
   bool alive() const { return hp > 0; }
   const UnitStats& stats() const { return stats_for(type); }
 };

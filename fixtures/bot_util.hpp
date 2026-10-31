@@ -1,5 +1,6 @@
 #pragma once
 #include "abi.hpp"
+#include "config.hpp"
 #include "entity.hpp"
 #include "grid.hpp"
 #include "snapshot.hpp"
@@ -21,6 +22,12 @@ namespace game {
 // the first step, since it will likely have gone by the time we get there. Planning through a
 // parked unit makes a bot walk up to it, turn back and try again forever. Enemy units are not
 // avoided.
+//
+// The lower id has right of way: a moving unit with a higher id doesn't block a first step,
+// because it treats ours as blocking and steps aside, and the engine lets us follow into the
+// tile it leaves. Two units meeting head-on in a corridor would otherwise both detour every
+// tick, forever; and since only one side plans through the other, they never swap (which the
+// engine blocks).
 class Router {
 public:
   void reset(const Map& map) {
@@ -29,6 +36,7 @@ public:
     last_pos_.clear();
     enemy_structure_.assign(n, 0);
     own_unit_.assign(n, 0);
+    own_id_.assign(n, 0);
     own_structure_.assign(n, 0);
     seen_.assign(n, 0);
     first_.assign(n, Vec2{});
@@ -45,6 +53,7 @@ public:
       now.emplace(u.id, p);
       auto it = last_pos_.find(u.id);
       own_unit_[idx(p)] = it != last_pos_.end() && it->second == p ? kParked : kMoving;
+      own_id_[idx(p)] = u.id;
     }
     last_pos_ = std::move(now);
     for (const auto& s : snap.my_structures) own_structure_[idx({s.x, s.y})] = 1;
@@ -57,6 +66,7 @@ public:
   // ties between equally short paths always resolve the same way.
   template <class Goal> Vec2 next_step(Vec2 from, Goal goal) {
     if (goal(from)) return from;
+    const uint32_t self = own_unit_[idx(from)] ? own_id_[idx(from)] : 0;
     ++generation_;
     seen_[idx(from)] = generation_;
     std::deque<Vec2> q{from};
@@ -68,7 +78,8 @@ public:
         if (!map_.passable(n)) continue;
         const size_t i = idx(n);
         if (seen_[i] == generation_ || enemy_structure_[i] || own_structure_[i]) continue;
-        if (own_unit_[i] == kParked || (p == from && own_unit_[i] == kMoving)) continue;
+        if (own_unit_[i] == kParked) continue;
+        if (p == from && own_unit_[i] == kMoving && own_id_[i] < self) continue;
         seen_[i] = generation_;
         first_[i] = p == from ? n : first_[idx(p)];
         if (goal(n)) return first_[i];
@@ -89,6 +100,7 @@ private:
   Map map_;
   std::map<uint32_t, Vec2> last_pos_; // own unit positions last tick
   std::vector<uint8_t> enemy_structure_, own_unit_, own_structure_;
+  std::vector<uint32_t> own_id_; // id of the own unit on each tile marked in own_unit_
   std::vector<uint32_t> seen_; // == generation_ when visited by the current search
   std::vector<Vec2> first_;    // the first step of the path that reached each tile
   uint32_t generation_{0};
@@ -113,6 +125,25 @@ inline bool near_resource(const Map& map, Vec2 p) {
       if (map.in_bounds(q) && map.tile_at(q).terrain == Terrain::ResourceNode) return true;
     }
   return false;
+}
+
+inline bool at_drop_off(const Snapshot& snap, Vec2 p) {
+  for (const auto& s : snap.my_structures) {
+    const auto type = static_cast<StructureType>(s.type);
+    if ((type == StructureType::CommandCore || type == StructureType::ClaimNode) &&
+        manhattan(p, {s.x, s.y}) <= cfg::DEPOSIT_RANGE)
+      return true;
+  }
+  return false;
+}
+
+// A Drone's next step round its harvest loop: out to a resource node until its cargo is full,
+// then back to a drop-off (own Command Core or Claim Node) to bank it.
+inline Vec2 harvest_step(Router& router, const Map& map, const Snapshot& snap, const UnitView& d) {
+  const Vec2 pos{d.x, d.y};
+  if (d.cargo_energy >= cfg::DRONE_CARGO_ENERGY || d.cargo_alloy >= cfg::DRONE_CARGO_ALLOY)
+    return router.next_step(pos, [&](Vec2 p) { return at_drop_off(snap, p); });
+  return router.next_step(pos, [&](Vec2 p) { return near_resource(map, p); });
 }
 
 inline Command move_cmd(uint32_t unit_id, CommandKind kind, Vec2 to) {

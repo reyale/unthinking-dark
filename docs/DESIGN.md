@@ -120,7 +120,8 @@ fn on_tick(world: WorldView) -> Vec<Command>   // per tick, lean fuel budget
 Contains only what fog permits:
 - `tick`: current tick number
 - `my_faction_id`
-- `my_units`: full info — `{id, type, pos, hp, cooldowns, current_order, ...}`
+- `my_units`: full info — `{id, type, pos, hp, current_order, cargo}` (cargo: a Drone's
+  carried Energy/Alloy, not yet deposited)
 - `visible_enemies`: `{id, type, pos, hp, ...}` for enemies currently in vision
 - `visible_tiles`: terrain / resources / occupancy within vision
 - `my_resources`: `{energy, alloy}`
@@ -202,9 +203,15 @@ for step in 1..=N:
 - Apply deaths at end of phase.
 
 ### Phase 4 — Economy
-- Harvest (Drones on/adjacent to resource nodes) credits `energy` / `alloy`.
+- Harvest: a Drone on or adjacent to a resource node adds `HARVEST_ENERGY` /
+  `HARVEST_ALLOY` to its **cargo** (once per tick however many nodes it touches), up to
+  `DRONE_CARGO_ENERGY` / `DRONE_CARGO_ALLOY`. Cargo is not spendable.
+- Deposit: a Drone within `DEPOSIT_RANGE` (v1: 1) of its own Command Core or a Claim Node
+  banks its whole cargo into the faction's `energy` / `alloy`. Harvest runs first, so a
+  Drone between a node and a drop-off banks every tick. A Drone that dies loses its cargo.
 - Spend resolves in deterministic id order: builds, production, claim deployment; costs
-  deducted. Insufficient resources → action fails (logged).
+  deducted. Insufficient resources → action fails (logged). Producing a Drone also fails at
+  the **Drone cap** (§6).
 - Only Drones Build or DeployClaim (anything else is rejected at validation). Both need a
   free target tile at this point (after movement): passable, no structure, no living unit.
   The tile must also be near the Drone (Manhattan): within `BUILD_RANGE` (v1: 1) for a
@@ -260,8 +267,15 @@ units nearby is not blind.
 **Resources (2 types, v1):**
 - **Energy** — gates combat ships (spent at Factory).
 - **Alloy** — gates structures (Factories, Claim Nodes).
-- Drones harvest both from asteroid-embedded nodes. (A 3rd resource is a possible add if
-  build orders prove too flat — defer.)
+- Drones harvest both from asteroid-embedded nodes and must **carry** them back: income
+  only counts once deposited at the faction's own Command Core or a Claim Node (§5 Phase 4).
+  A claim next to a node is a drop-off as well as territory. (A 3rd resource is a possible
+  add if build orders prove too flat — defer.)
+
+**Drone cap:** `DRONES_PER_CLAIM` (v1: 1) per living Claim Node plus `DRONES_PER_CORE`
+(v1: 1) per living Command Core, so a side starts with room for one Drone and grows its
+economy by expanding. Drones queued in the Core count. Produce at the cap is refused at no
+cost; losing a claim never kills Drones, it only blocks producing more until back under.
 
 **Unit cap:** economy-gated soft cap + a hard ceiling (`UNIT_HARD_CAP`, v1 256 per side) purely
 to bound fuel/memory worst-case and keep rendering legible. A ship counts from the moment it is

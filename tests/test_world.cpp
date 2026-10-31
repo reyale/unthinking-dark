@@ -239,24 +239,81 @@ TEST(Fixed, IsqrtMonotonic) {
 
 // ---- Economy ------------------------------------------------------------
 
-TEST(Economy, DroneHarvestsAdjacentResource) {
+TEST(Economy, DroneHarvestsIntoItsCargoNotTheBank) {
   auto w = make_world();
   w.map.set_terrain({2, 1}, game::Terrain::ResourceNode, 100);
-  w.spawn_unit({0}, game::UnitType::Drone, {1, 1});
+  auto& d = w.spawn_unit({0}, game::UnitType::Drone, {1, 1});
   game::ValidatedCommands empty;
   game::run_economy(w, empty, empty);
-  EXPECT_GT(w.res({0}).energy, 0);
-  EXPECT_GT(w.res({0}).alloy, 0);
+  EXPECT_EQ(d.cargo_energy, game::cfg::HARVEST_ENERGY);
+  EXPECT_EQ(d.cargo_alloy, game::cfg::HARVEST_ALLOY);
+  EXPECT_EQ(w.res({0}).energy, 0);
+  EXPECT_EQ(w.res({0}).alloy, 0);
 }
 
 TEST(Economy, DroneAtEdgeCausesOOBNeighborCheck) {
   // Drone at column 0 — left neighbor (-1,y) is out of bounds.
   auto w = make_world();
   w.map.set_terrain({1, 0}, game::Terrain::ResourceNode, 100);
-  w.spawn_unit({0}, game::UnitType::Drone, {0, 0});
+  auto& d = w.spawn_unit({0}, game::UnitType::Drone, {0, 0});
   game::ValidatedCommands empty;
   game::run_economy(w, empty, empty);
-  EXPECT_GT(w.res({0}).energy, 0); // valid right neighbor is still harvested
+  EXPECT_GT(d.cargo_energy, 0); // valid right neighbor is still harvested
+}
+
+TEST(Economy, OneHarvestPerTickHoweverManyNodesTouched) {
+  auto w = make_world();
+  w.map.set_terrain({2, 1}, game::Terrain::ResourceNode, 100);
+  w.map.set_terrain({0, 1}, game::Terrain::ResourceNode, 100);
+  w.map.set_terrain({1, 1}, game::Terrain::ResourceNode, 100);
+  auto& d = w.spawn_unit({0}, game::UnitType::Drone, {1, 1});
+  game::ValidatedCommands empty;
+  game::run_economy(w, empty, empty);
+  EXPECT_EQ(d.cargo_energy, game::cfg::HARVEST_ENERGY);
+}
+
+TEST(Economy, CargoStopsAtCapacity) {
+  auto w = make_world();
+  w.map.set_terrain({2, 1}, game::Terrain::ResourceNode, 100);
+  auto& d = w.spawn_unit({0}, game::UnitType::Drone, {1, 1});
+  game::ValidatedCommands empty;
+  for (int t = 0; t < 50; ++t) game::run_economy(w, empty, empty);
+  EXPECT_EQ(d.cargo_energy, game::cfg::DRONE_CARGO_ENERGY);
+  EXPECT_EQ(d.cargo_alloy, game::cfg::DRONE_CARGO_ALLOY);
+}
+
+TEST(Economy, CargoIsBankedAtOwnCoreOrClaimOnly) {
+  auto w = make_world();
+  w.spawn_structure({0}, game::StructureType::CommandCore, {2, 2});
+  w.spawn_structure({0}, game::StructureType::ClaimNode, {8, 2});
+  w.spawn_structure({1}, game::StructureType::ClaimNode, {2, 8});
+  auto& at_core  = w.spawn_unit({0}, game::UnitType::Drone, {3, 2});
+  auto& at_claim = w.spawn_unit({0}, game::UnitType::Drone, {8, 3});
+  auto& at_enemy = w.spawn_unit({0}, game::UnitType::Drone, {2, 7});
+  auto& too_far  = w.spawn_unit({0}, game::UnitType::Drone, {4, 2}); // distance 2 from core
+  for (game::Unit* d : {&at_core, &at_claim, &at_enemy, &too_far}) {
+    d->cargo_energy = 6;
+    d->cargo_alloy = 3;
+  }
+  game::ValidatedCommands empty;
+  game::run_economy(w, empty, empty);
+  EXPECT_EQ(w.res({0}).energy, 12);
+  EXPECT_EQ(w.res({0}).alloy, 6);
+  EXPECT_EQ(at_core.cargo_energy, 0);
+  EXPECT_EQ(at_claim.cargo_alloy, 0);
+  EXPECT_EQ(at_enemy.cargo_energy, 6);
+  EXPECT_EQ(too_far.cargo_energy, 6);
+  EXPECT_EQ(w.res({1}).energy, 0);
+}
+
+TEST(Economy, DroneBetweenNodeAndDropOffBanksTheSameTick) {
+  auto w = make_world();
+  w.spawn_structure({0}, game::StructureType::ClaimNode, {1, 2});
+  w.map.set_terrain({2, 1}, game::Terrain::ResourceNode, 100);
+  w.spawn_unit({0}, game::UnitType::Drone, {1, 1});
+  game::ValidatedCommands empty;
+  game::run_economy(w, empty, empty);
+  EXPECT_EQ(w.res({0}).energy, game::cfg::HARVEST_ENERGY);
 }
 
 TEST(Economy, DepletedResourceNodeYieldsNothing) {
@@ -1115,6 +1172,49 @@ TEST(Economy, CoreProducesADroneBesideIt) {
   const auto& d = w.units.begin()->second;
   EXPECT_EQ(d.type, game::UnitType::Drone);
   EXPECT_EQ(game::manhattan(d.pos, core.pos), 1);
+}
+
+TEST(Economy, DroneCapIsOnePerClaimPlusOneForTheCore) {
+  auto w = make_world();
+  auto& core = w.spawn_structure({0}, game::StructureType::CommandCore, {5, 5});
+  w.res({0}).energy = 1000;
+  game::ValidatedCommands empty;
+  auto produce = [&] {
+    game::ValidatedCommands cmds;
+    cmds.emplace(core.id, produce_cmd(core.id.value, game::UnitType::Drone));
+    game::run_economy(w, cmds, empty);
+    for (int32_t t = 1; t < game::cfg::PRODUCTION_TICKS; ++t) game::run_economy(w, empty, empty);
+  };
+  produce();
+  EXPECT_EQ(w.units.size(), 1u);
+  produce(); // cap 1: refused at no cost
+  EXPECT_EQ(w.units.size(), 1u);
+  EXPECT_EQ(w.res({0}).energy, 1000 - game::cfg::DRONE_COST_E);
+
+  auto& claim = w.spawn_structure({0}, game::StructureType::ClaimNode, {9, 9});
+  w.spawn_structure({1}, game::StructureType::ClaimNode, {1, 9}); // the enemy's adds nothing
+  produce();
+  EXPECT_EQ(w.units.size(), 2u);
+  produce();
+  EXPECT_EQ(w.units.size(), 2u);
+
+  claim.hp = 0; // losing the claim leaves both Drones alive
+  produce();
+  EXPECT_EQ(w.units.size(), 2u);
+}
+
+TEST(Economy, QueuedDroneCountsTowardTheDroneCap) {
+  auto w = make_world();
+  auto& core = w.spawn_structure({0}, game::StructureType::CommandCore, {5, 5});
+  auto& core2 = w.spawn_structure({0}, game::StructureType::CommandCore, {9, 9});
+  w.spawn_unit({0}, game::UnitType::Drone, {1, 1});
+  w.res({0}).energy = 1000;
+  game::ValidatedCommands cmds, empty;
+  cmds.emplace(core.id, produce_cmd(core.id.value, game::UnitType::Drone));
+  cmds.emplace(core2.id, produce_cmd(core2.id.value, game::UnitType::Drone));
+  game::run_economy(w, cmds, empty); // cap 2, one Drone alive: only the first is bought
+  EXPECT_TRUE(core.production_queue.has_value());
+  EXPECT_FALSE(core2.production_queue.has_value());
 }
 
 TEST(Economy, BuildRangeIsOne) {

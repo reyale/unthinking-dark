@@ -3,31 +3,67 @@
 #include "entity.hpp"
 #include "grid.hpp"
 #include "config.hpp"
+#include <algorithm>
 
 namespace game {
 
+static bool touches_resource(const World& world, Vec2 pos) {
+  for (const Vec2& p : {pos, pos + DIRS[0], pos + DIRS[1], pos + DIRS[2], pos + DIRS[3]}) {
+    if (!world.map.in_bounds(p))
+      continue;
+    const Tile& tile = world.map.tile_at(p);
+    if (tile.terrain == Terrain::ResourceNode && tile.resource_amount > 0)
+      return true;
+  }
+  return false;
+}
+
+static bool at_drop_off(const World& world, const Unit& drone) {
+  for (const auto& [sid, s] : world.structures)
+    if (s.alive() && s.faction == drone.faction &&
+        (s.type == StructureType::CommandCore || s.type == StructureType::ClaimNode) &&
+        manhattan(s.pos, drone.pos) <= cfg::DEPOSIT_RANGE)
+      return true;
+  return false;
+}
+
+// Harvest before depositing, so a Drone between a node and a drop-off banks every tick.
 static void harvest(World& world) {
-  for (const auto& [uid, unit] : world.units) {
+  for (auto& [uid, unit] : world.units) {
     if (!unit.alive() || unit.type != UnitType::Drone)
       continue;
-    // Check current tile and 4 neighbours for resource nodes
-    for (int32_t dy = -1; dy <= 1; ++dy) {
-      for (int32_t dx = -1; dx <= 1; ++dx) {
-        if (dx != 0 && dy != 0)
-          continue; // 4-connected only
-        Vec2 p{unit.pos.x + dx, unit.pos.y + dy};
-        if (!world.map.in_bounds(p))
-          continue;
-        const Tile& tile = world.map.tile_at(p);
-        if (tile.terrain != Terrain::ResourceNode)
-          continue;
-        if (tile.resource_amount <= 0)
-          continue;
-        world.res(unit.faction).energy += cfg::HARVEST_ENERGY;
-        world.res(unit.faction).alloy += cfg::HARVEST_ALLOY;
-      }
+    if (touches_resource(world, unit.pos)) {
+      unit.cargo_energy =
+          std::min(cfg::DRONE_CARGO_ENERGY, unit.cargo_energy + cfg::HARVEST_ENERGY);
+      unit.cargo_alloy = std::min(cfg::DRONE_CARGO_ALLOY, unit.cargo_alloy + cfg::HARVEST_ALLOY);
+    }
+    if ((unit.cargo_energy > 0 || unit.cargo_alloy > 0) && at_drop_off(world, unit)) {
+      world.res(unit.faction).energy += unit.cargo_energy;
+      world.res(unit.faction).alloy += unit.cargo_alloy;
+      unit.cargo_energy = 0;
+      unit.cargo_alloy = 0;
     }
   }
+}
+
+static int32_t drone_cap(const World& world, FactionId f) {
+  int32_t cap = 0;
+  for (const auto& [sid, s] : world.structures) {
+    if (!s.alive() || s.faction != f)
+      continue;
+    if (s.type == StructureType::ClaimNode) cap += cfg::DRONES_PER_CLAIM;
+    if (s.type == StructureType::CommandCore) cap += cfg::DRONES_PER_CORE;
+  }
+  return cap;
+}
+
+static int32_t drone_count(const World& world, FactionId f) {
+  int32_t n = 0;
+  for (const auto& [uid, u] : world.units)
+    if (u.alive() && u.faction == f && u.type == UnitType::Drone) ++n;
+  for (const auto& [sid, s] : world.structures)
+    if (s.alive() && s.faction == f && s.production_queue == UnitType::Drone) ++n;
+  return n;
 }
 
 // Live units plus ships already paid for and queued: a queued ship spawns whatever happens next,
@@ -67,6 +103,9 @@ static void spend(World& world, const ValidatedCommands& cmds_a, const Validated
         continue;
 
       auto utype = static_cast<UnitType>(cmd.aux);
+      if (utype == UnitType::Drone &&
+          drone_count(world, fac->faction) >= drone_cap(world, fac->faction))
+        continue;
       int32_t cost_e = 0, cost_a = 0;
       switch (utype) {
       case UnitType::Drone:

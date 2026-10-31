@@ -44,6 +44,8 @@ void StateHash::update(const World& world) {
     s.write(unit.pos.y);
     s.write(unit.hp);
     s.write(static_cast<uint8_t>(unit.current_order));
+    s.write(unit.cargo_energy);
+    s.write(unit.cargo_alloy);
   }
 
   // Structures in ascending id order

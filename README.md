@@ -15,7 +15,7 @@ Each bot compiles to WASM and receives a fog-masked snapshot of the battlefield 
 
 | Unit | Role | Special |
 |------|------|---------|
-| Drone | Economy | Harvests resources, builds structures |
+| Drone | Economy | Harvests resources and carries them to a Command Core or Claim Node, builds structures. One per claim, plus one |
 | Interceptor | Brawler | Fast, high collision priority |
 | Frigate | Ranged | First-strike; fires before the simultaneous phase |
 | Artillery | Siege | Radius splash with friendly fire; cracks Claim Nodes |
