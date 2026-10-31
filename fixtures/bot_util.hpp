@@ -5,6 +5,7 @@
 #include "grid.hpp"
 #include "snapshot.hpp"
 #include <algorithm>
+#include <climits>
 #include <cstdint>
 #include <deque>
 #include <map>
@@ -144,6 +145,35 @@ inline Vec2 harvest_step(Router& router, const Map& map, const Snapshot& snap, c
   if (d.cargo_energy >= cfg::DRONE_CARGO_ENERGY || d.cargo_alloy >= cfg::DRONE_CARGO_ALLOY)
     return router.next_step(pos, [&](Vec2 p) { return at_drop_off(snap, p); });
   return router.next_step(pos, [&](Vec2 p) { return near_resource(map, p); });
+}
+
+// A claim under construction only progresses while an own Drone stays within
+// CLAIM_DEPLOY_RANGE, so each unfinished claim keeps the Drone nearest to it (ties: lower id)
+// as its builder. Returns builder id → claim position.
+inline std::map<uint32_t, Vec2> claim_builders(const Snapshot& snap) {
+  std::map<uint32_t, Vec2> out;
+  for (const auto& s : snap.my_structures) {
+    if (static_cast<StructureType>(s.type) != StructureType::ClaimNode || s.build_ticks_left == 0)
+      continue;
+    const UnitView* best = nullptr;
+    int32_t best_dist = INT32_MAX;
+    for (const auto& u : snap.my_units) {
+      if (static_cast<UnitType>(u.type) != UnitType::Drone || out.contains(u.id)) continue;
+      const int32_t d = manhattan({u.x, u.y}, {s.x, s.y});
+      if (d < best_dist) {
+        best_dist = d;
+        best = &u;
+      }
+    }
+    if (best) out.emplace(best->id, Vec2{s.x, s.y});
+  }
+  return out;
+}
+
+// A builder's step: toward its claim until within CLAIM_DEPLOY_RANGE, then hold.
+inline Vec2 builder_step(Router& router, const UnitView& d, Vec2 claim) {
+  return router.next_step({d.x, d.y},
+                          [&](Vec2 p) { return manhattan(p, claim) <= cfg::CLAIM_DEPLOY_RANGE; });
 }
 
 inline Command move_cmd(uint32_t unit_id, CommandKind kind, Vec2 to) {

@@ -349,3 +349,32 @@ TEST(CombatLog, StructureKillRecorded) {
   EXPECT_EQ(log.kills[0].structure, core_id);
   EXPECT_EQ(log.kills[0].structure_type, game::StructureType::CommandCore);
 }
+
+// ---- Nebulae hide targets ---------------------------------------------------
+
+TEST(Combat, EnemyHiddenInNebulaCannotBeTargeted) {
+  auto w = make_combat_world();
+  w.map.set_terrain({5, 5}, game::Terrain::Nebula);
+  auto& frigate = w.spawn_unit({0}, game::UnitType::Frigate, {2, 5}); // range 4, distance 3
+  auto& drone = w.spawn_unit({1}, game::UnitType::Drone, {5, 5});
+  game::Command c{};
+  c.entity_id = frigate.id.value;
+  c.kind = static_cast<uint16_t>(game::CommandKind::Attack);
+  c.target_id = drone.id.value; // an explicit target doesn't help either
+  game::ValidatedCommands cmds, empty;
+  cmds.emplace(frigate.id, c);
+  game::run_combat(w, cmds, empty);
+  EXPECT_EQ(drone.hp, game::stats_for(game::UnitType::Drone).hp);
+}
+
+TEST(Combat, ASpotterBesideTheNebulaExposesItsOccupant) {
+  auto w = make_combat_world();
+  w.map.set_terrain({5, 5}, game::Terrain::Nebula);
+  auto& frigate = w.spawn_unit({0}, game::UnitType::Frigate, {2, 5});
+  w.spawn_unit({0}, game::UnitType::Drone, {5, 6}); // within NEBULA_SIGHT of the target
+  const game::UnitId drone = w.spawn_unit({1}, game::UnitType::Drone, {5, 5}).id;
+  game::ValidatedCommands empty;
+  game::run_combat(w, attack_cmd(frigate.id), empty);
+  const game::Unit* d = w.find_unit(drone); // purged if the shot killed it
+  EXPECT_TRUE(!d || d->hp < game::stats_for(game::UnitType::Drone).hp);
+}

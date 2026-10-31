@@ -56,6 +56,7 @@ void StateHash::update(const World& world) {
     s.write(str.pos.x);
     s.write(str.pos.y);
     s.write(str.hp);
+    s.write(str.build_ticks_left);
   }
 
   // Resources per faction (fixed order 0, 1)

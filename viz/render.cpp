@@ -1,5 +1,6 @@
 #include "render.hpp"
 #include "entity.hpp"
+#include "vision.hpp"
 #include <cstdlib>
 
 namespace viz {
@@ -78,7 +79,8 @@ RenderFrame build_render_frame(const game::FrameState& frame, const game::Map& m
           if (std::abs(dx) + std::abs(dy) > sight)
             continue;
           int32_t nx = uf.pos.x + dx, ny = uf.pos.y + dy;
-          if (nx >= 0 && nx < W && ny >= 0 && ny < H)
+          if (nx >= 0 && nx < W && ny >= 0 && ny < H &&
+              game::sees_tile(map, uf.pos, sight, {nx, ny}))
             rf.cells[static_cast<size_t>(ny * W + nx)].visible = true;
         }
       }
@@ -96,7 +98,7 @@ RenderFrame build_render_frame(const game::FrameState& frame, const game::Map& m
     size_t idx = static_cast<size_t>(sf.pos.y * W + sf.pos.x);
     if (!rf.cells[idx].visible)
       continue;
-    rf.cells[idx].glyph = structure_glyph(sf.type);
+    rf.cells[idx].glyph = sf.build_ticks_left > 0 ? 'n' : structure_glyph(sf.type);
     rf.cells[idx].color = faction_color(sf.faction.value);
   }
   for (const auto& uf : frame.units) {

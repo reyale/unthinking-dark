@@ -7,6 +7,8 @@
 
 namespace game {
 
+class NebulaSight;
+
 struct World;
 struct Unit;
 
@@ -53,14 +55,16 @@ struct CombatLog {
 //   Mutual kills both die. Artillery splash hits a radius-1 area, friendly
 //   fire included, all simultaneous.
 //
-// Targeting: explicit target if valid and in range; else nearest enemy in
-//   range (Manhattan); else no attack.
+// Targeting: explicit target if valid, in range and seen; else nearest enemy in
+//   range (Manhattan) that the attacker's faction sees (only a nebula hides); else no attack.
 void run_combat(World& world, const ValidatedCommands& cmds_a, const ValidatedCommands& cmds_b,
                 CombatLog* log = nullptr);
 
 // True if `unit` has anything it could attack right now: a living enemy unit or
-// structure within its range. Movement uses this to halt MoveAttack units, so a
-// unit stops at full range whether it is closing on a ship or a building.
-bool target_in_range(const World& world, const Unit& unit);
+// structure within its range that its faction can see (nebulae hide). Movement uses this to
+// halt MoveAttack units, so a unit stops at full range whether it is closing on a ship or a
+// building.
+bool target_in_range(const World& world, const Unit& unit, const NebulaSight& sight);
+bool target_in_range(const World& world, const Unit& unit); // builds the NebulaSight itself
 
 } // namespace game

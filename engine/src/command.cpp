@@ -70,14 +70,8 @@ ValidatedCommands validate_commands(const World& world, uint32_t faction_id,
       }
       break;
     }
-    case CommandKind::Gather: {
-      Vec2 node{cmd.ax, cmd.ay};
-      if (!world.map.in_bounds(node))
-        continue;
-      if (world.map.tile_at(node).terrain != Terrain::ResourceNode)
-        continue;
-      break;
-    }
+    case CommandKind::Gather:
+      continue; // reserved: harvesting is automatic for a Drone beside a node
     case CommandKind::Build:
     case CommandKind::DeployClaim: {
       if (unit->type != UnitType::Drone)

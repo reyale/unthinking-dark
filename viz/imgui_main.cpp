@@ -9,6 +9,7 @@
 #include <GLFW/glfw3.h>
 
 #include "config.hpp"
+#include "vision.hpp"
 #include "entity.hpp"
 #include "frame.hpp"
 #include "grid.hpp"
@@ -69,9 +70,10 @@ static game::Map map_from_log(const game::ReplayLog& log) {
 static constexpr ImVec4 kFogBg    = {0.06f, 0.06f, 0.08f, 1.0f};
 static constexpr ImVec4 kOpenBg   = {0.14f, 0.14f, 0.18f, 1.0f};
 static constexpr ImVec4 kAsteroid = {0.19f, 0.17f, 0.15f, 1.0f}; // dust under the rocks
-static constexpr ImVec4 kNebula   = {0.22f, 0.15f, 0.35f, 1.0f};
+static constexpr ImVec4 kNebula   = {0.17f, 0.13f, 0.26f, 1.0f}; // ground under the gas
 static constexpr ImVec4 kResource = {0.24f, 0.20f, 0.14f, 1.0f}; // ground under the crystals
 static constexpr ImVec4 kCargo    = {1.0f, 0.72f, 0.18f, 1.0f}; // Drone hold bar
+static constexpr float  kGhostAlpha = 0.45f; // a Claim Node still under construction
 
 static ImU32  u32(const ImVec4& c) { return ImGui::ColorConvertFloat4ToU32(c); }
 static ImVec4 dim_vec(ImVec4 c, float f) { return {c.x*f, c.y*f, c.z*f, c.w}; }
@@ -98,6 +100,8 @@ struct CellData {
   float    rock{0.0f}; // asteroid brightness to draw at; 0 = no asteroid
   float    cargo{0.0f}; // Drone hold fill, 0..1
   float    crystal{0.0f}; // resource-node brightness to draw at; 0 = no node
+  float    built{1.0f};   // Claim Node construction progress, 0..1; below 1 it draws as a ghost
+  float    gas{0.0f};     // nebula brightness to draw at; 0 = no nebula
 };
 
 // ---- Cell data builder ----------------------------------------------------
@@ -111,17 +115,16 @@ static int structure_facing(const game::Map& map, int32_t x, int32_t y) {
 // view: -1 = god (everything), -2 = union of both factions, 0/1 = that faction.
 // Line of sight this frame: what units and structures can be shown. Terrain stays known once
 // seen (tile_explored).
-static bool tile_visible(const game::FrameState& fr, int view, int32_t x, int32_t y) {
+static bool tile_visible(const game::Map& map, const game::FrameState& fr, int view, int32_t x,
+                         int32_t y) {
   if (view == -1) return true;
   for (const auto& u : fr.units) {
     if (view >= 0 && static_cast<int>(u.faction.value) != view) continue;
-    if (std::abs(x - u.pos.x) + std::abs(y - u.pos.y) <= game::stats_for(u.type).sight)
-      return true;
+    if (game::sees_tile(map, u.pos, game::stats_for(u.type).sight, {x, y})) return true;
   }
   for (const auto& s : fr.structures) {
     if (view >= 0 && static_cast<int>(s.faction.value) != view) continue;
-    if (s.hp > 0 && std::abs(x - s.pos.x) + std::abs(y - s.pos.y) <= game::cfg::STRUCTURE_SIGHT)
-      return true;
+    if (s.hp > 0 && game::sees_tile(map, s.pos, game::cfg::STRUCTURE_SIGHT, {x, y})) return true;
   }
   return false;
 }
@@ -147,7 +150,7 @@ static float cargo_fill(const game::UnitFrame& u) {
 static CellData make_cell(const game::Map& map, const game::FrameState& fr,
                            const std::vector<uint8_t>& facings, int frame,
                            int view, int32_t x, int32_t y) {
-  if (!tile_visible(fr, view, x, y)) {
+  if (!tile_visible(map, fr, view, x, y)) {
     // Out of sight: terrain once seen is still known, but nothing on it is shown.
     CellData fog{tile_explored(view, frame, x, y) ? dim_vec(terrain_bg(map, x, y), kRememberedDim)
                                                   : kFogBg};
@@ -162,8 +165,11 @@ static CellData make_cell(const game::Map& map, const game::FrameState& fr,
     char g = s.type == game::StructureType::CommandCore ? 'C' :
              s.type == game::StructureType::Factory     ? 'T' : 'N';
     ImVec4 fg = s.faction.value == 0 ? kFactionA : kFactionB;
-    return {bg, g, false, game::UnitType::Drone, shape_index(s.type), fg, s.hp, s.max_hp,
-            structure_facing(map, x, y), s.id.value, true};
+    CellData cd{bg, g, false, game::UnitType::Drone, shape_index(s.type), fg, s.hp, s.max_hp,
+                structure_facing(map, x, y), s.id.value, true};
+    if (s.build_ticks_left > 0)
+      cd.built = 1.0f - static_cast<float>(s.build_ticks_left) / game::cfg::CLAIM_BUILD_TICKS;
+    return cd;
   }
 
   int top = -1;
@@ -266,7 +272,7 @@ static void update_zones() {
   if (g.zones_frame == g.cur) return;
   std::vector<game::ClaimAnchor> claims;
   for (const auto& s : g.frames[static_cast<size_t>(g.cur)].structures)
-    if (s.type == game::StructureType::ClaimNode && s.hp > 0)
+    if (s.type == game::StructureType::ClaimNode && s.hp > 0 && s.build_ticks_left == 0)
       claims.push_back({s.pos, s.faction.value});
   g.zones = game::territory_owners(g.map, claims);
   g.zone_pct = game::territory_pct(g.map, g.zones);
@@ -326,8 +332,10 @@ static void compute_first_seen() {
     const auto& fr = g.frames[frame];
     auto see_around = [&](uint32_t f, game::Vec2 c, int32_t r) {
       for (int32_t dy = -r; dy <= r; ++dy)
-        for (int32_t dx = -(r - std::abs(dy)); dx <= r - std::abs(dy); ++dx)
-          mark(f, c.x + dx, c.y + dy, frame);
+        for (int32_t dx = -(r - std::abs(dy)); dx <= r - std::abs(dy); ++dx) {
+          const game::Vec2 p{c.x + dx, c.y + dy};
+          if (g.map.in_bounds(p) && game::sees_tile(g.map, c, r, p)) mark(f, p.x, p.y, frame);
+        }
     };
     for (const auto& u : fr.units) see_around(u.faction.value, u.pos, game::stats_for(u.type).sight);
     for (const auto& s : fr.structures)
@@ -470,8 +478,8 @@ static ImVec4 mix_white(ImVec4 c, float t) {
 }
 
 static bool shot_visible(const game::FrameState& fr, const game::ShotEvent& sh) {
-  return tile_visible(fr, g.view, sh.from.x, sh.from.y) ||
-         tile_visible(fr, g.view, sh.to.x, sh.to.y);
+  return tile_visible(g.map, fr, g.view, sh.from.x, sh.from.y) ||
+         tile_visible(g.map, fr, g.view, sh.to.x, sh.to.y);
 }
 
 static int32_t splash_radius(const game::ShotEvent& sh) {
@@ -533,7 +541,7 @@ static void spawn_fx(int frame, double now) {
   }
 
   for (const auto& kl : fr.kills) {
-    if (!tile_visible(fr, g.view, kl.pos.x, kl.pos.y)) continue;
+    if (!tile_visible(g.map, fr, g.view, kl.pos.x, kl.pos.y)) continue;
     double t = -1.0;
     for (size_t i = 0; i < fr.shots.size(); ++i) {
       const auto& sh = fr.shots[i];
@@ -1010,6 +1018,46 @@ static void draw_crystals(ImDrawList* dl, ImVec2 ctr, float cw2, float ch2, int3
     draw_shard(dl, shards[i].base, shards[i].w, shards[i].h, shards[i].lean, bright);
 }
 
+// Nebulae are drifting gas: overlapping translucent puffs that spill past their tile, so a
+// patch reads as one cloud. Drawn twice: thick under units, then a thin veil over everything,
+// so a ship inside looks like it is in the gas.
+static constexpr ImVec4 kGasDeep  = {0.46f, 0.24f, 0.70f, 1.0f};
+static constexpr ImVec4 kGasLight = {0.42f, 0.55f, 0.92f, 1.0f};
+static constexpr int    kGasPuffs = 6;
+static constexpr int    kGasRings = 4;
+static constexpr float  kGasDrift = 0.07f;  // fraction of a tile the puffs wander
+static constexpr float  kGasSpeed = 0.22f;  // radians per second
+static constexpr float  kGasUnder = 0.55f;  // puff opacity beneath units (summed over rings)
+static constexpr float  kGasVeil  = 0.22f;  // ...and over them
+
+static void draw_gas(ImDrawList* dl, ImVec2 ctr, float cw2, float ch2, int32_t x, int32_t y,
+                     float bright, double now, float opacity) {
+  TileRand rnd{x, y, 202};
+  for (int i = 0; i < kGasPuffs; ++i) {
+    const float phase = rnd.next() * 6.2832f;
+    const float t = static_cast<float>(now) * kGasSpeed + phase;
+    const float ox = rnd.next() * 2.0f - 1.0f;
+    const float oy = rnd.next() * 2.0f - 1.0f;
+    const ImVec2 c = {ctr.x + (ox * 0.5f + std::sin(t) * kGasDrift) * cw2,
+                      ctr.y + (oy * 0.5f + std::cos(t * 0.8f) * kGasDrift) * ch2};
+    const float rx = cw2 * (0.55f + 0.30f * rnd.next());
+    const float k = rnd.next();
+    const ImVec4 tone = {kGasDeep.x + (kGasLight.x - kGasDeep.x) * k,
+                         kGasDeep.y + (kGasLight.y - kGasDeep.y) * k,
+                         kGasDeep.z + (kGasLight.z - kGasDeep.z) * k, 1.0f};
+    const float a = opacity * bright * (0.75f + 0.25f * std::sin(t * 1.3f));
+    // Stacked rings, faint and wide to dense and small: the puff thins out at its edge.
+    for (int ring = 0; ring < kGasRings; ++ring) {
+      const float s = 1.0f - 0.22f * static_cast<float>(ring);
+      const float lift = 0.06f * static_cast<float>(ring);
+      dl->AddEllipseFilled({c.x - rx * 0.08f * ring, c.y - rx * 0.05f * ring},
+                           {rx * s, rx * s * 0.55f},
+                           u32({tone.x + lift, tone.y + lift, tone.z + lift * 0.5f,
+                                a / kGasRings}));
+    }
+  }
+}
+
 // ---- Claim zones ------------------------------------------------------------
 
 static constexpr float kZoneTint     = 0.30f; // faction colour mixed into an owned tile
@@ -1083,11 +1131,13 @@ static void draw_tile_cell(ImDrawList* dl, ImVec2 ctr, float cw2, float ch2,
   draw_zone_edges(dl, ctr, top, right, bottom, left, cd, x, y);
   if (cd.rock > 0.0f) draw_asteroid(dl, ctr, cw2, ch2, x, y, cd.rock);
   if (cd.crystal > 0.0f) draw_crystals(dl, ctr, cw2, ch2, x, y, cd.crystal);
+  if (cd.gas > 0.0f) draw_gas(dl, ctr, cw2, ch2, x, y, cd.gas, glfwGetTime(), kGasUnder);
 
   if (cd.shape >= 0) {
     const float flash = hit_flash(cd.is_struct, cd.id, {x, y}, glfwGetTime());
-    draw_unit_from_def(dl, ctr, cw2, ch2, g.shape_defs[cd.shape],
-                       u32(mix_white(cd.fg, 0.75f * flash)), cd.facing);
+    ImVec4 col = mix_white(cd.fg, 0.75f * flash);
+    if (cd.built < 1.0f) col.w = kGhostAlpha;
+    draw_unit_from_def(dl, ctr, cw2, ch2, g.shape_defs[cd.shape], u32(col), cd.facing);
   }
 
   if (cd.glyph) {
@@ -1113,6 +1163,15 @@ static void draw_tile_cell(ImDrawList* dl, ImVec2 ctr, float cw2, float ch2,
     float  bw     = std::max(2.0f, ch2 * 0.3f);
     dl->AddLine(right, bottom, u32({0.08f, 0.08f, 0.08f, 1.0f}), bw);
     dl->AddLine(right, hp_end, u32(hp_color(ratio)), bw);
+  }
+
+  // Construction progress sits where a Drone's cargo would (structures carry none).
+  if (cd.built < 1.0f && g.cs >= 32.0f) {
+    ImVec2 b_end = {left.x + cd.built * (bottom.x - left.x),
+                    left.y + cd.built * (bottom.y - left.y)};
+    float  bw    = std::max(2.0f, ch2 * 0.3f);
+    dl->AddLine(left, bottom, u32({0.08f, 0.08f, 0.08f, 1.0f}), bw);
+    dl->AddLine(left, b_end, u32(mix_white(cd.fg, 0.5f)), bw);
   }
 
   // The hold mirrors the HP bar on the opposite lower edge. Too small for a bar, a pip.
@@ -1153,8 +1212,20 @@ static void draw_grid(const game::FrameState& fr) {
       if (g.map.tile_at({x, y}).terrain == game::Terrain::ResourceNode &&
           (!cd.fogged || tile_explored(g.view, g.cur, x, y)))
         cd.crystal = cd.fogged ? kRememberedDim : 1.0f;
+      if (g.map.tile_at({x, y}).terrain == game::Terrain::Nebula &&
+          (!cd.fogged || tile_explored(g.view, g.cur, x, y)))
+        cd.gas = cd.fogged ? kRememberedDim : 1.0f;
       tint_zone(cd, x, y);
       draw_tile_cell(dl, tile_ctr(x, y), cw2, ch2, cd, x, y, fr);
+    }
+
+  for (int32_t y = 0; y < g.map.height; ++y)
+    for (int32_t x = 0; x < g.map.width; ++x) {
+      if (g.map.tile_at({x, y}).terrain != game::Terrain::Nebula) continue;
+      const bool seen = tile_visible(g.map, fr, g.view, x, y);
+      if (!seen && !tile_explored(g.view, g.cur, x, y)) continue;
+      draw_gas(dl, tile_ctr(x, y), cw2, ch2, x, y, seen ? 1.0f : kRememberedDim, glfwGetTime(),
+               kGasVeil);
     }
 
   draw_fx(dl, iso_org, cw2, ch2, glfwGetTime());
@@ -1284,6 +1355,10 @@ static void draw_sel_panel(const ImGuiIO& io) {
       ImGui::SameLine();
       ImGui::TextColored(hp_color(ratio), "%d / %d", sel->hp, sel->max_hp);
       ImGui::Text("Pos  %d, %d", sel->pos.x, sel->pos.y);
+      if (sel->build_ticks_left > 0)
+        ImGui::TextColored({0.9f, 0.85f, 0.4f, 1.0f}, "Building  %d/%d  (needs a Drone within %d)",
+                           game::cfg::CLAIM_BUILD_TICKS - sel->build_ticks_left,
+                           game::cfg::CLAIM_BUILD_TICKS, game::cfg::CLAIM_DEPLOY_RANGE);
     }
   } else {
     const game::Tile& tile = g.map.tile_at(g.sel_tile);

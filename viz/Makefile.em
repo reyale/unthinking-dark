@@ -44,6 +44,7 @@ ENGINE_SRCS := \
   $(ENGINE_DIR)/grid.cpp      \
   $(ENGINE_DIR)/world.cpp     \
   $(ENGINE_DIR)/snapshot.cpp  \
+  $(ENGINE_DIR)/vision.cpp    \
   $(ENGINE_DIR)/command.cpp   \
   $(ENGINE_DIR)/movement.cpp  \
   $(ENGINE_DIR)/combat.cpp    \

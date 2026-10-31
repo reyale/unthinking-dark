@@ -2,6 +2,7 @@
 #include "world.hpp"
 #include "entity.hpp"
 #include "grid.hpp"
+#include "vision.hpp"
 #include <map>
 #include <limits>
 
@@ -14,42 +15,51 @@ struct CombatTarget {
   bool is_null() const { return unit_id.is_null() && struct_id.is_null(); }
 };
 
-bool target_in_range(const World& world, const Unit& unit) {
+bool target_in_range(const World& world, const Unit& unit, const NebulaSight& sight) {
   const int32_t range = unit.stats().range;
   if (range == 0)
     return false;
   for (const auto& [eid, enemy] : world.units)
-    if (enemy.faction != unit.faction && enemy.alive() && manhattan(unit.pos, enemy.pos) <= range)
+    if (enemy.faction != unit.faction && enemy.alive() &&
+        manhattan(unit.pos, enemy.pos) <= range && sight.sees(unit.faction, enemy.pos))
       return true;
   for (const auto& [sid, s] : world.structures)
-    if (s.faction != unit.faction && s.alive() && manhattan(unit.pos, s.pos) <= range)
+    if (s.faction != unit.faction && s.alive() && manhattan(unit.pos, s.pos) <= range &&
+        sight.sees(unit.faction, s.pos))
       return true;
   return false;
 }
 
-// Pick the best target for `attacker`.  Priority order:
+bool target_in_range(const World& world, const Unit& unit) {
+  return target_in_range(world, unit, NebulaSight(world));
+}
+
+// Pick the best target for `attacker`, among enemies in range that its faction can see (only
+// a nebula hides anything; see NebulaSight). Priority order:
 //   1. Explicit unit target from command (if valid and in range)
 //   2. Explicit structure target from command (if valid and in range)
 //   3. Nearest enemy unit in range (ties: ascending unit-id)
 //   4. Nearest enemy structure in range (ties: ascending structure-id)
-static CombatTarget pick_target(const World& world, const Unit& attacker, const Command* cmd) {
+static CombatTarget pick_target(const World& world, const Unit& attacker, const Command* cmd,
+                                const NebulaSight& sight) {
   const int32_t range = attacker.stats().range;
   if (range == 0)
     return {};
+  auto targetable = [&](Vec2 p) {
+    return manhattan(attacker.pos, p) <= range && sight.sees(attacker.faction, p);
+  };
 
   if (cmd && cmd->target_id != 0) {
     // Try as a unit first
     UnitId uid{cmd->target_id};
     const Unit* u = world.find_unit(uid);
-    if (u && u->alive() && u->faction != attacker.faction &&
-        manhattan(attacker.pos, u->pos) <= range)
+    if (u && u->alive() && u->faction != attacker.faction && targetable(u->pos))
       return {uid, {}};
 
     // Try as a structure
     StructureId sid{cmd->target_id};
     const Structure* s = world.find_structure(sid);
-    if (s && s->alive() && s->faction != attacker.faction &&
-        manhattan(attacker.pos, s->pos) <= range)
+    if (s && s->alive() && s->faction != attacker.faction && targetable(s->pos))
       return {{}, sid};
   }
 
@@ -59,9 +69,9 @@ static CombatTarget pick_target(const World& world, const Unit& attacker, const 
   for (const auto& [eid, enemy] : world.units) {
     if (enemy.faction == attacker.faction || !enemy.alive())
       continue;
-    int32_t d = manhattan(attacker.pos, enemy.pos);
-    if (d > range)
+    if (!targetable(enemy.pos))
       continue;
+    int32_t d = manhattan(attacker.pos, enemy.pos);
     if (d < best_dist || (d == best_dist && eid < best_unit)) {
       best_dist = d;
       best_unit = eid;
@@ -76,9 +86,9 @@ static CombatTarget pick_target(const World& world, const Unit& attacker, const 
   for (const auto& [sid, s] : world.structures) {
     if (s.faction == attacker.faction || !s.alive())
       continue;
-    int32_t d = manhattan(attacker.pos, s.pos);
-    if (d > range)
+    if (!targetable(s.pos))
       continue;
+    int32_t d = manhattan(attacker.pos, s.pos);
     if (d < best_struct_dist || (d == best_struct_dist && sid < best_struct)) {
       best_struct_dist = d;
       best_struct = sid;
@@ -138,6 +148,9 @@ void run_combat(World& world, const ValidatedCommands& cmds_a, const ValidatedCo
     return it != all_cmds.end() ? &it->second : nullptr;
   };
 
+  // Who sees into which nebula is fixed at the start of combat, from post-movement positions.
+  const NebulaSight sight(world);
+
   // --- Sub-phase A: first-strike (Frigates only) ---------------------------
   for (auto& [uid, unit] : world.units) {
     if (!unit.alive() || !unit.stats().first_strike)
@@ -147,7 +160,7 @@ void run_combat(World& world, const ValidatedCommands& cmds_a, const ValidatedCo
     if (kind != CommandKind::Attack && kind != CommandKind::MoveAttack)
       continue;
 
-    CombatTarget tgt = pick_target(world, unit, cmd);
+    CombatTarget tgt = pick_target(world, unit, cmd, sight);
     if (tgt.is_null())
       continue;
 
@@ -186,7 +199,7 @@ void run_combat(World& world, const ValidatedCommands& cmds_a, const ValidatedCo
     if (kind != CommandKind::Attack && kind != CommandKind::MoveAttack)
       continue;
 
-    CombatTarget tgt = pick_target(world, unit, cmd);
+    CombatTarget tgt = pick_target(world, unit, cmd, sight);
     if (tgt.is_null())
       continue;
 

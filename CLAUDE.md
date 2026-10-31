@@ -10,7 +10,7 @@ Build order and acceptance criteria: `docs/IMPLEMENTATION_PLAN.md`.
 
 ## Current State
 
-**Phases 1–5 complete. 276/276 tests passing.**
+**Phases 1–5 complete. 286/286 tests passing.**
 
 | Phase | Status | Notes |
 |-------|--------|-------|
@@ -25,9 +25,10 @@ Build order and acceptance criteria: `docs/IMPLEMENTATION_PLAN.md`.
 Additional work:
 - **Draws are allowed** (`WinReason::Draw`): both Command Cores die the same tick, or the tick cap is
   reached with territory difference ≤ `cfg::DRAW_TERRITORY_MARGIN` (5%). Don't "fix" them away.
-- `ABI_VERSION` is 11 (8 added `StructureView`: all own structures; 9 added `EnemyStructureView`:
+- `ABI_VERSION` is 12 (8 added `StructureView`: all own structures; 9 added `EnemyStructureView`:
   enemy structures in sight; 10 renamed `Command::unit_id` → `entity_id`: Produce is issued by the
-  Core (Drones) or a Factory (ships) itself; 11 added `UnitView::cargo_energy/cargo_alloy`). Bumping it invalidates all existing replay files and every compiled bot.
+  Core (Drones) or a Factory (ships) itself; 11 added `UnitView::cargo_energy/cargo_alloy`; 12 added `StructureView::build_ticks_left` and
+  `EnemyStructureView::building` for claim construction). Bumping it invalidates all existing replay files and every compiled bot.
 - Hard caps `UNIT_HARD_CAP` (256, queued ships count) and `STRUCTURE_HARD_CAP` (128) are enforced in
   `economy.cpp`: they bound the snapshot buffer, and the runner clamps to them when copying in.
 
@@ -75,7 +76,8 @@ For LSP support: `ln -s build/compile_commands.json compile_commands.json`
 | `stats.hpp/.cpp` | `UnitStats` and `stats_for(UnitType)`, built from `config.hpp`. |
 | `entity.hpp` | `UnitType`, `StructureType`, `OrderType` enums; core structs. |
 | `world.hpp/.cpp` | Authoritative game state. `std::map` for units/structures (never unordered). |
-| `snapshot.hpp/.cpp` | Fog-masked snapshot builder. LoS = Manhattan distance ≤ sight_radius only. Own units and structures always included; enemy units and structures only on visible tiles. |
+| `vision.hpp/.cpp` | `sees_tile()` (the one sight rule: Manhattan, nebula tiles only within `NEBULA_SIGHT`) and `NebulaSight` (who can target into which nebula; combat and MoveAttack). |
+| `snapshot.hpp/.cpp` | Fog-masked snapshot builder, via `sees_tile()`. Own units and structures always included; enemy units and structures only on visible tiles. |
 | `command.hpp/.cpp` | `ValidatedCommands` and `validate_commands()`. |
 | `movement.hpp/.cpp` | Stepped simultaneous movement. Chains advance (a unit may enter a tile vacated on the same step); swaps and other closed loops are blocked whole. |
 | `combat.hpp/.cpp` | Sub-phase A: first-strike (Frigates). Sub-phase B: simultaneous; splash has friendly fire. |
@@ -139,7 +141,7 @@ Standard match setup (Command Core + starting units on free tiles near each spaw
 |---------------|-------------|
 | `ud_viz` | Terminal renderer (raw ANSI) |
 | `ud_viz_nc` | ncurses renderer (optional, requires libncurses) |
-| `ud_viz_imgui` | Dear ImGui, isometric 2:1 projection (optional, requires libglfw3-dev). Z toggles claim zones, drawn with the engine's `territory_owners()`. Resource nodes are amber crystal clusters; a Drone's cargo is a matching amber bar on its lower-left edge (HP is lower-right) |
+| `ud_viz_imgui` | Dear ImGui, isometric 2:1 projection (optional, requires libglfw3-dev). Z toggles claim zones, drawn with the engine's `territory_owners()`. Resource nodes are amber crystal clusters, nebulae drifting violet gas (thin veil drawn over units inside); a Drone's cargo is a matching amber bar on its lower-left edge (HP is lower-right) |
 | `ud_shape_editor` | ImGui editor for unit/structure render shapes; reads/writes `.udshapes` files (`shape_model.hpp`) |
 | `Makefile.em` | Emscripten browser build → `viz/web/index.html`; drag-and-drop `.ud` files |
 
@@ -209,7 +211,14 @@ Compile flags enforcing these: `-ffp-contract=off -fno-fast-math` (in `cmake/Com
 
 ## Decided Design Questions
 
-- **Line-of-sight:** Manhattan distance ≤ sight_radius only. No terrain blocking.
+- **Line-of-sight:** Manhattan distance ≤ sight_radius, no rays. Nebulae hide what is inside:
+  a nebula tile (and its occupant) is seen only from within `NEBULA_SIGHT` (1), and can't be
+  targeted by a side that doesn't see it. Asteroids don't block sight.
+- **Claim construction:** a deployed claim needs `CLAIM_BUILD_TICKS` ticks with an own Drone
+  within `CLAIM_DEPLOY_RANGE` (it waits, attackable, otherwise). Unfinished: no territory, no
+  drop-off, no Drone slot.
+- **No Gather command:** harvesting is automatic; the kind value is reserved and rejected.
+- **No upkeep** for now; revisit only if calibration shows hoarding or spam.
 - **Terrain memory:** terrain once seen stays known (it is static). Units and structures need
   current sight. The snapshot still sends only in-sight tiles; bots remember the rest themselves.
 - **Economy:** Drones carry what they harvest and bank it at their own Core or a Claim Node.

@@ -169,19 +169,13 @@ TEST(Command, AttackValidEnemyStructureAccepted) {
   EXPECT_EQ(game::validate_commands(w, 0, {c}).size(), 1u);
 }
 
-TEST(Command, GatherOutOfBoundsRejected) {
+TEST(Command, GatherIsAlwaysRejected) {
+  // Reserved: a Drone beside a node harvests without being told to.
   auto w = make_world();
+  w.map.set_terrain({2, 1}, game::Terrain::ResourceNode, 100);
   auto& u = w.spawn_unit({0}, game::UnitType::Drone, {1, 1});
   game::Command c = make_cmd(u.id.value, game::CommandKind::Gather);
-  c.ax = 99; c.ay = 99;
-  EXPECT_TRUE(game::validate_commands(w, 0, {c}).empty());
-}
-
-TEST(Command, GatherNonResourceTileRejected) {
-  auto w = make_world(); // all Open
-  auto& u = w.spawn_unit({0}, game::UnitType::Drone, {1, 1});
-  game::Command c = make_cmd(u.id.value, game::CommandKind::Gather);
-  c.ax = 2; c.ay = 2;
+  c.ax = 2; c.ay = 1;
   EXPECT_TRUE(game::validate_commands(w, 0, {c}).empty());
 }
 
@@ -1248,4 +1242,159 @@ TEST(Snapshot, StructuresSeeAroundThemselves) {
   EXPECT_EQ(snap.visible_enemies[0].id, in.id.value);
   ASSERT_EQ(snap.visible_enemy_structures.size(), 1u);
   EXPECT_EQ(snap.visible_enemy_structures[0].id, enemy_fac.id.value);
+}
+
+// ---- Claim construction -------------------------------------------------------
+
+static game::Structure& deploy_claim(game::World& w, game::Unit& drone, game::Vec2 at) {
+  w.res(drone.faction).alloy += game::cfg::CLAIM_COST_A;
+  game::ValidatedCommands cmds, empty;
+  cmds.emplace(drone.id, place_cmd(drone.id, game::CommandKind::DeployClaim, at));
+  game::run_economy(w, cmds, empty);
+  return *w.find_structure(w.structure_by_pos.at(at));
+}
+
+static void economy_ticks(game::World& w, int32_t n) {
+  game::ValidatedCommands empty;
+  for (int32_t i = 0; i < n; ++i) game::run_economy(w, empty, empty);
+}
+
+TEST(Claim, DeployStartsConstructionAndTheDeployTickCounts) {
+  auto w = make_world();
+  auto& d = w.spawn_unit({0}, game::UnitType::Drone, {3, 3});
+  auto& c = deploy_claim(w, d, {4, 3});
+  EXPECT_FALSE(c.complete());
+  EXPECT_EQ(c.build_ticks_left, game::cfg::CLAIM_BUILD_TICKS - 1);
+  EXPECT_GT(c.hp, game::cfg::CLAIM_BUILD_START_HP);
+  EXPECT_LT(c.hp, game::cfg::CLAIM_HP_BASE);
+}
+
+TEST(Claim, FinishesAtFullHpAfterBuildTicks) {
+  auto w = make_world();
+  auto& d = w.spawn_unit({0}, game::UnitType::Drone, {3, 3});
+  auto& c = deploy_claim(w, d, {5, 3}); // distance 2: the edge of CLAIM_DEPLOY_RANGE
+  economy_ticks(w, game::cfg::CLAIM_BUILD_TICKS - 2);
+  EXPECT_EQ(c.build_ticks_left, 1);
+  economy_ticks(w, 1);
+  EXPECT_TRUE(c.complete());
+  EXPECT_EQ(c.hp, game::cfg::CLAIM_HP_BASE);
+  economy_ticks(w, 5);
+  EXPECT_EQ(c.hp, game::cfg::CLAIM_HP_BASE); // no growth after it is done
+}
+
+TEST(Claim, ConstructionWaitsWhileNoDroneIsInRange) {
+  auto w = make_world();
+  auto& d = w.spawn_unit({0}, game::UnitType::Drone, {3, 3});
+  auto& c = deploy_claim(w, d, {4, 3});
+  const int32_t left = c.build_ticks_left;
+  const int32_t hp = c.hp;
+  d.pos = {7, 3}; // distance 3
+  w.spawn_unit({1}, game::UnitType::Drone, {4, 4}); // the enemy's Drone doesn't help
+  w.spawn_unit({0}, game::UnitType::Frigate, {4, 2}); // nor does a non-Drone
+  economy_ticks(w, 5);
+  EXPECT_EQ(c.build_ticks_left, left);
+  EXPECT_EQ(c.hp, hp);
+  d.pos = {6, 3}; // back within range: resumes
+  economy_ticks(w, 1);
+  EXPECT_EQ(c.build_ticks_left, left - 1);
+}
+
+TEST(Claim, ADroneBuildsOneClaimAtATime) {
+  auto w = make_world();
+  auto& d = w.spawn_unit({0}, game::UnitType::Drone, {4, 4});
+  auto& a = w.spawn_structure({0}, game::StructureType::ClaimNode, {4, 5});
+  auto& b = w.spawn_structure({0}, game::StructureType::ClaimNode, {4, 3});
+  a.build_ticks_left = b.build_ticks_left = 10;
+  economy_ticks(w, 1);
+  EXPECT_EQ(a.build_ticks_left, 9); // lower id first
+  EXPECT_EQ(b.build_ticks_left, 10);
+  w.spawn_unit({0}, game::UnitType::Drone, {5, 4});
+  economy_ticks(w, 1);
+  EXPECT_EQ(a.build_ticks_left, 8);
+  EXPECT_EQ(b.build_ticks_left, 9);
+  (void)d;
+}
+
+TEST(Claim, UnfinishedClaimHoldsNoTerritoryIsNoDropOffAndAddsNoDroneSlot) {
+  auto w = make_world();
+  auto& core = w.spawn_structure({0}, game::StructureType::CommandCore, {0, 0});
+  auto& d = w.spawn_unit({0}, game::UnitType::Drone, {5, 4});
+  auto& c = deploy_claim(w, d, {5, 5});
+  EXPECT_EQ(game::run_territory(w, game::cfg::TICK_CAP).pct_faction[0], 0u);
+
+  d.cargo_energy = 4; // adjacent to the claim, but it's no drop-off yet
+  economy_ticks(w, 1);
+  EXPECT_EQ(d.cargo_energy, 4);
+
+  w.res({0}).energy = 100; // cap is the Core's slot alone, and the Drone fills it
+  game::ValidatedCommands cmds, empty;
+  cmds.emplace(core.id, produce_cmd(core.id.value, game::UnitType::Drone));
+  game::run_economy(w, cmds, empty);
+  EXPECT_FALSE(core.production_queue.has_value());
+
+  economy_ticks(w, c.build_ticks_left);
+  ASSERT_TRUE(c.complete());
+  EXPECT_GT(game::run_territory(w, game::cfg::TICK_CAP).pct_faction[0], 0u);
+  game::run_economy(w, cmds, empty); // deposit runs before construction: banked a tick later
+  EXPECT_EQ(d.cargo_energy, 0);
+  EXPECT_TRUE(core.production_queue.has_value());
+}
+
+TEST(Claim, SnapshotShowsConstructionToBothSides) {
+  auto w = make_world();
+  auto& d = w.spawn_unit({0}, game::UnitType::Drone, {3, 3});
+  auto& c = deploy_claim(w, d, {4, 3});
+  w.spawn_unit({1}, game::UnitType::Drone, {6, 3});
+  auto mine = game::build_snapshot(w, 0, game::cfg::TICK_CAP);
+  ASSERT_EQ(mine.my_structures.size(), 1u);
+  EXPECT_EQ(mine.my_structures[0].build_ticks_left, static_cast<uint32_t>(c.build_ticks_left));
+  auto theirs = game::build_snapshot(w, 1, game::cfg::TICK_CAP);
+  ASSERT_EQ(theirs.visible_enemy_structures.size(), 1u);
+  EXPECT_EQ(theirs.visible_enemy_structures[0].building, 1);
+  economy_ticks(w, c.build_ticks_left);
+  theirs = game::build_snapshot(w, 1, game::cfg::TICK_CAP);
+  EXPECT_EQ(theirs.visible_enemy_structures[0].building, 0);
+  EXPECT_EQ(game::build_snapshot(w, 0, game::cfg::TICK_CAP).my_structures[0].build_ticks_left, 0u);
+}
+
+// ---- Nebulae ------------------------------------------------------------------
+
+TEST(Nebula, HidesWhatIsInsideBeyondOneTile) {
+  auto w = make_world();
+  for (int32_t x = 4; x <= 6; ++x) w.map.set_terrain({x, 5}, game::Terrain::Nebula);
+  w.spawn_unit({0}, game::UnitType::Interceptor, {2, 5}); // sight 3
+  auto& hidden = w.spawn_unit({1}, game::UnitType::Drone, {4, 5}); // distance 2, in nebula
+  w.spawn_unit({1}, game::UnitType::Drone, {2, 7});                // distance 2, open space
+  auto snap = game::build_snapshot(w, 0, game::cfg::TICK_CAP);
+  ASSERT_EQ(snap.visible_enemies.size(), 1u);
+  EXPECT_NE(snap.visible_enemies[0].id, hidden.id.value);
+  for (const auto& t : snap.visible_tiles)
+    EXPECT_FALSE(t.x == 4 && t.y == 5) << "nebula tile beyond NEBULA_SIGHT was sent";
+
+  w.map.set_terrain({3, 5}, game::Terrain::Nebula);
+  hidden.pos = {3, 5}; // still in a nebula, but within NEBULA_SIGHT
+  snap = game::build_snapshot(w, 0, game::cfg::TICK_CAP);
+  EXPECT_EQ(snap.visible_enemies.size(), 2u);
+}
+
+TEST(Nebula, UnitsInsideSeeOut) {
+  auto w = make_world();
+  w.map.set_terrain({2, 5}, game::Terrain::Nebula);
+  w.spawn_unit({0}, game::UnitType::Interceptor, {2, 5});
+  auto& e = w.spawn_unit({1}, game::UnitType::Drone, {5, 5});
+  auto snap = game::build_snapshot(w, 0, game::cfg::TICK_CAP);
+  ASSERT_EQ(snap.visible_enemies.size(), 1u);
+  EXPECT_EQ(snap.visible_enemies[0].id, e.id.value);
+}
+
+TEST(Nebula, MoveAttackDoesNotHaltForAHiddenEnemy) {
+  auto w = make_world();
+  w.map.set_terrain({5, 1}, game::Terrain::Nebula);
+  auto& f = w.spawn_unit({0}, game::UnitType::Frigate, {0, 1}); // range 4, speed 1
+  w.spawn_unit({1}, game::UnitType::Drone, {5, 1});
+  game::ValidatedCommands empty;
+  game::run_movement(w, move_cmd(f.id, 3, 1, game::CommandKind::MoveAttack), empty);
+  EXPECT_EQ(f.pos.x, 1); // the Drone is at distance 4 from (1,1) but unseen: keeps going
+  game::run_movement(w, move_cmd(f.id, 3, 1, game::CommandKind::MoveAttack), empty);
+  EXPECT_EQ(f.pos.x, 2);
 }

@@ -16,7 +16,8 @@ namespace game {
 //
 // Claims must be deployed by a Drone standing within CLAIM_DEPLOY_RANGE, so the bot needs
 // Drones to spare: its Core produces up to kMaxDrones (and the Drone cap, one per claim plus
-// one), the first kHarvesters ferry resources home and the rest walk to claim sites. Combat units move kClearRadius out from
+// one), the first kHarvesters ferry resources home and the rest walk to claim sites. A Drone
+// stays by each claim it deploys until construction finishes. Combat units move kClearRadius out from
 // home and hold there, so they can't box Drones in beside the base.
 class ExpanderBot : public Bot {
 public:
@@ -73,10 +74,16 @@ public:
       if (step != pos) issue(move_cmd(u.id, CommandKind::Move, step));
     }
 
+    const auto builders = claim_builders(snap);
     for (size_t i = 0; i < drones.size(); ++i) {
       const UnitView& d = *drones[i];
       if (busy.contains(d.id)) continue;
       const Vec2 pos{d.x, d.y};
+      if (auto b = builders.find(d.id); b != builders.end()) {
+        const Vec2 step = builder_step(router_, d, b->second);
+        if (step != pos) issue(move_cmd(d.id, CommandKind::Move, step));
+        continue;
+      }
       // A lone Drone (the cap is one until the first claim stands) harvests until it can
       // afford a claim, then goes to stake it.
       const bool lone_claimer = drones.size() == 1 && alloy >= cfg::CLAIM_COST_A;

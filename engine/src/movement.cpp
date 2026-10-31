@@ -4,6 +4,7 @@
 #include "entity.hpp"
 #include "config.hpp"
 #include "grid.hpp"
+#include "vision.hpp"
 #include <map>
 #include <algorithm>
 #include <cstdlib>
@@ -59,6 +60,7 @@ void run_movement(World& world, const ValidatedCommands& cmds_a, const Validated
   for (int32_t step = 0; step < max_speed && !movers.empty(); ++step) {
     // Proposed moves: unit_id → proposed tile
     std::map<UnitId, Vec2> proposals;
+    const NebulaSight sight(world);
 
     for (auto& mv : movers) {
       if (mv.steps_left <= 0)
@@ -68,7 +70,7 @@ void run_movement(World& world, const ValidatedCommands& cmds_a, const Validated
         continue;
 
       // MoveAttack: halt if enemy now in range
-      if (mv.move_attack && target_in_range(world, *u)) {
+      if (mv.move_attack && target_in_range(world, *u, sight)) {
         mv.steps_left = 0;
         continue;
       }

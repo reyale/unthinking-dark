@@ -96,7 +96,7 @@ TerritoryState run_territory(World& world, uint32_t tick_cap) {
   // Step 2 — Voronoi partition
   std::vector<ClaimAnchor> claims;
   for (const auto& [sid, s] : world.structures)
-    if (s.type == StructureType::ClaimNode && s.alive())
+    if (s.type == StructureType::ClaimNode && s.alive() && s.complete())
       claims.push_back({s.pos, s.faction.value});
   if (claims.empty())
     return {};

@@ -10,6 +10,7 @@
 
 #include "config.hpp"
 #include "entity.hpp"
+#include "vision.hpp"
 #include "frame.hpp"
 #include "grid.hpp"
 #include "replay.hpp"
@@ -72,7 +73,7 @@ static CellData make_cell(const game::Map& map, const game::FrameState& fr,
   if (!vis) {
     for (const auto& u : fr.units) {
       if (view >= 0 && static_cast<int>(u.faction.value) != view) continue;
-      if (std::abs(x - u.pos.x) + std::abs(y - u.pos.y) <= game::stats_for(u.type).sight)
+      if (game::sees_tile(map, u.pos, game::stats_for(u.type).sight, {x, y}))
         { vis = true; break; }
     }
     if (!vis) {
@@ -95,7 +96,8 @@ static CellData make_cell(const game::Map& map, const game::FrameState& fr,
   for (const auto& s : fr.structures) {
     if (s.pos.x != x || s.pos.y != y) continue;
     char g = s.type == game::StructureType::CommandCore ? 'C' :
-             s.type == game::StructureType::Factory     ? 'T' : 'N';
+             s.type == game::StructureType::Factory     ? 'T' :
+             s.build_ticks_left > 0                      ? 'n' : 'N';
     ImVec4 fg = s.faction.value == 0 ? kFactionA : kFactionB;
     return {bg, g, fg, s.hp, s.max_hp};
   }

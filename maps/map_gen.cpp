@@ -9,6 +9,11 @@ static constexpr int32_t MIN_SPAWN_CLEARANCE   = 4;
 static constexpr int32_t MIN_CLUSTER_CLEARANCE = 3;
 static constexpr int32_t BLOB_MIN_TILES        = 3;
 static constexpr int32_t BLOB_MAX_TILES        = 6;
+// Nebula patches: soft cover, one per NEBULA_AREA_PER_PATCH tiles of map, grown over open
+// ground only (never over rock, resources or the spawns' surroundings).
+static constexpr int32_t NEBULA_AREA_PER_PATCH = 300;
+static constexpr int32_t NEBULA_MIN_TILES      = 6;
+static constexpr int32_t NEBULA_MAX_TILES      = 14;
 
 static const int32_t DX[4] = {0, 0, 1, -1};
 static const int32_t DY[4] = {1, -1, 0, 0};
@@ -96,6 +101,31 @@ static MapData generate_once(const GenParams& p, game::Rng& rng) {
 
       data.map.set_terrain(pos, game::Terrain::Asteroid);
       data.map.set_terrain(mpos, game::Terrain::Asteroid);
+    }
+  }
+
+  // Drawn after the asteroids, so adding nebulae left every seed's rock layout unchanged.
+  const int32_t n_nebulae = std::max(1, w * h / NEBULA_AREA_PER_PATCH);
+  for (int32_t ni = 0; ni < n_nebulae; ++ni) {
+    int32_t bx = static_cast<int32_t>(rng.next_u32(static_cast<uint32_t>(w / 2 - 3))) + 2;
+    int32_t by = static_cast<int32_t>(rng.next_u32(static_cast<uint32_t>(h - 4))) + 2;
+    const int32_t size =
+        NEBULA_MIN_TILES +
+        static_cast<int32_t>(
+            rng.next_u32(static_cast<uint32_t>(NEBULA_MAX_TILES - NEBULA_MIN_TILES + 1)));
+    for (int32_t t = 0; t < size; ++t) {
+      const uint32_t dir = rng.next_u32(4);
+      bx = std::clamp(bx + DX[dir], 1, w - 2);
+      by = std::clamp(by + DY[dir], 1, h - 2);
+      const game::Vec2 pos{bx, by};
+      if (data.map.tile_at(pos).terrain != game::Terrain::Open) continue;
+      if (game::manhattan(pos, data.spawn[0]) < MIN_SPAWN_CLEARANCE ||
+          game::manhattan(pos, data.spawn[1]) < MIN_SPAWN_CLEARANCE ||
+          game::manhattan({w - 1 - bx, h - 1 - by}, data.spawn[0]) < MIN_SPAWN_CLEARANCE ||
+          game::manhattan({w - 1 - bx, h - 1 - by}, data.spawn[1]) < MIN_SPAWN_CLEARANCE)
+        continue;
+      if (data.map.tile_at({w - 1 - bx, h - 1 - by}).terrain != game::Terrain::Open) continue;
+      set_sym(pos, game::Terrain::Nebula);
     }
   }
 

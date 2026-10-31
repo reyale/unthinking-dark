@@ -73,8 +73,6 @@ how to verify each piece**. Section refs like §5 point into `DESIGN.md`.
   bot toolchain is clang; same language, different target). Other LLVM languages later.
 
 **Open / stop-and-ask (do NOT improvise — `DESIGN.md` §13)**
-- **Line-of-sight rule** (nebula/asteroid vision blocking) — needed in snapshot generation
-  (Phase 1) and the MoveAttack halt check (Phase 2). Currently undecided; surface it early.
 - Attack-move halt precision (step-into-range-then-hold vs stop-one-short).
 
 ---
@@ -162,6 +160,7 @@ struct StructureView {       // my structures: all of them, regardless of fog (A
   uint16_t producing;        // UnitType in the Factory queue, or PRODUCING_NONE (0xFFFF)
   int32_t x, y; int32_t hp;
   uint32_t production_ticks_left;
+  uint32_t build_ticks_left; // Claim Node under construction; 0 = finished (ABI 12)
 };
 struct UnitView {            // my units: full info
   uint32_t id; uint16_t type; uint16_t _pad;
@@ -174,7 +173,7 @@ struct EnemyView {           // visible enemies: observable info only
   int32_t x, y; int32_t hp;
 };
 struct EnemyStructureView {  // enemy structures on fog-visible tiles only (ABI 9)
-  uint32_t id; uint16_t type; uint16_t _pad;
+  uint32_t id; uint16_t type; uint16_t building; // 1 = Claim Node under construction (ABI 12)
   int32_t x, y; int32_t hp;
 };
 struct TileView {            // only fog-visible tiles
@@ -189,7 +188,7 @@ struct TileView {            // only fog-visible tiles
 ```c
 struct Command {
   uint32_t entity_id; // issuer: a unit, or the Core/Factory for Produce (ABI 10)
-  uint16_t kind;   // enum: Move, MoveAttack, Attack, Gather, Build, DeployClaim, Produce
+  uint16_t kind;   // enum: Move, MoveAttack, Attack, Gather (reserved, rejected), Build, DeployClaim, Produce
   uint16_t arg_type;
   int32_t  ax, ay; // target tile (Move/MoveAttack/Attack-at / Build / DeployClaim)
   uint32_t target_id; // Attack target (unit or structure id)

@@ -4,6 +4,7 @@
 #include "grid.hpp"
 #include "config.hpp"
 #include <algorithm>
+#include <set>
 
 namespace game {
 
@@ -22,6 +23,7 @@ static bool at_drop_off(const World& world, const Unit& drone) {
   for (const auto& [sid, s] : world.structures)
     if (s.alive() && s.faction == drone.faction &&
         (s.type == StructureType::CommandCore || s.type == StructureType::ClaimNode) &&
+        s.complete() &&
         manhattan(s.pos, drone.pos) <= cfg::DEPOSIT_RANGE)
       return true;
   return false;
@@ -49,7 +51,7 @@ static void harvest(World& world) {
 static int32_t drone_cap(const World& world, FactionId f) {
   int32_t cap = 0;
   for (const auto& [sid, s] : world.structures) {
-    if (!s.alive() || s.faction != f)
+    if (!s.alive() || s.faction != f || !s.complete())
       continue;
     if (s.type == StructureType::ClaimNode) cap += cfg::DRONES_PER_CLAIM;
     if (s.type == StructureType::CommandCore) cap += cfg::DRONES_PER_CORE;
@@ -182,7 +184,10 @@ static void spend(World& world, const ValidatedCommands& cmds_a, const Validated
       if (res.alloy < cfg::CLAIM_COST_A)
         continue;
       res.alloy -= cfg::CLAIM_COST_A;
-      world.spawn_structure(builder->faction, StructureType::ClaimNode, {cmd.ax, cmd.ay});
+      Structure& claim =
+          world.spawn_structure(builder->faction, StructureType::ClaimNode, {cmd.ax, cmd.ay});
+      claim.hp = cfg::CLAIM_BUILD_START_HP;
+      claim.build_ticks_left = cfg::CLAIM_BUILD_TICKS;
     }
   }
 }
@@ -211,10 +216,35 @@ static void tick_production(World& world) {
   }
 }
 
+// A claim under construction gets one tick of work when an own Drone is within
+// CLAIM_DEPLOY_RANGE, and waits otherwise. A Drone works on one claim at a time: claims take
+// the nearby Drones in id order, lowest structure id first. The deploy tick counts as work.
+static void tick_construction(World& world) {
+  const int32_t span = cfg::CLAIM_HP_BASE - cfg::CLAIM_BUILD_START_HP;
+  std::set<UnitId> busy;
+  for (auto& [sid, s] : world.structures) {
+    if (!s.alive() || s.complete())
+      continue;
+    for (const auto& [uid, u] : world.units) {
+      if (!u.alive() || u.faction != s.faction || u.type != UnitType::Drone ||
+          busy.contains(uid) || manhattan(u.pos, s.pos) > cfg::CLAIM_DEPLOY_RANGE)
+        continue;
+      busy.insert(uid);
+      // Gains sum to exactly `span`, so an undamaged claim finishes at CLAIM_HP_BASE (before
+      // the fragility cap).
+      const int32_t done = cfg::CLAIM_BUILD_TICKS - s.build_ticks_left;
+      s.hp += span * (done + 1) / cfg::CLAIM_BUILD_TICKS - span * done / cfg::CLAIM_BUILD_TICKS;
+      --s.build_ticks_left;
+      break;
+    }
+  }
+}
+
 void run_economy(World& world, const ValidatedCommands& cmds_a, const ValidatedCommands& cmds_b) {
   harvest(world);
   spend(world, cmds_a, cmds_b);
   tick_production(world);
+  tick_construction(world);
 }
 
 } // namespace game

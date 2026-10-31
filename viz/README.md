@@ -32,6 +32,7 @@ file) and presents it frame by frame in the terminal.
 | `C`   | Command Core     |
 | `T`   | Factory          |
 | `N`   | Claim Node       |
+| `n`   | Claim Node under construction |
 | `#`   | Asteroid         |
 | `~`   | Nebula           |
 | `$`   | Resource Node    |

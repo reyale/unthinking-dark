@@ -10,7 +10,8 @@
 
 namespace game {
 
-// The turtle: holds one Claim Node beside its base and never reaches for more. Drones
+// The turtle: holds one Claim Node beside its base and never reaches for more (a Drone stays by
+// it while it is built). Drones
 // harvest, combat units stay within kGuardRadius of home and only engage enemies that come
 // inside it. Attrition can't beat it, so the descending territory threshold has to
 // (IMPLEMENTATION_PLAN Phase 3).
@@ -59,9 +60,15 @@ public:
       out.push_back(c); // refused at no cost once at the Drone cap
     }
 
+    const auto builders = claim_builders(snap);
     for (const auto& u : snap.my_units) {
       if (u.id == deployer) continue;
       const Vec2 pos{u.x, u.y};
+      if (auto b = builders.find(u.id); b != builders.end()) {
+        const Vec2 step = builder_step(router_, u, b->second);
+        if (step != pos) out.push_back(move_cmd(u.id, CommandKind::Move, step));
+        continue;
+      }
       if (static_cast<UnitType>(u.type) == UnitType::Drone) {
         const Vec2 step = harvest_step(router_, map_, snap, u);
         if (step != pos) out.push_back(move_cmd(u.id, CommandKind::Move, step));

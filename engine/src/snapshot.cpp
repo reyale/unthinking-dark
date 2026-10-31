@@ -4,6 +4,7 @@
 #include "world.hpp"
 #include "entity.hpp"
 #include "grid.hpp"
+#include "vision.hpp"
 #include <vector>
 
 namespace game {
@@ -14,7 +15,8 @@ Snapshot build_snapshot(const World& world, uint32_t faction_id, uint32_t tick_c
 
   // --- Compute visibility mask -----------------------------------------
   // A tile is visible if it is within sight (Manhattan) of any friendly unit or structure:
-  // a unit's own sight radius, STRUCTURE_SIGHT for every structure. No terrain blocking.
+  // a unit's own sight radius, STRUCTURE_SIGHT for every structure. Only nebulae obscure
+  // (sees_tile).
   const int32_t W = world.map.width;
   const int32_t H = world.map.height;
   std::vector<bool> visible(static_cast<size_t>(W * H), false);
@@ -25,7 +27,7 @@ Snapshot build_snapshot(const World& world, uint32_t faction_id, uint32_t tick_c
     const int32_t y1 = std::min(H - 1, c.y + sight);
     for (int32_t y = y0; y <= y1; ++y)
       for (int32_t x = x0; x <= x1; ++x)
-        if (manhattan(c, {x, y}) <= sight)
+        if (sees_tile(world.map, c, sight, {x, y}))
           visible[static_cast<size_t>(y * W + x)] = true;
   };
   for (const auto& [id, unit] : world.units)
@@ -85,6 +87,7 @@ Snapshot build_snapshot(const World& world, uint32_t faction_id, uint32_t tick_c
     sv.hp = s.hp;
     sv.production_ticks_left =
       s.production_queue ? static_cast<uint32_t>(s.production_ticks_left) : 0;
+    sv.build_ticks_left = static_cast<uint32_t>(s.build_ticks_left);
     snap.my_structures.push_back(sv);
   }
 
@@ -131,6 +134,7 @@ Snapshot build_snapshot(const World& world, uint32_t faction_id, uint32_t tick_c
     es.x = s.pos.x;
     es.y = s.pos.y;
     es.hp = s.hp;
+    es.building = s.complete() ? 0 : 1;
     snap.visible_enemy_structures.push_back(es);
   }
 

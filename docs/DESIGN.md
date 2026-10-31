@@ -88,11 +88,14 @@ These are non-negotiable; each one silently breaks replay if violated.
 - **Terrain (v1, minimal):**
   - **Asteroids** — impassable. Serve as both obstacles and (when packed) walls/corridors.
     Resource nodes are embedded in / adjacent to asteroid fields.
-  - **Nebulae** — passable, **vision-blocking**. Amplify active-only fog; create ambush
-    zones. (LoS interaction precise rules: see Deferred.)
+  - **Nebulae** — passable, **hide what is inside**: a nebula tile, and anything on it, is
+    seen only from within `NEBULA_SIGHT` (v1: 1, Manhattan), by the same rule for bots,
+    combat and the viewer. Units inside see out normally. A unit hidden in a nebula can't be
+    targeted (explicitly or automatically) by a side that doesn't see it; splash still hits
+    it. Ambush zones; the map generator scatters symmetric patches over open ground.
 - **Fog of war:** **active-only for what moves.** A faction sees a tile only if currently
-  within a friendly unit's sight radius or `STRUCTURE_SIGHT` of a friendly structure, and
-  not blocked by nebula. **Terrain, once seen,
+  within a friendly unit's sight radius or `STRUCTURE_SIGHT` of a friendly structure (a
+  nebula tile: only within `NEBULA_SIGHT`). **Terrain, once seen,
   stays known**: it never changes, so there is nothing to hide again. The snapshot carries
   only the tiles in sight this tick; a bot keeps what it has seen (its memory persists
   across ticks), and the viewer draws explored-but-out-of-sight terrain dimmed, with
@@ -138,7 +141,7 @@ One validated command max per unit per tick. Command modes:
 - `MoveAttack(unit_id, path/target)` — advance, but **auto-halt** as soon as a valid
   enemy target is in range (then fire in combat phase).
 - `Attack(unit_id, target?)` — attack in place / hold and fire; does not move.
-- Economy/structure commands: `Gather(unit_id, node)`, `Build(unit_id, what, where)`,
+- Economy/structure commands: `Build(unit_id, what, where)`,
   `DeployClaim(unit_id, where)`, `Produce(producer_id, unit_type)`. A command's issuer is an
   entity id: a unit, or for Produce the Command Core (Drones) or a Factory (combat ships).
   Units and structures share one id sequence, so an id names exactly one entity.
@@ -216,7 +219,16 @@ for step in 1..=N:
   free target tile at this point (after movement): passable, no structure, no living unit.
   The tile must also be near the Drone (Manhattan): within `BUILD_RANGE` (v1: 1) for a
   Factory, `CLAIM_DEPLOY_RANGE` (v1: 2) for a Claim Node. Otherwise the action fails and
-  nothing is deducted.
+  nothing is deducted. (There is no Gather command: harvesting is automatic. Its kind value
+  is reserved and always rejected.)
+- **Claim construction:** a deployed Claim Node starts at `CLAIM_BUILD_START_HP` and needs
+  `CLAIM_BUILD_TICKS` (v1: 20) ticks of work. It gets a tick of work only while one of its
+  faction's Drones is within `CLAIM_DEPLOY_RANGE`; with none there it waits, still
+  standing and attackable. A Drone works on one claim at a time (claims take nearby Drones
+  in id order, lowest structure id first); the deploy tick counts. Its hp rises with each
+  tick of work, reaching `CLAIM_HP_BASE` (then the fragility cap) when done. Until finished
+  it holds **no territory**, is **no drop-off** and adds **no Drone-cap slot**. Bots see
+  `build_ticks_left` on their own claims and a `building` flag on enemy ones.
 
 ### Phase 5 — Spawn / Upkeep
 - Newly produced ships appear on the first free tile adjacent to their Factory, checked
@@ -262,7 +274,7 @@ positioning beat raw numbers.
 
 Every structure sees `STRUCTURE_SIGHT` (v1: 2, Manhattan) around itself, so a base without
 units nearby is not blind.
-| **Claim Node** | scales high→~1 over match | Voronoi territory anchor; weak aura (deters lone scouts, ignorable by real forces); deployed by a Drone onto a tile within `CLAIM_DEPLOY_RANGE` (v1: 2) of itself, so Drones must travel to stake ground; cracked by firepower (esp. Artillery splash) |
+| **Claim Node** | scales high→~1 over match | Voronoi territory anchor; weak aura (deters lone scouts, ignorable by real forces); deployed by a Drone onto a tile within `CLAIM_DEPLOY_RANGE` (v1: 2) of itself, so Drones must travel to stake ground, and built over `CLAIM_BUILD_TICKS` while a Drone stays by it (§5 Phase 4); cracked by firepower (esp. Artillery splash) |
 
 **Resources (2 types, v1):**
 - **Energy** — gates combat ships (spent at Factory).
@@ -428,8 +440,6 @@ and a late climax; draws rare (they are allowed, §7); turtles lose.
 - Per-step re-pathing ownership (bot-owned vs engine-owned).
 - Stepped-move × first-strike × ranged-halt-distance interaction (the kiting-vs-run-down
   balance — validate in sim; it's the heart of the counter-triangle).
-- **Line-of-sight definition** for the halt check and ranged combat through
-  nebula/asteroids (currently hand-waved).
 
 **Other deferred:**
 - Terrain-respecting territory (claim signal flowing around walls, not through) and
@@ -437,8 +447,6 @@ and a late climax; draws rare (they are allowed, §7); turtles lose.
   packed asteroids; revisit if so.
 - Extra terrain: structural wall skin (megastructure debris), gravity wells, hazard
   tiles, jump lanes, sensor/interference zones.
-- Claim placement gating beyond the range limit: a vulnerable build window (claim spawns
-  weak and only counts once complete).
 - Scratch memory region zeroed each tick.
 - 3rd resource type, additional unit types (Scout, etc.), claim tiers.
 - Procedural map generation.
