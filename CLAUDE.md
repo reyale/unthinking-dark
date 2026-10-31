@@ -10,7 +10,7 @@ Build order and acceptance criteria: `docs/IMPLEMENTATION_PLAN.md`.
 
 ## Current State
 
-**Phases 1–5 complete. 262/262 tests passing.**
+**Phases 1–5 complete. 269/269 tests passing.**
 
 | Phase | Status | Notes |
 |-------|--------|-------|
@@ -77,7 +77,7 @@ For LSP support: `ln -s build/compile_commands.json compile_commands.json`
 | `world.hpp/.cpp` | Authoritative game state. `std::map` for units/structures (never unordered). |
 | `snapshot.hpp/.cpp` | Fog-masked snapshot builder. LoS = Manhattan distance ≤ sight_radius only. Own units and structures always included; enemy units and structures only on visible tiles. |
 | `command.hpp/.cpp` | `ValidatedCommands` and `validate_commands()`. |
-| `movement.hpp/.cpp` | Stepped simultaneous movement. Blocked unit stays put, no retry. |
+| `movement.hpp/.cpp` | Stepped simultaneous movement. Chains advance (a unit may enter a tile vacated on the same step); swaps and other closed loops are blocked whole. |
 | `combat.hpp/.cpp` | Sub-phase A: first-strike (Frigates). Sub-phase B: simultaneous; splash has friendly fire. |
 | `economy.hpp/.cpp` | Harvest (Drones adjacent to ResourceNode), spend, production. |
 | `territory.hpp/.cpp` | `territory_owners()` (per-tile owner grid, the one definition of territory) and `territory_pct()`; Voronoi territory as a share of **passable** tiles (squared-Euclidean nearest Claim Node, cross-faction ties → neutral, `CLAIM_INFLUENCE` radius; each claim stamps only its radius), Claim Node hp fragility, `win_threshold()`. |
@@ -92,7 +92,7 @@ For LSP support: `ln -s build/compile_commands.json compile_commands.json`
 | `file_io.cpp` | Raw + Zstd file I/O. Zstd sections are `#ifdef`'d out under `__EMSCRIPTEN__`. |
 
 `fixtures/` — native test bots: `IdleBot` (empty commands; determinism tests), `RushBot`, `EconBot`,
-`TurtleBot` (one home claim, guards its base) and `ExpanderBot` (builds a Factory and Drones,
+`TurtleBot` (one home claim, guards its base) and `ExpanderBot` (its Core produces Drones,
 walks claimers out to a claim lattice, never attacks).
 `Turtle.*` in `map_tests` proves the turtle loses to the descending threshold on every map.
 `bot_util.hpp` has a BFS `Router`: the engine never re-routes a blocked unit, so bots route
@@ -211,7 +211,10 @@ Compile flags enforcing these: `-ffp-contract=off -fno-fast-math` (in `cmake/Com
 - **Line-of-sight:** Manhattan distance ≤ sight_radius only. No terrain blocking.
 - **Terrain memory:** terrain once seen stays known (it is static). Units and structures need
   current sight. The snapshot still sends only in-sight tiles; bots remember the rest themselves.
-- **Blocked movement:** unit stays put, no retry. Deadlocks are accepted.
+- **Blocked movement:** a unit may follow into a tile vacated on the same step, so columns move
+  together. Swaps and any closed loop of movers are blocked, with everyone queued behind them:
+  that is bad bot behavior and is meant to cost the bot. A blocked unit stays put for the step.
+  The engine does no path-finding; routing, choke points and group ordering are the bot's job.
 
 ---
 

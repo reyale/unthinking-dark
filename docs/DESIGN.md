@@ -177,8 +177,11 @@ for step in 1..=N:
     resolve all proposed tiles simultaneously:
         - tile contested by 2+ units → highest collision-priority (tonnage) wins;
           ties → lowest unit-id
-        - swaps (A↔B exchange tiles) are blocked; both stay
-        - blocked unit → stays put / retries (v1 placeholder; see Deferred)
+        - chains: a unit may enter a tile whose occupant moves out on the same step,
+          so a column advances together
+        - swaps (A↔B exchange tiles), and any closed loop of movers, are blocked whole,
+          as is every unit queued behind one: steering units into each other is a bot error
+        - blocked unit → stays put for the step (it proposes again next step)
     apply all valid steps
 ```
 - The MoveAttack halt check MUST run at the same per-step granularity as movement, in
@@ -407,9 +410,6 @@ and a late climax; draws rare (they are allowed, §7); turtles lose.
 ## 13. Deferred / Open Items (explicitly out of v1 scope)
 
 **Pathing bucket (resolve later):**
-- Blocked-unit behavior final rule (currently stay-put/retry placeholder; watch for
-  two-units-retry-forever deadlock within a movement phase — wastes the phase, a
-  correctness-tuning issue not a spine issue).
 - Attack-move halt precision (step-into-range-then-hold vs. stop-one-tile-short).
 - Per-step re-pathing ownership (bot-owned vs engine-owned).
 - Stepped-move × first-strike × ranged-halt-distance interaction (the kiting-vs-run-down

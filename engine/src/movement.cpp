@@ -7,6 +7,7 @@
 #include <map>
 #include <algorithm>
 #include <cstdlib>
+#include <vector>
 
 namespace game {
 
@@ -88,15 +89,13 @@ void run_movement(World& world, const ValidatedCommands& cmds_a, const Validated
       proposals.emplace(mv.id, next);
     }
 
-    // Build current tile → unit-id map to detect conflicts.
     std::map<Vec2, UnitId> occupied;
     for (const auto& [uid, unit] : world.units)
       if (unit.alive())
         occupied.emplace(unit.pos, uid);
 
-    // Resolve proposals: contested tile → highest collision priority wins,
-    // ties → lower unit-id. Swap → both blocked.
-    std::map<Vec2, UnitId> winners; // proposed tile → winning unit
+    // Contested tile → highest collision priority wins, ties → lower unit-id.
+    std::map<Vec2, UnitId> winners;
     for (const auto& [uid, tile] : proposals) {
       auto it = winners.find(tile);
       if (it == winners.end()) {
@@ -110,46 +109,44 @@ void run_movement(World& world, const ValidatedCommands& cmds_a, const Validated
           it->second = uid;
       }
     }
+    std::map<UnitId, Vec2> won;
+    for (const auto& [tile, uid] : winners)
+      won.emplace(uid, tile);
 
-    // Block swaps: if A→B and B→A both won their tiles, block both.
-    for (auto& [tile, winner_id] : winners) {
-      auto it = proposals.find(winner_id);
-      if (it == proposals.end())
-        continue;
-      // Check if the unit currently on the target tile is moving to winner's tile
-      auto occ_it = occupied.find(tile);
-      if (occ_it == occupied.end())
-        continue;
-      UnitId blocker = occ_it->second;
-      auto blocker_prop = proposals.find(blocker);
-      if (blocker_prop == proposals.end())
-        continue;
-      Unit* winner_unit = world.find_unit(winner_id);
-      if (winner_unit && blocker_prop->second == winner_unit->pos) {
-        // Swap detected — mark by clearing both from winners map later.
-        // We nullify the winner for this tile to signal a blocked swap.
-        winner_id = UnitId{}; // null signals block
+    // A winner moves if its tile is empty or the occupant moves out this step, so a column
+    // advances together. A closed loop of movers (a swap, or a ring) is blocked whole, along
+    // with every unit queued behind it: exchanging tiles is never allowed.
+    enum class Fate : uint8_t { Visiting, Moves, Stays };
+    std::map<UnitId, Fate> fate;
+    for (const auto& [start, tile] : won) {
+      std::vector<UnitId> chain;
+      Fate result = Fate::Stays;
+      for (UnitId cur = start;;) {
+        if (auto f = fate.find(cur); f != fate.end()) {
+          result = f->second == Fate::Visiting ? Fate::Stays : f->second;
+          break;
+        }
+        fate[cur] = Fate::Visiting;
+        chain.push_back(cur);
+        auto occ = occupied.find(won.at(cur));
+        if (occ == occupied.end()) {
+          result = Fate::Moves;
+          break;
+        }
+        if (!won.contains(occ->second))
+          break;
+        cur = occ->second;
       }
+      for (UnitId id : chain)
+        fate[id] = result;
     }
 
-    // Apply valid moves.
-    for (const auto& [tile, winner_id] : winners) {
-      if (winner_id.is_null())
+    for (const auto& [uid, tile] : won) {
+      if (fate.at(uid) != Fate::Moves)
         continue;
-      // Reject if target occupied by a unit that didn't move away
-      auto occ_it = occupied.find(tile);
-      if (occ_it != occupied.end() && occ_it->second != winner_id) {
-        // The occupant isn't the winner — blocked
-        continue;
-      }
-      Unit* u = world.find_unit(winner_id);
-      if (!u)
-        continue;
-      u->pos = tile;
-
-      // Decrement steps for this mover
+      world.find_unit(uid)->pos = tile;
       for (auto& mv : movers) {
-        if (mv.id == winner_id) {
+        if (mv.id == uid) {
           --mv.steps_left;
           break;
         }

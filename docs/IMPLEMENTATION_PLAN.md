@@ -75,7 +75,6 @@ how to verify each piece**. Section refs like §5 point into `DESIGN.md`.
 **Open / stop-and-ask (do NOT improvise — `DESIGN.md` §13)**
 - **Line-of-sight rule** (nebula/asteroid vision blocking) — needed in snapshot generation
   (Phase 1) and the MoveAttack halt check (Phase 2). Currently undecided; surface it early.
-- Blocked-unit movement deadlock behavior (stay-put/retry placeholder).
 - Attack-move halt precision (step-into-range-then-hold vs stop-one-short).
 
 ---
@@ -242,12 +241,11 @@ phase's acceptance implicitly.
 - UBSan + ASan builds pass on the test matches.
 - Fog test: bot's snapshot never contains an entity outside its vision.
 - Combat: first-strike kills before simultaneous; mutual kills both die; splash hits
-  friendlies. Movement: tile contest → tonnage then id; swap blocked; MoveAttack halts on
+  friendlies. Movement: tile contest → tonnage then id; chains advance, swaps and loops blocked; MoveAttack halts on
   the step a target enters range.
 
 **Stop-and-ask**
 - **Line-of-sight** (needed in `snapshot` fog-mask and MoveAttack halt) — surface, don't guess.
-- Blocked-unit deadlock behavior beyond placeholder.
 
 ### Phase 2 — Replay Playback + Minimal Visualizer
 **Goal:** watch matches (you can't tune what you can't see). Input-log model.

@@ -694,6 +694,109 @@ TEST(Movement, SwapIsBlocked) {
   EXPECT_EQ(b.pos.x, 4);
 }
 
+static void add_move(game::ValidatedCommands& vc, game::UnitId uid, int32_t tx, int32_t ty) {
+  vc.merge(move_cmd(uid, tx, ty));
+}
+
+TEST(Movement, ColumnAdvancesTogether) {
+  auto w = make_world();
+  auto& rear = w.spawn_unit({0}, game::UnitType::Interceptor, {3, 5});
+  auto& mid  = w.spawn_unit({0}, game::UnitType::Interceptor, {4, 5});
+  auto& lead = w.spawn_unit({0}, game::UnitType::Interceptor, {5, 5});
+  game::ValidatedCommands cmds, empty;
+  add_move(cmds, rear.id, 10, 5);
+  add_move(cmds, mid.id, 10, 5);
+  add_move(cmds, lead.id, 10, 5);
+  game::run_movement(w, cmds, empty);
+  EXPECT_EQ(rear.pos.x, 5); // each follows into the tile vacated ahead of it, every step
+  EXPECT_EQ(mid.pos.x, 6);
+  EXPECT_EQ(lead.pos.x, 7);
+}
+
+TEST(Movement, FollowsIntoTileAnEnemyVacates) {
+  auto w = make_world();
+  auto& a = w.spawn_unit({0}, game::UnitType::Frigate, {3, 5});
+  auto& b = w.spawn_unit({1}, game::UnitType::Frigate, {4, 5});
+  game::run_movement(w, move_cmd(a.id, 9, 5), move_cmd(b.id, 9, 5));
+  EXPECT_EQ(a.pos.x, 4);
+  EXPECT_EQ(b.pos.x, 5);
+}
+
+TEST(Movement, FriendlySwapIsBlocked) {
+  auto w = make_world();
+  auto& a = w.spawn_unit({0}, game::UnitType::Interceptor, {3, 5});
+  auto& b = w.spawn_unit({0}, game::UnitType::Interceptor, {4, 5});
+  game::ValidatedCommands cmds, empty;
+  add_move(cmds, a.id, 4, 5);
+  add_move(cmds, b.id, 3, 5);
+  game::run_movement(w, cmds, empty);
+  EXPECT_EQ(a.pos.x, 3);
+  EXPECT_EQ(b.pos.x, 4);
+}
+
+TEST(Movement, RingOfMoversIsBlocked) {
+  // Four units rotating round a 2x2 block: a closed loop like a swap, so nobody moves.
+  auto w = make_world();
+  auto& a = w.spawn_unit({0}, game::UnitType::Frigate, {3, 3});
+  auto& b = w.spawn_unit({0}, game::UnitType::Frigate, {4, 3});
+  auto& c = w.spawn_unit({0}, game::UnitType::Frigate, {4, 4});
+  auto& d = w.spawn_unit({0}, game::UnitType::Frigate, {3, 4});
+  game::ValidatedCommands cmds, empty;
+  add_move(cmds, a.id, 4, 3);
+  add_move(cmds, b.id, 4, 4);
+  add_move(cmds, c.id, 3, 4);
+  add_move(cmds, d.id, 3, 3);
+  game::run_movement(w, cmds, empty);
+  EXPECT_EQ(a.pos, (game::Vec2{3, 3}));
+  EXPECT_EQ(b.pos, (game::Vec2{4, 3}));
+  EXPECT_EQ(c.pos, (game::Vec2{4, 4}));
+  EXPECT_EQ(d.pos, (game::Vec2{3, 4}));
+}
+
+TEST(Movement, UnitQueuedBehindASwapIsBlocked) {
+  auto w = make_world();
+  auto& back = w.spawn_unit({0}, game::UnitType::Frigate, {2, 5});
+  auto& a    = w.spawn_unit({0}, game::UnitType::Frigate, {3, 5});
+  auto& b    = w.spawn_unit({0}, game::UnitType::Frigate, {4, 5});
+  game::ValidatedCommands cmds, empty;
+  add_move(cmds, back.id, 9, 5);
+  add_move(cmds, a.id, 4, 5);
+  add_move(cmds, b.id, 3, 5);
+  game::run_movement(w, cmds, empty);
+  EXPECT_EQ(back.pos.x, 2);
+  EXPECT_EQ(a.pos.x, 3);
+  EXPECT_EQ(b.pos.x, 4);
+}
+
+TEST(Movement, ChainStopsAtAParkedUnit) {
+  auto w = make_world();
+  auto& rear   = w.spawn_unit({0}, game::UnitType::Frigate, {3, 5});
+  auto& front  = w.spawn_unit({0}, game::UnitType::Frigate, {4, 5});
+  auto& parked = w.spawn_unit({0}, game::UnitType::Frigate, {5, 5});
+  game::ValidatedCommands cmds, empty;
+  add_move(cmds, rear.id, 9, 5);
+  add_move(cmds, front.id, 9, 5);
+  game::run_movement(w, cmds, empty);
+  EXPECT_EQ(rear.pos.x, 3);
+  EXPECT_EQ(front.pos.x, 4);
+  EXPECT_EQ(parked.pos.x, 5);
+}
+
+TEST(Movement, FollowerStaysWhenTheUnitAheadLosesItsTile) {
+  // front (Drone, priority 1) loses (5,5) to the Battleship; its tile never empties.
+  auto w = make_world();
+  auto& rear  = w.spawn_unit({0}, game::UnitType::Frigate, {3, 5});
+  auto& front = w.spawn_unit({0}, game::UnitType::Drone, {4, 5});
+  auto& bs    = w.spawn_unit({1}, game::UnitType::Battleship, {5, 6});
+  game::ValidatedCommands cmds;
+  add_move(cmds, rear.id, 9, 5);
+  add_move(cmds, front.id, 9, 5);
+  game::run_movement(w, cmds, move_cmd(bs.id, 5, 5));
+  EXPECT_EQ(bs.pos, (game::Vec2{5, 5}));
+  EXPECT_EQ(front.pos.x, 4);
+  EXPECT_EQ(rear.pos.x, 3);
+}
+
 TEST(Movement, BlockedByFriendlyStructure) {
   auto w = make_world();
   w.spawn_structure({0}, game::StructureType::CommandCore, {2, 1});
