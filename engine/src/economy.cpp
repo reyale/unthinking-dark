@@ -132,6 +132,10 @@ static void spend(World& world, const ValidatedCommands& cmds_a, const Validated
         continue;
       if (structure_count(world, builder->faction) >= cfg::STRUCTURE_HARD_CAP)
         continue;
+      // A deploying Drone's one command this tick is the deploy, so it hasn't moved: range is
+      // from where it stood when the bot decided.
+      if (manhattan(builder->pos, {cmd.ax, cmd.ay}) > cfg::CLAIM_DEPLOY_RANGE)
+        continue;
       if (!world.tile_free({cmd.ax, cmd.ay}))
         continue;
       auto& res = world.res(builder->faction);

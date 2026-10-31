@@ -10,7 +10,7 @@ Build order and acceptance criteria: `docs/IMPLEMENTATION_PLAN.md`.
 
 ## Current State
 
-**Phases 1–5 complete. 254/254 tests passing.**
+**Phases 1–5 complete. 256/256 tests passing.**
 
 | Phase | Status | Notes |
 |-------|--------|-------|
@@ -91,10 +91,11 @@ For LSP support: `ln -s build/compile_commands.json compile_commands.json`
 | `file_io.cpp` | Raw + Zstd file I/O. Zstd sections are `#ifdef`'d out under `__EMSCRIPTEN__`. |
 
 `fixtures/` — native test bots: `IdleBot` (empty commands; determinism tests), `RushBot`, `EconBot`,
-`TurtleBot` (one home claim, guards its base) and `ExpanderBot` (claims outward, never attacks).
+`TurtleBot` (one home claim, guards its base) and `ExpanderBot` (builds a Factory and Drones,
+walks claimers out to a claim lattice, never attacks).
 `Turtle.*` in `map_tests` proves the turtle loses to the descending threshold on every map.
 `bot_util.hpp` has a BFS `Router`: the engine never re-routes a blocked unit, so bots route
-themselves; enemy structures out of sight are learned from failed steps.
+themselves (own units block only the first step; enemy structures are remembered once seen).
 
 ### runner/ — Wasmtime WASM bot host
 

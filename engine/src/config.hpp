@@ -79,6 +79,9 @@ inline constexpr int32_t ARTILLERY_COST_E = 10,   ARTILLERY_COST_A = 25;
 inline constexpr int32_t BATTLESHIP_COST_E = 120, BATTLESHIP_COST_A = 15;
 inline constexpr int32_t FACTORY_COST_E = 0,      FACTORY_COST_A = 50;
 inline constexpr int32_t CLAIM_COST_E = 0,        CLAIM_COST_A = 20;
+// A Drone deploys a Claim Node onto a tile within this Manhattan distance of itself.
+// v1 placeholder.
+inline constexpr int32_t CLAIM_DEPLOY_RANGE = 2;
 inline constexpr int32_t PRODUCTION_TICKS = 3; // Factory build time, every ship type (v1 placeholder)
 
 // ---- WASM budgets (v1 placeholders — tune in sim) ----------------------

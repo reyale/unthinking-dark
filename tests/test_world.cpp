@@ -899,3 +899,53 @@ TEST(Snapshot, EnemyStructuresOnlyWithinSight) {
   EXPECT_TRUE(game::build_snapshot(w, 0, game::cfg::TICK_CAP).visible_enemy_structures.empty())
       << "out of sight, out of the snapshot";
 }
+
+// ---- Who can build, and from how far ----------------------------------------
+
+TEST(Command, OnlyDronesBuildOrDeploy) {
+  for (auto kind : {game::CommandKind::Build, game::CommandKind::DeployClaim}) {
+    auto w = make_world();
+    auto& drone = w.spawn_unit({0}, game::UnitType::Drone, {3, 3});
+    auto& frigate = w.spawn_unit({0}, game::UnitType::Frigate, {6, 6});
+    game::Command by_drone = make_cmd(drone.id.value, kind);
+    by_drone.ax = 4; by_drone.ay = 3;
+    game::Command by_frigate = make_cmd(frigate.id.value, kind);
+    by_frigate.ax = 6; by_frigate.ay = 7;
+    auto vc = game::validate_commands(w, 0, {by_drone, by_frigate});
+    EXPECT_TRUE(vc.contains(drone.id));
+    EXPECT_FALSE(vc.contains(frigate.id)) << "kind " << static_cast<int>(kind);
+  }
+}
+
+static game::ValidatedCommands deploy_at(const game::Unit& d, game::Vec2 at) {
+  game::Command c = make_cmd(d.id.value, game::CommandKind::DeployClaim);
+  c.ax = at.x;
+  c.ay = at.y;
+  game::ValidatedCommands cmds;
+  cmds.emplace(d.id, c);
+  return cmds;
+}
+
+static size_t claims(const game::World& w) {
+  size_t n = 0;
+  for (const auto& [sid, s] : w.structures)
+    if (s.type == game::StructureType::ClaimNode) ++n;
+  return n;
+}
+
+TEST(Economy, ClaimDeployRangeIsManhattan) {
+  const int32_t r = game::cfg::CLAIM_DEPLOY_RANGE;
+  for (auto [at, ok] : std::vector<std::pair<game::Vec2, bool>>{
+           {{3 + r, 3}, true},          // straight out, at range
+           {{3 + r - 1, 4}, true},      // diagonal-ish, at range
+           {{3 + r + 1, 3}, false},     // one past
+           {{3 + r, 4}, false}}) {      // Manhattan, not Chebyshev
+    auto w = make_world();
+    auto& d = w.spawn_unit({0}, game::UnitType::Drone, {3, 3});
+    w.res({0}).alloy = game::cfg::CLAIM_COST_A;
+    game::ValidatedCommands empty;
+    game::run_economy(w, deploy_at(d, at), empty);
+    EXPECT_EQ(claims(w), ok ? 1u : 0u) << "(" << at.x << "," << at.y << ")";
+    EXPECT_EQ(w.res({0}).alloy, ok ? 0 : game::cfg::CLAIM_COST_A) << "refusal is free";
+  }
+}

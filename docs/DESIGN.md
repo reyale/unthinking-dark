@@ -196,8 +196,10 @@ for step in 1..=N:
 - Harvest (Drones on/adjacent to resource nodes) credits `energy` / `alloy`.
 - Spend resolves in deterministic id order: builds, production, claim deployment; costs
   deducted. Insufficient resources → action fails (logged).
-- Build and DeployClaim need a free target tile at this point (after movement): passable,
-  no structure, no living unit. Otherwise the action fails and nothing is deducted.
+- Only Drones Build or DeployClaim (anything else is rejected at validation). Both need a
+  free target tile at this point (after movement): passable, no structure, no living unit.
+  A claim must also be within `CLAIM_DEPLOY_RANGE` (v1: 2, Manhattan) of the deploying
+  Drone. Otherwise the action fails and nothing is deducted.
 
 ### Phase 5 — Spawn / Upkeep
 - Newly produced ships appear on the first free tile adjacent to their Factory, checked
@@ -240,7 +242,7 @@ positioning beat raw numbers.
 |-----------|----|------|
 | **Command Core** (base) | 600 | destroyed = instant loss; produces Drones; stationary |
 | **Factory** | 150 | produces Interceptor/Frigate/Artillery; stationary; built by Drone |
-| **Claim Node** | scales high→~1 over match | Voronoi territory anchor; weak aura (deters lone scouts, ignorable by real forces); deployed by Drone via teleport (v1); cracked by firepower (esp. Artillery splash) |
+| **Claim Node** | scales high→~1 over match | Voronoi territory anchor; weak aura (deters lone scouts, ignorable by real forces); deployed by a Drone onto a tile within `CLAIM_DEPLOY_RANGE` (v1: 2) of itself, so Drones must travel to stake ground; cracked by firepower (esp. Artillery splash) |
 
 **Resources (2 types, v1):**
 - **Energy** — gates combat ships (spent at Factory).
@@ -411,8 +413,9 @@ and a late climax; draws rare (they are allowed, §7); turtles lose.
   packed asteroids; revisit if so.
 - Extra terrain: structural wall skin (megastructure debris), gravity wells, hazard
   tiles, jump lanes, sensor/interference zones.
-- Claim placement gating (currently teleport-anywhere; fallback is
-  "deploy where a builder can walk, with a vulnerable build window").
+- Claim placement gating beyond the range limit: a vulnerable build window (claim spawns
+  weak and only counts once complete).
+- Factory placement range: Build is Drone-only but still places at any distance.
 - Scratch memory region zeroed each tick.
 - 3rd resource type, additional unit types (Scout, etc.), claim tiers.
 - Procedural map generation.
