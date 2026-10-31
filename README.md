@@ -39,6 +39,22 @@ std::vector<Command> on_tick(WorldView);      // per tick, metered fuel budget
 
 Bots compile to `wasm32` via any LLVM toolchain (Rust, C++, Zig, AssemblyScript, ...). Fuel is deterministic — authors get exact, reproducible gas/memory reports before submitting.
 
+Bots must be built **without the WebAssembly bulk-memory feature** (`memory.copy`, `memory.fill`, ...);
+the runner refuses modules that use it. The C++ SDK handles this (`-mno-bulk-memory` plus its own
+`memcpy`/`memset`/`memmove`). Other toolchains need the equivalent flag, and recent ones enable
+bulk memory by default.
+
+## Open decisions to review
+
+- **Bulk memory is disabled for bots.** Wasmtime charges `memory.fill`/`memory.copy` one unit of
+  fuel whatever their length, so a bot could burn ~0.6 s of CPU per tick for a few thousand fuel
+  (measured: 200 × 32 MiB fills = 2,601 fuel). Rejecting the instructions closes that hole but
+  costs authors convenience: every toolchain must be told not to emit them, and bulk memory is on
+  by default in clang 19+, recent Rust, and Zig. Revisit if that friction proves real, e.g. by
+  rewriting bot modules at load to charge bulk instructions per byte, or if Wasmtime gains
+  size-proportional fuel for them. A wall-clock limit is not an alternative: it would make
+  forfeits machine-dependent and break determinism. See `runner/README.md`.
+
 ## Repository layout
 
 ```

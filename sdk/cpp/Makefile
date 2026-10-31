@@ -7,7 +7,12 @@ CXXFLAGS = --target=$(TARGET)        \
            -Iinclude                 \
            -nostdlib -fno-exceptions -fno-rtti \
            -O2 -ffp-contract=off -fno-fast-math \
+           -mno-bulk-memory          \
            -Wall
+
+# The runner rejects bulk-memory instructions, so large copies/clears compile to calls into
+# runtime.cpp's memcpy/memset/memmove instead (the build is -nostdlib; nothing else provides them).
+RUNTIME  = runtime.cpp
 
 # wasm-ld exports data symbols by address, so SNAPSHOT_ADDR and COMMAND_ADDR
 # become WASM i32 globals pointing at their linear-memory locations.
@@ -27,16 +32,17 @@ OUT      = $(patsubst %.cpp,%.wasm,$(BOT))
 
 all: $(OUT)
 
-$(OUT): $(BOT) $(HEADERS)
-	$(CLANG) $(CXXFLAGS) $(LDFLAGS) -o $@ $<
+$(OUT): $(BOT) $(RUNTIME) $(HEADERS)
+	$(CLANG) $(CXXFLAGS) $(LDFLAGS) -o $@ $< $(RUNTIME)
 
 examples: examples/idle_bot.wasm examples/rush_bot.wasm \
-          examples/quadratic_bot.wasm examples/leaky_bot.wasm
+          examples/quadratic_bot.wasm examples/leaky_bot.wasm \
+          examples/copy_bot.wasm
 
 HEADERS = include/ud/types.hpp ../../engine/src/abi.hpp ../../engine/src/config.hpp
 
-examples/%.wasm: examples/%.cpp $(HEADERS)
-	$(CLANG) $(CXXFLAGS) $(LDFLAGS) -o $@ $<
+examples/%.wasm: examples/%.cpp $(RUNTIME) $(HEADERS)
+	$(CLANG) $(CXXFLAGS) $(LDFLAGS) -o $@ $< $(RUNTIME)
 
 clean:
 	rm -f *.wasm examples/*.wasm

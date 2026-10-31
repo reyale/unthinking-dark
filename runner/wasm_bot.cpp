@@ -183,6 +183,9 @@ WasmBot::WasmBot(const std::vector<uint8_t>& wasm)
   wasmtime_config_wasm_threads_set(cfg, false);
   wasmtime_config_wasm_simd_set(cfg, false);
   wasmtime_config_wasm_relaxed_simd_set(cfg, false); // relaxed SIMD requires SIMD
+  // memory.fill/memory.copy cost one fuel unit whatever their length, so a bot could burn
+  // unbounded CPU inside its budget. Without them the compiler emits ordinary metered loops.
+  wasmtime_config_wasm_bulk_memory_set(cfg, false);
   wasmtime_config_cranelift_nan_canonicalization_set(cfg, true);
   wasmtime_memory_creator_t creator{&impl_->memory_gate, capped_new, nullptr};
   wasmtime_config_host_memory_creator_set(cfg, &creator); // copied into the config
@@ -194,7 +197,13 @@ WasmBot::WasmBot(const std::vector<uint8_t>& wasm)
   // Compile.
   wasmtime_error_t* err = wasmtime_module_new(
       impl_->engine, wasm.data(), wasm.size(), &impl_->module);
-  if (err) { last_error_ = drain_error(err, nullptr); return; }
+  if (err) {
+    last_error_ = drain_error(err, nullptr);
+    if (last_error_.find("bulk memory support is not enabled") != std::string::npos)
+      last_error_ += "\n(bots must be built with -mno-bulk-memory; see sdk/cpp/Makefile and "
+                     "sdk/cpp/runtime.cpp)";
+    return;
+  }
 
   // Instantiate (no host imports required for v1 bots).
   wasm_trap_t* trap = nullptr;

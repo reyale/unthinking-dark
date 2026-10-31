@@ -11,10 +11,12 @@ module and running it under [Wasmtime](https://wasmtime.dev/) with:
 - **Memory cap** — `MEMORY_CAP_MB` enforced via a host memory creator; a grow past it is
   refused and forfeits that tick
 - **Determinism flags** — threads off, SIMD off, relaxed SIMD off, NaN canonicalization on
+- **Bulk memory off** — modules using `memory.copy`/`memory.fill`/`memory.init`/`data.drop`
+  or the `table.*` equivalents are rejected at load (see below)
+- **Buffer validation** — export addresses and memory size checked at load time
 
 **Linux only.** The capped linear memory is reserved and committed with `mmap`/`mprotect`.
 `runner/CMakeLists.txt` stops configuration on any other platform.
-- **Buffer validation** — export addresses and memory size checked at load time
 
 ## Bot ABI contract
 
@@ -46,16 +48,39 @@ Init overrun → bot permanently unhealthy (load failure, match continues with
 empty commands every tick). Tick overrun → empty commands that tick, bot stays
 healthy and is called again next tick.
 
+## Bulk memory (disabled — open to review)
+
+Wasmtime charges each instruction one unit of fuel, and bulk-memory instructions are single
+instructions however many bytes they touch. Measured on this runner: an ordinary loop burns
+10M fuel in ~2 ms, but 200 × `memory.fill` of 32 MiB cost 2,601 fuel and took ~600 ms. Fuel
+would no longer bound CPU time.
+
+So `wasmtime_config_wasm_bulk_memory_set(cfg, false)`: such modules fail to load with
+`bulk memory support is not enabled` (the runner appends a hint pointing at the SDK). Without
+the feature, compilers emit copies and fills as ordinary loops, or as calls to `memcpy`/`memset`,
+which are metered per iteration like any other code. Memory size, loads/stores, the memory cap
+and fuel are otherwise unaffected.
+
+The C++ SDK builds with `-mno-bulk-memory` and links `sdk/cpp/runtime.cpp`, which provides
+loop-based `memcpy`/`memset`/`memmove` (the build is `-nostdlib`, so nothing else would).
+`sdk/cpp/examples/copy_bot.cpp` and `SdkLifecycle.LargeCopiesRunAsMeteredLoops` check it.
+
+**To review:** this pushes a burden onto every non-SDK toolchain (clang 19+, recent Rust and
+Zig enable bulk memory by default). Alternatives if it proves a problem: rewrite modules at load
+to charge bulk instructions in proportion to their length, or adopt per-byte fuel if Wasmtime
+adds it. A wall-clock timeout is *not* an option for forfeits: it is machine-dependent and would
+break determinism (at most a Phase 6 infrastructure abort for a hung match).
+
 ## Building bots
 
 Bots are compiled to `wasm32` via clang (not the engine's GCC toolchain):
 
 ```bash
-clang++ --target=wasm32-unknown-unknown -nostdlib -O2 \
+clang++ --target=wasm32-unknown-unknown -nostdlib -O2 -mno-bulk-memory \
         -Wl,--export=init,--export=on_tick \
         -Wl,--export=SNAPSHOT_ADDR,--export=COMMAND_ADDR \
         -Wl,--no-entry \
-        -o my_bot.wasm my_bot.cpp
+        -o my_bot.wasm my_bot.cpp sdk/cpp/runtime.cpp
 ```
 
 The C++ SDK template in `sdk/cpp/` (Phase 5) provides scaffolding and the

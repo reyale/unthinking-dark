@@ -10,7 +10,7 @@ Build order and acceptance criteria: `docs/IMPLEMENTATION_PLAN.md`.
 
 ## Current State
 
-**Phases 1–5 complete. 236/236 tests passing.**
+**Phases 1–5 complete. 238/238 tests passing.**
 
 | Phase | Status | Notes |
 |-------|--------|-------|
@@ -102,6 +102,11 @@ requests); the refused grow returns -1 and the memory never exceeds the cap. The
 `TickEntry::fault_a/b`, carried into `FrameState::forfeits`, shown in the viewer as "STALLED", and
 summarised by `ud_run`. `TickFault` values are written to replay files: append only.
 
+**Bulk memory is disabled** (`memory.copy`/`memory.fill` cost 1 fuel regardless of length, so
+they would unbound CPU per tick). Such modules fail to load. The SDK builds with
+`-mno-bulk-memory` and links `sdk/cpp/runtime.cpp` (loop-based `memcpy`/`memset`/`memmove`).
+Flagged for review in README.md "Open decisions to review".
+
 **Replay file format** is versioned by its magic (`UDREPLY2`), separately from `ABI_VERSION`.
 Change the layout → bump the magic and refuse the old one with a clear message (see `replay_io.cpp`).
 
@@ -147,7 +152,7 @@ every weapon's range, so scenarios always run their full length. Suite: `early_g
 
 ABI headers in `sdk/cpp/include/`. Bot template in `sdk/cpp/bot_template.cpp`. Examples:
 `idle_bot`, `rush_bot`, plus profiler demonstrations `quadratic_bot` (deliberately O(n²)) and
-`leaky_bot` (deliberately leaks memory). Build with the
+`leaky_bot` (deliberately leaks memory), and `copy_bot` (exercises `runtime.cpp`). Build with the
 `sdk/cpp/Makefile` (requires `wasm32` clang toolchain). Exports `abi_version` symbol for runner
 version check.
 

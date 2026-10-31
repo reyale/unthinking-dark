@@ -55,12 +55,16 @@ if(CLANGPP18)
       ${_EX}/idle_bot.wasm
       ${_EX}/quadratic_bot.wasm
       ${_EX}/leaky_bot.wasm
+      ${_EX}/copy_bot.wasm
     COMMAND ${CMAKE_MAKE_PROGRAM} -C ${_SDK} examples
     DEPENDS
       ${_EX}/rush_bot.cpp
       ${_EX}/idle_bot.cpp
       ${_EX}/quadratic_bot.cpp
       ${_EX}/leaky_bot.cpp
+      ${_EX}/copy_bot.cpp
+      ${_SDK}/runtime.cpp
+      ${_SDK}/Makefile
       ${_SDK}/include/ud/types.hpp
       ${_SDK}/include/cstddef
       ${_SDK}/include/cstdint
@@ -76,6 +80,7 @@ if(CLANGPP18)
     ${_EX}/idle_bot.wasm
     ${_EX}/quadratic_bot.wasm
     ${_EX}/leaky_bot.wasm
+    ${_EX}/copy_bot.wasm
   )
 
   add_dependencies(runner_tests sdk_bots_wasm)

@@ -753,3 +753,44 @@ TEST(WasmBot, MemoryForfeitsAreRecordedThroughReplayAndFrames) {
     EXPECT_EQ(frames[f].forfeits[1], game::TickFault::None);
   }
 }
+
+// ---- Bulk memory (disabled) -------------------------------------------------
+//
+// memory.fill/memory.copy cost one unit of fuel whatever their length, so they would let a bot
+// burn unbounded CPU inside its budget. The runner rejects any module that uses them; the SDK
+// builds with -mno-bulk-memory and supplies loop-based memcpy/memset/memmove instead.
+
+static std::string bulk_wat(std::string_view instr) {
+  std::string wat(IDLE_WAT);
+  const std::string tick = "(func   (export \"on_tick\") (result i32) i32.const 0)";
+  wat.replace(wat.find(tick), tick.size(),
+              "(func (export \"on_tick\") (result i32) (" + std::string(instr) +
+                  " (i32.const 0) (i32.const 0) (i32.const 65536)) i32.const 0)");
+  return wat;
+}
+
+TEST(WasmBot, BulkMemoryInstructionsRejectedAtLoad) {
+  for (std::string_view instr : {"memory.fill", "memory.copy"}) {
+    runner::WasmBot bot(to_wasm(bulk_wat(instr)));
+    EXPECT_FALSE(bot.healthy()) << instr;
+    EXPECT_NE(bot.last_error().find("bulk memory"), std::string::npos)
+        << instr << ": " << bot.last_error();
+  }
+}
+
+TEST(SdkLifecycle, LargeCopiesRunAsMeteredLoops) {
+  const std::string path = sdk_path("copy_bot.wasm");
+  if (!file_exists(path)) GTEST_SKIP() << "copy_bot.wasm not built (clang++-18 required)";
+
+  runner::WasmBot bot(runner::load_wasm_file(path));
+  ASSERT_TRUE(bot.healthy()) << bot.last_error();
+  bot.on_init(make_world().map, 0);
+  ASSERT_TRUE(bot.healthy()) << bot.last_error();
+  for (uint32_t t = 0; t < 3; ++t) {
+    bot.on_tick(make_snap(t));
+    EXPECT_EQ(bot.last_metrics().fault, game::TickFault::None)
+        << "tick " << t << ": the bot traps if a copy, clear or move is wrong";
+    // A 64 KiB copy plus clear plus move: at one word per iteration, tens of thousands of fuel.
+    EXPECT_GT(bot.last_metrics().fuel_consumed, 50'000u) << "copies were not charged per word";
+  }
+}
