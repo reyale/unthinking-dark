@@ -5,7 +5,7 @@
 namespace game {
 
 Unit& World::spawn_unit(FactionId faction, UnitType type, Vec2 pos) {
-  UnitId id{next_unit_id++};
+  UnitId id{next_entity_id++};
   Unit u;
   u.id = id;
   u.faction = faction;
@@ -18,7 +18,7 @@ Unit& World::spawn_unit(FactionId faction, UnitType type, Vec2 pos) {
 }
 
 Structure& World::spawn_structure(FactionId faction, StructureType type, Vec2 pos) {
-  StructureId id{next_structure_id++};
+  StructureId id{next_entity_id++};
   Structure s;
   s.id = id;
   s.faction = faction;

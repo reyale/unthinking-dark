@@ -27,7 +27,7 @@ public:
       if (res.x < 0 || manhattan({u.x, u.y}, res) <= 1)
         continue; // no visible resource, or already in harvest range
       Command cmd{};
-      cmd.unit_id = u.id;
+      cmd.entity_id = u.id;
       cmd.kind    = static_cast<uint16_t>(CommandKind::Move);
       cmd.ax      = res.x;
       cmd.ay      = res.y;

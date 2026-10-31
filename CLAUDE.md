@@ -10,7 +10,7 @@ Build order and acceptance criteria: `docs/IMPLEMENTATION_PLAN.md`.
 
 ## Current State
 
-**Phases 1–5 complete. 256/256 tests passing.**
+**Phases 1–5 complete. 262/262 tests passing.**
 
 | Phase | Status | Notes |
 |-------|--------|-------|
@@ -25,8 +25,9 @@ Build order and acceptance criteria: `docs/IMPLEMENTATION_PLAN.md`.
 Additional work:
 - **Draws are allowed** (`WinReason::Draw`): both Command Cores die the same tick, or the tick cap is
   reached with territory difference ≤ `cfg::DRAW_TERRITORY_MARGIN` (5%). Don't "fix" them away.
-- `ABI_VERSION` is 9 (8 added `StructureView`: all own structures; 9 added `EnemyStructureView`:
-  enemy structures in sight). Bumping it invalidates all existing replay files and every compiled bot.
+- `ABI_VERSION` is 10 (8 added `StructureView`: all own structures; 9 added `EnemyStructureView`:
+  enemy structures in sight; 10 renamed `Command::unit_id` → `entity_id`: Produce is issued by the
+  Core (Drones) or a Factory (ships) itself). Bumping it invalidates all existing replay files and every compiled bot.
 - Hard caps `UNIT_HARD_CAP` (256, queued ships count) and `STRUCTURE_HARD_CAP` (128) are enforced in
   `economy.cpp`: they bound the snapshot buffer, and the runner clamps to them when copying in.
 
@@ -67,7 +68,7 @@ For LSP support: `ln -s build/compile_commands.json compile_commands.json`
 |------|------|
 | `abi.hpp` | **Single source of truth for all bot/engine wire structs.** Locked with `offsetof`/`sizeof` static_asserts. Do not define ABI structs anywhere else. |
 | `config.hpp` | Every balance constant and hard cap (unit stats, production costs, harvest yields, territory). No magic numbers anywhere else. |
-| `ids.hpp` | Strong typed `UnitId`, `StructureId`, `FactionId`. Never raw `uint32_t` for ids. |
+| `ids.hpp` | Strong typed `UnitId`, `StructureId`, `FactionId`, and `EntityId` (a command's issuer). Units and structures share one id sequence (`World::next_entity_id`): ids never collide. Never raw `uint32_t` for ids. |
 | `rng.hpp/.cpp` | xoshiro256** PRNG. Hand-rolled — `std::uniform_int_distribution` is not portable. |
 | `fixed.hpp/.cpp` | Q32.32 fixed-point. `isqrt()` seeds from `std::sqrt` (currently unused by game logic — make it integer-only before relying on it). |
 | `grid.hpp/.cpp` | `Vec2`, `Terrain`, 4-connected grid helpers (`manhattan()`, `is_passable()`). |

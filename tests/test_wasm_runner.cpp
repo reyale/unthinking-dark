@@ -72,7 +72,7 @@ static constexpr std::string_view TICK_ECHO_WAT = R"wat(
 )
 )wat";
 
-// Writes a known magic command (unit_id=57005, ax=7, ay=9) to COMMAND_ADDR and
+// Writes a known magic command (entity_id=57005, ax=7, ay=9) to COMMAND_ADDR and
 // returns 1.  Proves command bytes written by the bot are delivered to the engine.
 static constexpr std::string_view COMMAND_WRITER_WAT = R"wat(
 (module
@@ -104,7 +104,7 @@ static constexpr std::string_view UNIT_COUNT_WAT = R"wat(
 )wat";
 
 // Reads my_units_off from SnapshotHeader (offset 44), loads UnitView[0].id from
-// that offset, writes it as Command[0].unit_id, returns 1.
+// that offset, writes it as Command[0].entity_id, returns 1.
 // Proves the full snapshot layout (header offsets → array data → unit id) is correct.
 static constexpr std::string_view UNIT_ID_ROUNDTRIP_WAT = R"wat(
 (module
@@ -324,7 +324,7 @@ TEST(WasmBot, CommandWrittenByBotIsDelivered) {
   auto cmds = bot.on_tick(make_snap());
 
   ASSERT_EQ(cmds.size(), 1u);
-  EXPECT_EQ(cmds[0].unit_id, 57005u); // 0xDEAD
+  EXPECT_EQ(cmds[0].entity_id, 57005u); // 0xDEAD
   EXPECT_EQ(cmds[0].ax, 7);
   EXPECT_EQ(cmds[0].ay, 9);
 }
@@ -344,7 +344,7 @@ TEST(WasmBot, SnapshotUnitCountReadByBot) {
 
 TEST(WasmBot, UnitIdRoundTripThroughSnapshot) {
   // UNIT_ID_ROUNDTRIP_WAT reads my_units_off from the header, loads UnitView[0].id
-  // from that offset, and writes it as Command[0].unit_id.
+  // from that offset, and writes it as Command[0].entity_id.
   runner::WasmBot bot(to_wasm(UNIT_ID_ROUNDTRIP_WAT));
   ASSERT_TRUE(bot.healthy());
 
@@ -357,7 +357,7 @@ TEST(WasmBot, UnitIdRoundTripThroughSnapshot) {
   auto cmds = bot.on_tick(snap);
 
   ASSERT_EQ(cmds.size(), 1u);
-  EXPECT_EQ(cmds[0].unit_id, 999u);
+  EXPECT_EQ(cmds[0].entity_id, 999u);
 }
 
 TEST(WasmBot, TickFuelExhaustionReturnsEmptyAndStaysHealthy) {
@@ -619,7 +619,7 @@ static std::string grow_wat(uint32_t pages, bool only_even_ticks) {
   (func (export "abi_version") (result i32) i32.const @ABI@)
   (func (export "init") (param i32))
   (func (export "on_tick") (result i32)
-    (i32.store (i32.const 327680) (i32.const 57005))   ;; unit_id
+    (i32.store (i32.const 327680) (i32.const 57005))   ;; entity_id
     (i32.store (i32.const 327688) (global.get $last))  ;; ax = previous grow result
     (if (i32.or (i32.const @ALWAYS@) (i32.eqz (i32.rem_u (i32.load (i32.const 0)) (i32.const 2))))
       (then (global.set $last (memory.grow (i32.const @PAGES@)))))
@@ -655,7 +655,7 @@ TEST(WasmBot, MemoryForfeitIsOnlyForThatTick) {
   auto cmds = bot.on_tick(make_snap(1)); // odd tick: no grow attempt
   ASSERT_EQ(cmds.size(), 1u);
   EXPECT_EQ(bot.last_metrics().fault, game::TickFault::None);
-  EXPECT_EQ(cmds[0].unit_id, 57005u);
+  EXPECT_EQ(cmds[0].entity_id, 57005u);
   EXPECT_EQ(cmds[0].ax, -1) << "the bot saw memory.grow fail with -1 and kept running";
 }
 
@@ -798,7 +798,7 @@ TEST(SdkLifecycle, LargeCopiesRunAsMeteredLoops) {
 // ---- Snapshot: my structures ------------------------------------------------
 
 // Reads my_structures_off (header offset 60) and my_structure_count (56); writes
-// StructureView[0].id as Command[0].unit_id and StructureView[0].x as ax; returns the count.
+// StructureView[0].id as Command[0].entity_id and StructureView[0].x as ax; returns the count.
 static constexpr std::string_view STRUCTURE_ECHO_WAT = R"wat(
 (module
   (memory (export "memory") 6)
@@ -829,12 +829,12 @@ TEST(WasmBot, StructureViewRoundTripThroughSnapshot) {
   snap.my_structures.push_back(sv);
   auto cmds = bot.on_tick(snap);
   ASSERT_EQ(cmds.size(), 1u);
-  EXPECT_EQ(cmds[0].unit_id, 4242u);
+  EXPECT_EQ(cmds[0].entity_id, 4242u);
   EXPECT_EQ(cmds[0].ax, 17);
 }
 
 // Reads enemy_structures_off (header offset 68) and the count (64); writes
-// EnemyStructureView[0].id as Command[0].unit_id and its y as ay; returns the count.
+// EnemyStructureView[0].id as Command[0].entity_id and its y as ay; returns the count.
 static constexpr std::string_view ENEMY_STRUCTURE_ECHO_WAT = R"wat(
 (module
   (memory (export "memory") 6)
@@ -867,7 +867,7 @@ TEST(WasmBot, EnemyStructureViewRoundTripThroughSnapshot) {
   snap.visible_enemy_structures.push_back(es);
   auto cmds = bot.on_tick(snap);
   ASSERT_EQ(cmds.size(), 1u);
-  EXPECT_EQ(cmds[0].unit_id, 777u);
+  EXPECT_EQ(cmds[0].entity_id, 777u);
   EXPECT_EQ(cmds[0].ay, 23);
 }
 

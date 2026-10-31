@@ -5,6 +5,7 @@
 #include "snapshot.hpp"
 #include "tick.hpp"
 #include "world.hpp"
+#include <map>
 
 namespace game {
 
@@ -36,13 +37,17 @@ MatchRecord run_match(World& world, Bot& bot_a, uint32_t faction_a, Bot& bot_b, 
     for (int32_t x = 0; x < world.map.width; ++x)
       rec.replay.map_tiles.push_back(world.map.tile_at({x, y}));
 
-  // Record initial entity placement in id order (= spawn order)
+  // Record initial entity placement in id order (= spawn order). Units and structures share
+  // one id sequence, so merge the two maps: re-spawning in this order reproduces every id.
+  std::map<uint32_t, EntityInit> by_id;
   for (const auto& [uid, u] : world.units)
-    rec.replay.initial_entities.push_back(
-      {u.faction.value, static_cast<uint8_t>(u.type), false, u.pos.x, u.pos.y});
+    by_id.emplace(uid.value,
+                  EntityInit{u.faction.value, static_cast<uint8_t>(u.type), false, u.pos.x, u.pos.y});
   for (const auto& [sid, s] : world.structures)
-    rec.replay.initial_entities.push_back(
-      {s.faction.value, static_cast<uint8_t>(s.type), true, s.pos.x, s.pos.y});
+    by_id.emplace(sid.value,
+                  EntityInit{s.faction.value, static_cast<uint8_t>(s.type), true, s.pos.x, s.pos.y});
+  for (const auto& [id, e] : by_id)
+    rec.replay.initial_entities.push_back(e);
 
   if (writer)
     writer->begin(rec.replay);

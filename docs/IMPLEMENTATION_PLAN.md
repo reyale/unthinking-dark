@@ -188,11 +188,11 @@ struct TileView {            // only fog-visible tiles
 ### 2.3 Command structs (bot → engine)
 ```c
 struct Command {
-  uint32_t unit_id;
+  uint32_t entity_id; // issuer: a unit, or the Core/Factory for Produce (ABI 10)
   uint16_t kind;   // enum: Move, MoveAttack, Attack, Gather, Build, DeployClaim, Produce
   uint16_t arg_type;
   int32_t  ax, ay; // target tile (Move/MoveAttack/Attack-at / Build / DeployClaim)
-  uint32_t target_id; // target unit/structure/factory (Attack target, Produce-from, etc.)
+  uint32_t target_id; // Attack target (unit or structure id)
   uint16_t aux;    // unit_type for Produce/Build; reserved otherwise
   uint16_t _pad;
 };

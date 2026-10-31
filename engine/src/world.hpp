@@ -27,8 +27,7 @@ struct World {
   std::array<Resources, MAX_FACTIONS> resources{};
 
   // Id counters — assigned in creation order, never reused.
-  uint32_t next_unit_id{1};
-  uint32_t next_structure_id{1};
+  uint32_t next_entity_id{1}; // shared by units and structures: ids never collide
 
   // Last territory partition (updated each tick after run_territory).
   TerritoryState last_territory{};

@@ -33,11 +33,11 @@ enum class CommandKind : uint16_t {
 // Fields use plain integer types rather than CommandKind/UnitType enums so this
 // struct is valid C and can be shared with bots written in any language.
 struct Command {
-  uint32_t unit_id;
+  uint32_t entity_id; // who acts: a unit, or for Produce the Core or Factory producing
   uint16_t kind;      // CommandKind
   uint16_t arg_type;  // reserved / unit_type for Produce/Build
   int32_t ax, ay;     // target tile
-  uint32_t target_id; // attack target / factory id
+  uint32_t target_id; // Attack target (unit or structure id)
   uint16_t aux;       // unit_type for Produce/Build
   uint16_t _pad;
 };
@@ -80,7 +80,7 @@ struct UnitView { // my units: full info
 inline constexpr uint16_t PRODUCING_NONE = 0xFFFF;
 
 struct StructureView { // my structures: full info. All of them, regardless of fog.
-  uint32_t id;         // the Factory id for Produce's target_id
+  uint32_t id;         // Produce's entity_id when this is a Core or Factory
   uint16_t type;       // StructureType
   uint16_t producing;  // UnitType in the Factory's queue, or PRODUCING_NONE
   int32_t x, y;
@@ -117,7 +117,7 @@ struct TileView { // fog-visible tiles only
 // changes, and bump ABI_VERSION.
 
 static_assert(sizeof(Command) == 24,                      "Command ABI size changed");
-static_assert(offsetof(Command, unit_id)   ==  0,         "Command layout changed");
+static_assert(offsetof(Command, entity_id) ==  0,         "Command layout changed");
 static_assert(offsetof(Command, kind)      ==  4,         "Command layout changed");
 static_assert(offsetof(Command, arg_type)  ==  6,         "Command layout changed");
 static_assert(offsetof(Command, ax)        ==  8,         "Command layout changed");

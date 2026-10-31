@@ -58,7 +58,7 @@ extern "C" int32_t on_tick() {
   for (uint32_t i = 0; i < h->my_unit_count && n < (uint32_t)game::cfg::UNIT_HARD_CAP; ++i) {
     game::Command& cmd = COMMAND_ADDR[n++];
     cmd            = {};
-    cmd.unit_id    = u[i].id;
+    cmd.entity_id    = u[i].id;
     cmd.kind       = static_cast<uint16_t>(game::CommandKind::Move);
     cmd.ax         = 10;
     cmd.ay         = 10;

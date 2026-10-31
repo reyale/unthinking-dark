@@ -126,7 +126,7 @@ extern "C" int32_t on_tick() {
   for (uint32_t i = 0; i < h->my_unit_count && n < (uint32_t)game::cfg::UNIT_HARD_CAP; ++i) {
     const game::UnitView& u = units[i];
     game::Command cmd{};
-    cmd.unit_id = u.id;
+    cmd.entity_id = u.id;
 
     if (u.type == (uint16_t)game::UnitType::Drone) {
       // Find nearest visible resource node.

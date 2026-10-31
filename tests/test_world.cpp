@@ -106,7 +106,7 @@ TEST(Grid, ManhattanDistance) {
 
 static game::Command make_cmd(uint32_t uid, game::CommandKind kind) {
   game::Command c{};
-  c.unit_id = uid;
+  c.entity_id = uid;
   c.kind    = static_cast<uint16_t>(kind);
   return c;
 }
@@ -274,12 +274,11 @@ TEST(Economy, ProduceInterceptorDeductsEnergy) {
   w.res({0}).energy = 100;
   w.res({0}).alloy  = 100;
   game::Command c{};
-  c.unit_id   = 1; // issuing unit id (not checked for Produce)
+  c.entity_id = fac.id.value; // the producer issues Produce
   c.kind      = static_cast<uint16_t>(game::CommandKind::Produce);
-  c.target_id = fac.id.value;
   c.aux       = static_cast<uint16_t>(game::UnitType::Interceptor);
   game::ValidatedCommands cmds;
-  cmds.emplace(game::UnitId{1}, c);
+  cmds.emplace(fac.id, c);
   game::ValidatedCommands empty;
   game::run_economy(w, cmds, empty);
   EXPECT_LT(w.res({0}).energy, 100); // energy was deducted (INTERCEPTOR_COST_E)
@@ -291,12 +290,11 @@ TEST(Economy, ProduceInsufficientResourcesIgnored) {
   auto& fac = w.spawn_structure({0}, game::StructureType::Factory, {5, 5});
   w.res({0}).energy = 0; // can't afford Interceptor (costs 20)
   game::Command c{};
-  c.unit_id   = 1;
+  c.entity_id = fac.id.value;
   c.kind      = static_cast<uint16_t>(game::CommandKind::Produce);
-  c.target_id = fac.id.value;
   c.aux       = static_cast<uint16_t>(game::UnitType::Interceptor);
   game::ValidatedCommands cmds;
-  cmds.emplace(game::UnitId{1}, c);
+  cmds.emplace(fac.id, c);
   game::ValidatedCommands empty;
   game::run_economy(w, cmds, empty);
   EXPECT_FALSE(fac.production_queue.has_value());
@@ -575,7 +573,7 @@ TEST(World, TileFreeChecksTerrainStructuresAndUnits) {
 static game::ValidatedCommands move_cmd(game::UnitId uid, int32_t tx, int32_t ty,
                                          game::CommandKind kind = game::CommandKind::Move) {
   game::Command c{};
-  c.unit_id = uid.value;
+  c.entity_id = uid.value;
   c.kind    = static_cast<uint16_t>(kind);
   c.ax      = static_cast<int16_t>(tx);
   c.ay      = static_cast<int16_t>(ty);
@@ -784,12 +782,11 @@ TEST(Economy, StructureCapIsPerFactionAndFreedByDeath) {
 
 static game::ValidatedCommands produce(game::StructureId fac) {
   game::Command c{};
-  c.unit_id   = 1;
+  c.entity_id = fac.value;
   c.kind      = static_cast<uint16_t>(game::CommandKind::Produce);
-  c.target_id = fac.value;
   c.aux       = static_cast<uint16_t>(game::UnitType::Interceptor);
   game::ValidatedCommands cmds;
-  cmds.emplace(game::UnitId{1}, c);
+  cmds.emplace(fac, c);
   return cmds;
 }
 
@@ -884,7 +881,7 @@ TEST(Snapshot, EnemyStructuresOnlyWithinSight) {
   w.spawn_structure({1}, game::StructureType::ClaimNode, {39, 39});                    // far
   auto& dead = w.spawn_structure({1}, game::StructureType::ClaimNode, {10, 11});
   dead.hp = 0;
-  w.spawn_structure({0}, game::StructureType::CommandCore, {11, 10}); // ours: not an enemy
+  w.spawn_structure({0}, game::StructureType::CommandCore, {30, 30}); // ours: not an enemy
 
   auto snap = game::build_snapshot(w, 0, game::cfg::TICK_CAP);
   ASSERT_EQ(snap.visible_enemy_structures.size(), 1u);
@@ -948,4 +945,104 @@ TEST(Economy, ClaimDeployRangeIsManhattan) {
     EXPECT_EQ(claims(w), ok ? 1u : 0u) << "(" << at.x << "," << at.y << ")";
     EXPECT_EQ(w.res({0}).alloy, ok ? 0 : game::cfg::CLAIM_COST_A) << "refusal is free";
   }
+}
+
+// ---- Production: who makes what, issued by the producer ----------------------
+
+static game::Command produce_cmd(uint32_t issuer, game::UnitType what) {
+  game::Command c{};
+  c.entity_id = issuer;
+  c.kind = static_cast<uint16_t>(game::CommandKind::Produce);
+  c.aux = static_cast<uint16_t>(what);
+  return c;
+}
+
+TEST(Command, CoreProducesDronesFactoryProducesShips) {
+  auto w = make_world();
+  auto& core = w.spawn_structure({0}, game::StructureType::CommandCore, {1, 1});
+  auto& fac  = w.spawn_structure({0}, game::StructureType::Factory, {5, 5});
+  auto& claim = w.spawn_structure({0}, game::StructureType::ClaimNode, {8, 8});
+  auto& drone = w.spawn_unit({0}, game::UnitType::Drone, {3, 3});
+  using UT = game::UnitType;
+  auto accepted = [&](uint32_t issuer, UT what) {
+    return game::validate_commands(w, 0, {produce_cmd(issuer, what)}).size() == 1;
+  };
+  EXPECT_TRUE(accepted(core.id.value, UT::Drone));
+  for (UT ship : {UT::Interceptor, UT::Frigate, UT::Artillery, UT::Battleship}) {
+    EXPECT_FALSE(accepted(core.id.value, ship)) << "the Core makes only Drones";
+    EXPECT_TRUE(accepted(fac.id.value, ship));
+  }
+  EXPECT_FALSE(accepted(fac.id.value, UT::Drone)) << "Factories make only ships";
+  EXPECT_FALSE(accepted(claim.id.value, UT::Drone)) << "a Claim Node produces nothing";
+  EXPECT_FALSE(accepted(drone.id.value, UT::Drone)) << "units don't produce";
+}
+
+TEST(Command, ProduceFromAnEnemyOrDeadStructureRejected) {
+  auto w = make_world();
+  auto& enemy_core = w.spawn_structure({1}, game::StructureType::CommandCore, {1, 1});
+  auto& dead_core = w.spawn_structure({0}, game::StructureType::CommandCore, {8, 8});
+  dead_core.hp = 0;
+  EXPECT_TRUE(game::validate_commands(w, 0, {produce_cmd(enemy_core.id.value,
+                                                          game::UnitType::Drone)}).empty());
+  EXPECT_TRUE(game::validate_commands(w, 0, {produce_cmd(dead_core.id.value,
+                                                          game::UnitType::Drone)}).empty());
+}
+
+TEST(World, UnitsAndStructuresShareOneIdSequence) {
+  auto w = make_world();
+  auto& a = w.spawn_unit({0}, game::UnitType::Drone, {1, 1});
+  auto& b = w.spawn_structure({0}, game::StructureType::Factory, {2, 2});
+  auto& c = w.spawn_unit({0}, game::UnitType::Drone, {3, 3});
+  EXPECT_EQ(a.id.value + 1, b.id.value);
+  EXPECT_EQ(b.id.value + 1, c.id.value);
+  EXPECT_EQ(w.find_structure(game::StructureId{a.id.value}), nullptr);
+}
+
+TEST(Economy, CoreProducesADroneBesideIt) {
+  auto w = make_world();
+  auto& core = w.spawn_structure({0}, game::StructureType::CommandCore, {5, 5});
+  w.res({0}).energy = game::cfg::DRONE_COST_E;
+  game::ValidatedCommands cmds, empty;
+  cmds.emplace(core.id, produce_cmd(core.id.value, game::UnitType::Drone));
+  game::run_economy(w, cmds, empty);
+  ASSERT_TRUE(core.production_queue.has_value());
+  EXPECT_EQ(w.res({0}).energy, 0);
+  for (int32_t t = 1; t < game::cfg::PRODUCTION_TICKS; ++t) game::run_economy(w, empty, empty);
+  ASSERT_EQ(w.units.size(), 1u);
+  const auto& d = w.units.begin()->second;
+  EXPECT_EQ(d.type, game::UnitType::Drone);
+  EXPECT_EQ(game::manhattan(d.pos, core.pos), 1);
+}
+
+TEST(Economy, BuildRangeIsOne) {
+  for (auto [at, ok] : std::vector<std::pair<game::Vec2, bool>>{
+           {{4, 3}, true}, {{3, 4}, true}, {{5, 3}, false}, {{4, 4}, false}}) {
+    auto w = make_world();
+    auto& d = w.spawn_unit({0}, game::UnitType::Drone, {3, 3});
+    w.res({0}).alloy = game::cfg::FACTORY_COST_A;
+    game::Command c = make_cmd(d.id.value, game::CommandKind::Build);
+    c.ax = at.x;
+    c.ay = at.y;
+    c.aux = static_cast<uint16_t>(game::StructureType::Factory);
+    game::ValidatedCommands cmds, empty;
+    cmds.emplace(d.id, c);
+    game::run_economy(w, cmds, empty);
+    EXPECT_EQ(w.structures.size(), ok ? 1u : 0u) << "(" << at.x << "," << at.y << ")";
+  }
+}
+
+// Every structure sees STRUCTURE_SIGHT around itself, so a base with no units nearby
+// isn't blind.
+TEST(Snapshot, StructuresSeeAroundThemselves) {
+  auto w = make_big_world();
+  w.spawn_structure({0}, game::StructureType::ClaimNode, {20, 20});
+  const int32_t r = game::cfg::STRUCTURE_SIGHT;
+  auto& in = w.spawn_unit({1}, game::UnitType::Drone, {20 + r, 20});
+  w.spawn_unit({1}, game::UnitType::Drone, {20 + r, 21}); // Manhattan r + 1
+  auto& enemy_fac = w.spawn_structure({1}, game::StructureType::Factory, {20, 20 - r});
+  auto snap = game::build_snapshot(w, 0, game::cfg::TICK_CAP);
+  ASSERT_EQ(snap.visible_enemies.size(), 1u);
+  EXPECT_EQ(snap.visible_enemies[0].id, in.id.value);
+  ASSERT_EQ(snap.visible_enemy_structures.size(), 1u);
+  EXPECT_EQ(snap.visible_enemy_structures[0].id, enemy_fac.id.value);
 }

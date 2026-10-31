@@ -8,6 +8,7 @@
 #include "imgui_impl_opengl3.h"
 #include <GLFW/glfw3.h>
 
+#include "config.hpp"
 #include "entity.hpp"
 #include "frame.hpp"
 #include "grid.hpp"
@@ -116,7 +117,8 @@ static bool tile_visible(const game::FrameState& fr, int view, int32_t x, int32_
   }
   for (const auto& s : fr.structures) {
     if (view >= 0 && static_cast<int>(s.faction.value) != view) continue;
-    if (s.pos.x == x && s.pos.y == y) return true;
+    if (s.hp > 0 && std::abs(x - s.pos.x) + std::abs(y - s.pos.y) <= game::cfg::STRUCTURE_SIGHT)
+      return true;
   }
   return false;
 }
@@ -311,13 +313,14 @@ static void compute_first_seen() {
   };
   for (uint32_t frame = 0; frame < g.frames.size(); ++frame) {
     const auto& fr = g.frames[frame];
-    for (const auto& u : fr.units) {
-      const int32_t r = game::stats_for(u.type).sight;
+    auto see_around = [&](uint32_t f, game::Vec2 c, int32_t r) {
       for (int32_t dy = -r; dy <= r; ++dy)
         for (int32_t dx = -(r - std::abs(dy)); dx <= r - std::abs(dy); ++dx)
-          mark(u.faction.value, u.pos.x + dx, u.pos.y + dy, frame);
-    }
-    for (const auto& s : fr.structures) mark(s.faction.value, s.pos.x, s.pos.y, frame);
+          mark(f, c.x + dx, c.y + dy, frame);
+    };
+    for (const auto& u : fr.units) see_around(u.faction.value, u.pos, game::stats_for(u.type).sight);
+    for (const auto& s : fr.structures)
+      if (s.hp > 0) see_around(s.faction.value, s.pos, game::cfg::STRUCTURE_SIGHT);
   }
 }
 

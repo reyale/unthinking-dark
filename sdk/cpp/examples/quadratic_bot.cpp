@@ -48,7 +48,7 @@ extern "C" int32_t on_tick() {
     }
 
     game::Command cmd{};
-    cmd.unit_id = u.id;
+    cmd.entity_id = u.id;
     if (target != 0) {
       cmd.kind      = (uint16_t)game::CommandKind::MoveAttack;
       cmd.ax        = tx;

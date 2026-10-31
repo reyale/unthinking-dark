@@ -289,7 +289,7 @@ TEST(Territory, SimultaneousBaseDeathIsDraw) {
     void on_init(const game::Map&, uint32_t) override {}
     std::vector<game::Command> on_tick(const game::Snapshot&) override {
       game::Command cmd{};
-      cmd.unit_id   = my_unit_id;
+      cmd.entity_id   = my_unit_id;
       cmd.kind      = static_cast<uint16_t>(game::CommandKind::Attack);
       cmd.target_id = target_id;
       return {cmd};

@@ -28,7 +28,7 @@ public:
 
     for (const auto& u : snap.my_units) {
       Command cmd{};
-      cmd.unit_id = u.id;
+      cmd.entity_id = u.id;
 
       if (static_cast<UnitType>(u.type) == UnitType::Drone) {
         Vec2 res = nearest_resource(snap, {u.x, u.y});

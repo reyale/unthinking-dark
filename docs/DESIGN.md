@@ -91,7 +91,8 @@ These are non-negotiable; each one silently breaks replay if violated.
   - **Nebulae** — passable, **vision-blocking**. Amplify active-only fog; create ambush
     zones. (LoS interaction precise rules: see Deferred.)
 - **Fog of war:** **active-only for what moves.** A faction sees a tile only if currently
-  within a friendly unit's sight radius and not blocked by nebula. **Terrain, once seen,
+  within a friendly unit's sight radius or `STRUCTURE_SIGHT` of a friendly structure, and
+  not blocked by nebula. **Terrain, once seen,
   stays known**: it never changes, so there is nothing to hide again. The snapshot carries
   only the tiles in sight this tick; a bot keeps what it has seen (its memory persists
   across ticks), and the viewer draws explored-but-out-of-sight terrain dimmed, with
@@ -137,7 +138,9 @@ One validated command max per unit per tick. Command modes:
   enemy target is in range (then fire in combat phase).
 - `Attack(unit_id, target?)` — attack in place / hold and fire; does not move.
 - Economy/structure commands: `Gather(unit_id, node)`, `Build(unit_id, what, where)`,
-  `DeployClaim(unit_id, where)`, `Produce(factory_id, unit_type)`.
+  `DeployClaim(unit_id, where)`, `Produce(producer_id, unit_type)`. A command's issuer is an
+  entity id: a unit, or for Produce the Command Core (Drones) or a Factory (combat ships).
+  Units and structures share one id sequence, so an id names exactly one entity.
 
 Commands are **proposals**. The engine validates and resolves; invalid/contradictory
 commands are rejected deterministically. A bot proposing two commands for one unit:
@@ -201,8 +204,9 @@ for step in 1..=N:
   deducted. Insufficient resources → action fails (logged).
 - Only Drones Build or DeployClaim (anything else is rejected at validation). Both need a
   free target tile at this point (after movement): passable, no structure, no living unit.
-  A claim must also be within `CLAIM_DEPLOY_RANGE` (v1: 2, Manhattan) of the deploying
-  Drone. Otherwise the action fails and nothing is deducted.
+  The tile must also be near the Drone (Manhattan): within `BUILD_RANGE` (v1: 1) for a
+  Factory, `CLAIM_DEPLOY_RANGE` (v1: 2) for a Claim Node. Otherwise the action fails and
+  nothing is deducted.
 
 ### Phase 5 — Spawn / Upkeep
 - Newly produced ships appear on the first free tile adjacent to their Factory, checked
@@ -243,8 +247,11 @@ positioning beat raw numbers.
 
 | Structure | hp | role |
 |-----------|----|------|
-| **Command Core** (base) | 600 | destroyed = instant loss; produces Drones; stationary |
-| **Factory** | 150 | produces Interceptor/Frigate/Artillery; stationary; built by Drone |
+| **Command Core** (base) | 600 | destroyed = instant loss; produces Drones (only); stationary |
+| **Factory** | 150 | produces combat ships only (Interceptor/Frigate/Artillery/Battleship); stationary; built by a Drone within `BUILD_RANGE` (v1: 1) |
+
+Every structure sees `STRUCTURE_SIGHT` (v1: 2, Manhattan) around itself, so a base without
+units nearby is not blind.
 | **Claim Node** | scales high→~1 over match | Voronoi territory anchor; weak aura (deters lone scouts, ignorable by real forces); deployed by a Drone onto a tile within `CLAIM_DEPLOY_RANGE` (v1: 2) of itself, so Drones must travel to stake ground; cracked by firepower (esp. Artillery splash) |
 
 **Resources (2 types, v1):**
@@ -255,7 +262,7 @@ positioning beat raw numbers.
 
 **Unit cap:** economy-gated soft cap + a hard ceiling (`UNIT_HARD_CAP`, v1 256 per side) purely
 to bound fuel/memory worst-case and keep rendering legible. A ship counts from the moment it is
-bought (queued in a Factory); Produce at the cap is refused at no cost.
+bought (queued in its producer); Produce at the cap is refused at no cost.
 
 **Structure cap:** `STRUCTURE_HARD_CAP` (v1 128 per side, all types) bounds the snapshot the
 same way; Build and DeployClaim at the cap are refused at no cost. Destroyed structures free
@@ -418,7 +425,6 @@ and a late climax; draws rare (they are allowed, §7); turtles lose.
   tiles, jump lanes, sensor/interference zones.
 - Claim placement gating beyond the range limit: a vulnerable build window (claim spawns
   weak and only counts once complete).
-- Factory placement range: Build is Drone-only but still places at any distance.
 - Scratch memory region zeroed each tick.
 - 3rd resource type, additional unit types (Scout, etc.), claim tiers.
 - Procedural map generation.

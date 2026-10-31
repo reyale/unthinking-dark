@@ -1,4 +1,5 @@
 #include "snapshot.hpp"
+#include "config.hpp"
 #include "territory.hpp"
 #include "world.hpp"
 #include "entity.hpp"
@@ -12,27 +13,27 @@ Snapshot build_snapshot(const World& world, uint32_t faction_id, uint32_t tick_c
   const auto& res = world.res(my_faction);
 
   // --- Compute visibility mask -----------------------------------------
-  // A tile is visible if any friendly unit's Manhattan distance to it is
-  // within that unit's sight radius. No terrain blocking (LoS = radius only).
+  // A tile is visible if it is within sight (Manhattan) of any friendly unit or structure:
+  // a unit's own sight radius, STRUCTURE_SIGHT for every structure. No terrain blocking.
   const int32_t W = world.map.width;
   const int32_t H = world.map.height;
   std::vector<bool> visible(static_cast<size_t>(W * H), false);
-
-  for (const auto& [id, unit] : world.units) {
-    if (unit.faction != my_faction || !unit.alive())
-      continue;
-    const int32_t sight = unit.stats().sight;
-    const int32_t x0 = std::max(0, unit.pos.x - sight);
-    const int32_t x1 = std::min(W - 1, unit.pos.x + sight);
-    const int32_t y0 = std::max(0, unit.pos.y - sight);
-    const int32_t y1 = std::min(H - 1, unit.pos.y + sight);
-    for (int32_t y = y0; y <= y1; ++y) {
-      for (int32_t x = x0; x <= x1; ++x) {
-        if (manhattan(unit.pos, {x, y}) <= sight)
+  auto see_around = [&](Vec2 c, int32_t sight) {
+    const int32_t x0 = std::max(0, c.x - sight);
+    const int32_t x1 = std::min(W - 1, c.x + sight);
+    const int32_t y0 = std::max(0, c.y - sight);
+    const int32_t y1 = std::min(H - 1, c.y + sight);
+    for (int32_t y = y0; y <= y1; ++y)
+      for (int32_t x = x0; x <= x1; ++x)
+        if (manhattan(c, {x, y}) <= sight)
           visible[static_cast<size_t>(y * W + x)] = true;
-      }
-    }
-  }
+  };
+  for (const auto& [id, unit] : world.units)
+    if (unit.faction == my_faction && unit.alive())
+      see_around(unit.pos, unit.stats().sight);
+  for (const auto& [id, s] : world.structures)
+    if (s.faction == my_faction && s.alive())
+      see_around(s.pos, cfg::STRUCTURE_SIGHT);
 
   // --- Build visible-tile occupancy map --------------------------------
   // Maps tile position → occupant faction (0=none, 1=me, 2=enemy).

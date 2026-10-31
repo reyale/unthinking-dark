@@ -47,10 +47,10 @@ void run_movement(World& world, const ValidatedCommands& cmds_a, const Validated
     const auto kind = static_cast<CommandKind>(cmd.kind);
     if (kind != CommandKind::Move && kind != CommandKind::MoveAttack)
       continue;
-    Unit* u = world.find_unit(uid);
+    Unit* u = world.find_unit(uid.unit());
     if (!u || !u->alive())
       continue;
-    movers.push_back({uid, {cmd.ax, cmd.ay}, kind == CommandKind::MoveAttack, u->stats().speed});
+    movers.push_back({uid.unit(), {cmd.ax, cmd.ay}, kind == CommandKind::MoveAttack, u->stats().speed});
   }
 
   // Stepped simultaneous movement.

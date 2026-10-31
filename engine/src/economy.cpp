@@ -60,8 +60,7 @@ static void spend(World& world, const ValidatedCommands& cmds_a, const Validated
     auto kind = static_cast<CommandKind>(cmd.kind);
 
     if (kind == CommandKind::Produce) {
-      StructureId sid{cmd.target_id};
-      Structure* fac = world.find_structure(sid);
+      Structure* fac = world.find_structure(uid.structure());
       if (!fac || !fac->alive() || fac->production_queue.has_value())
         continue;
       if (unit_count(world, fac->faction) >= cfg::UNIT_HARD_CAP)
@@ -102,8 +101,10 @@ static void spend(World& world, const ValidatedCommands& cmds_a, const Validated
       fac->production_ticks_left = cfg::PRODUCTION_TICKS;
 
     } else if (kind == CommandKind::Build) {
-      const Unit* builder = world.find_unit(uid);
+      const Unit* builder = world.find_unit(uid.unit());
       if (!builder)
+        continue;
+      if (manhattan(builder->pos, {cmd.ax, cmd.ay}) > cfg::BUILD_RANGE)
         continue;
       auto stype = static_cast<StructureType>(cmd.aux);
       int32_t cost_e = 0, cost_a = 0;
@@ -127,7 +128,7 @@ static void spend(World& world, const ValidatedCommands& cmds_a, const Validated
       world.spawn_structure(builder->faction, stype, {cmd.ax, cmd.ay});
 
     } else if (kind == CommandKind::DeployClaim) {
-      const Unit* builder = world.find_unit(uid);
+      const Unit* builder = world.find_unit(uid.unit());
       if (!builder)
         continue;
       if (structure_count(world, builder->faction) >= cfg::STRUCTURE_HARD_CAP)
@@ -149,18 +150,17 @@ static void spend(World& world, const ValidatedCommands& cmds_a, const Validated
 
 static void tick_production(World& world) {
   for (auto& [sid, s] : world.structures) {
-    if (!s.alive() || s.type != StructureType::Factory)
-      continue;
-    if (!s.production_queue.has_value())
+    if (!s.alive() || !s.production_queue.has_value())
       continue;
     if (s.production_ticks_left > 0 && --s.production_ticks_left > 0)
       continue;
 
     // Spawn on the first free neighbour in DIRS order. If every neighbour is taken
-    // the finished unit stays in the factory (blocking the queue) and is retried
+    // the finished unit stays in the producer (blocking the queue) and is retried
     // each tick; if nothing ever moves out of the way it is never produced.
-    // Factories are iterated in id order, so two sharing a free tile resolve
-    // deterministically: the lower id spawns first and the tile is then taken.
+    // Producers (Command Cores and Factories) are iterated in id order, so two sharing
+    // a free tile resolve deterministically: the lower id spawns first and the tile is
+    // then taken.
     for (const Vec2& d : DIRS) {
       const Vec2 tile = s.pos + d;
       if (world.tile_free(tile)) {

@@ -5,24 +5,47 @@
 
 namespace game {
 
+bool can_produce(StructureType producer, UnitType what) {
+  switch (producer) {
+  case StructureType::CommandCore:
+    return what == UnitType::Drone;
+  case StructureType::Factory:
+    return what == UnitType::Interceptor || what == UnitType::Frigate ||
+           what == UnitType::Artillery || what == UnitType::Battleship;
+  default:
+    return false;
+  }
+}
+
 ValidatedCommands validate_commands(const World& world, uint32_t faction_id,
                                     const std::vector<Command>& raw) {
   FactionId my_faction{faction_id};
   ValidatedCommands out;
 
   for (const auto& cmd : raw) {
-    UnitId uid{cmd.unit_id};
+    const EntityId eid{cmd.entity_id};
 
-    // Reject if already have a command for this unit (first listed wins)
-    if (out.contains(uid))
-      continue;
-
-    // Reject if unit doesn't exist, is dead, or belongs to enemy
-    const Unit* unit = world.find_unit(uid);
-    if (!unit || !unit->alive() || unit->faction != my_faction)
+    // One command per issuer per tick: the first listed wins.
+    if (out.contains(eid))
       continue;
 
     const auto kind = static_cast<CommandKind>(cmd.kind);
+
+    // Structures issue one command, Produce: the Core makes Drones, a Factory makes ships.
+    if (kind == CommandKind::Produce) {
+      const Structure* s = world.find_structure(eid.structure());
+      if (!s || !s->alive() || s->faction != my_faction)
+        continue;
+      if (!can_produce(s->type, static_cast<UnitType>(cmd.aux)))
+        continue;
+      out.emplace(eid, cmd);
+      continue;
+    }
+
+    // Everything else is a unit's own order.
+    const Unit* unit = world.find_unit(eid.unit());
+    if (!unit || !unit->alive() || unit->faction != my_faction)
+      continue;
 
     // Per-kind validation
     switch (kind) {
@@ -35,8 +58,7 @@ ValidatedCommands validate_commands(const World& world, uint32_t faction_id,
     }
     case CommandKind::Attack: {
       if (cmd.target_id != 0) {
-        // Accept valid enemy unit OR valid enemy structure; unit takes priority
-        // when IDs coincide (both counters start at 1).
+        // An enemy unit or an enemy structure; ids are unique across both.
         UnitId uid{cmd.target_id};
         const Unit* u = world.find_unit(uid);
         if (u && u->alive() && u->faction != my_faction)
@@ -65,19 +87,11 @@ ValidatedCommands validate_commands(const World& world, uint32_t faction_id,
         continue;
       break;
     }
-    case CommandKind::Produce: {
-      // Issuer must be a Factory owned by this faction
-      StructureId sid{cmd.target_id};
-      const Structure* fac = world.find_structure(sid);
-      if (!fac || !fac->alive() || fac->faction != my_faction)
-        continue;
-      if (fac->type != StructureType::Factory)
-        continue;
-      break;
-    }
+    case CommandKind::Produce:
+      continue; // a unit can't produce
     }
 
-    out.emplace(uid, cmd);
+    out.emplace(eid, cmd);
   }
 
   return out;

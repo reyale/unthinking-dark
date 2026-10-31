@@ -18,7 +18,7 @@ static game::World make_combat_world() {
 // Issue an Attack command for a unit.
 static game::ValidatedCommands attack_cmd(game::UnitId attacker) {
   game::Command cmd{};
-  cmd.unit_id = attacker.value;
+  cmd.entity_id = attacker.value;
   cmd.kind = static_cast<uint16_t>(game::CommandKind::Attack);
   game::ValidatedCommands vc;
   vc.emplace(attacker, cmd);
@@ -155,7 +155,7 @@ TEST(Combat, BaseDestructionEndsMatch) {
       std::vector<game::Command> out;
       for (const auto& u : snap.my_units) {
         game::Command cmd{};
-        cmd.unit_id = u.id;
+        cmd.entity_id = u.id;
         cmd.kind = static_cast<uint16_t>(game::CommandKind::MoveAttack);
         cmd.ax = 8; cmd.ay = 5;
         out.push_back(cmd);
