@@ -3,6 +3,7 @@
 #include "entity.hpp"
 #include "grid.hpp"
 #include "vision.hpp"
+#include "config.hpp"
 #include <map>
 #include <limits>
 
@@ -224,6 +225,29 @@ void run_combat(World& world, const ValidatedCommands& cmds_a, const ValidatedCo
       else
         pending_units[tgt.unit_id] += unit.stats().dmg;
     }
+  }
+
+  // Finished Claim Nodes fire last; their shots are simultaneous with the units' all the same.
+  for (const auto& [sid, s] : world.structures) {
+    if (!s.alive() || s.type != StructureType::ClaimNode || !s.complete())
+      continue;
+    UnitId best{};
+    int32_t best_dist = std::numeric_limits<int32_t>::max();
+    for (const auto& [uid, u] : world.units) {
+      if (!u.alive() || u.faction == s.faction || !sight.sees(s.faction, u.pos))
+        continue;
+      const int32_t d = manhattan(s.pos, u.pos);
+      if (d <= cfg::CLAIM_ATTACK_RANGE && d < best_dist) {
+        best_dist = d;
+        best = uid;
+      }
+    }
+    if (best.is_null())
+      continue;
+    pending_units[best] += cfg::CLAIM_ATTACK_DMG;
+    if (log)
+      log->shots.push_back({{}, s.faction, UnitType::Drone, s.pos, best, {},
+                            world.find_unit(best)->pos, cfg::CLAIM_ATTACK_DMG, false, false, sid});
   }
 
   for (auto& [uid, dmg] : pending_units) {

@@ -378,3 +378,66 @@ TEST(Combat, ASpotterBesideTheNebulaExposesItsOccupant) {
   const game::Unit* d = w.find_unit(drone); // purged if the shot killed it
   EXPECT_TRUE(!d || d->hp < game::stats_for(game::UnitType::Drone).hp);
 }
+
+// ---- Claim Nodes fire, weakly -----------------------------------------------
+
+// Fights it out with every attacker attacking until the claim or all of them are dead.
+static bool claim_survives(int32_t interceptors) {
+  auto w = make_combat_world();
+  const game::StructureId claim =
+      w.spawn_structure({1}, game::StructureType::ClaimNode, {5, 5}).id;
+  game::ValidatedCommands cmds, empty;
+  const game::Vec2 spots[] = {{3, 5}, {5, 3}, {7, 5}};
+  for (int32_t i = 0; i < interceptors; ++i)
+    cmds.merge(attack_cmd(w.spawn_unit({0}, game::UnitType::Interceptor, spots[i]).id));
+  while (w.find_structure(claim) && !w.units.empty())
+    game::run_combat(w, cmds, empty);
+  return w.find_structure(claim) != nullptr;
+}
+
+TEST(Combat, FullStrengthClaimSeesOffALoneScoutButNotTwo) {
+  EXPECT_TRUE(claim_survives(1));
+  EXPECT_FALSE(claim_survives(2));
+}
+
+TEST(Combat, ClaimShootsNearestEnemyUnitInRangeOnly) {
+  auto w = make_combat_world();
+  w.spawn_structure({0}, game::StructureType::ClaimNode, {5, 5});
+  w.spawn_structure({1}, game::StructureType::Factory, {5, 6});     // structures: never
+  auto& own  = w.spawn_unit({0}, game::UnitType::Frigate, {4, 5});  // own: never
+  auto& far  = w.spawn_unit({1}, game::UnitType::Frigate, {5, 8});  // distance 3: out of range
+  auto& near = w.spawn_unit({1}, game::UnitType::Frigate, {6, 6});  // distance 2
+  auto& tie  = w.spawn_unit({1}, game::UnitType::Frigate, {7, 5});  // distance 2, higher id
+  game::ValidatedCommands empty;
+  game::CombatLog log;
+  game::run_combat(w, empty, empty, &log);
+  const int32_t full = game::stats_for(game::UnitType::Frigate).hp;
+  EXPECT_EQ(near.hp, full - game::cfg::CLAIM_ATTACK_DMG);
+  EXPECT_EQ(tie.hp, full);
+  EXPECT_EQ(far.hp, full);
+  EXPECT_EQ(own.hp, full);
+  ASSERT_EQ(log.shots.size(), 1u);
+  EXPECT_TRUE(log.shots[0].attacker.is_null());
+  EXPECT_FALSE(log.shots[0].attacker_struct.is_null());
+  EXPECT_EQ(log.shots[0].target_unit, near.id);
+}
+
+TEST(Combat, UnfinishedClaimDoesNotShoot) {
+  auto w = make_combat_world();
+  auto& c = w.spawn_structure({0}, game::StructureType::ClaimNode, {5, 5});
+  c.build_ticks_left = 5;
+  auto& e = w.spawn_unit({1}, game::UnitType::Frigate, {6, 5});
+  game::ValidatedCommands empty;
+  game::run_combat(w, empty, empty);
+  EXPECT_EQ(e.hp, game::stats_for(game::UnitType::Frigate).hp);
+}
+
+TEST(Combat, ClaimCannotShootIntoANebulaItCannotSee) {
+  auto w = make_combat_world();
+  w.map.set_terrain({7, 5}, game::Terrain::Nebula);
+  w.spawn_structure({0}, game::StructureType::ClaimNode, {5, 5});
+  auto& e = w.spawn_unit({1}, game::UnitType::Frigate, {7, 5}); // distance 2, hidden
+  game::ValidatedCommands empty;
+  game::run_combat(w, empty, empty);
+  EXPECT_EQ(e.hp, game::stats_for(game::UnitType::Frigate).hp);
+}

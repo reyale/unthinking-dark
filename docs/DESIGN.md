@@ -202,7 +202,8 @@ for step in 1..=N:
 - **Simultaneous sub-phase:** all non-first-strike damage (Interceptor, Artillery)
   computed against survivors, then applied together. Mutual kills both die. Splash
   (Artillery) resolves here: damage to every unit in radius, **friendly fire included**,
-  all simultaneous.
+  all simultaneous. Finished **Claim Nodes** fire in this sub-phase too (§6): nearest
+  visible enemy unit within `CLAIM_ATTACK_RANGE`, ties → lower id; never structures.
 - Apply deaths at end of phase.
 
 ### Phase 4 — Economy
@@ -274,7 +275,7 @@ positioning beat raw numbers.
 
 Every structure sees `STRUCTURE_SIGHT` (v1: 2, Manhattan) around itself, so a base without
 units nearby is not blind.
-| **Claim Node** | scales high→~1 over match | Voronoi territory anchor; weak aura (deters lone scouts, ignorable by real forces); deployed by a Drone onto a tile within `CLAIM_DEPLOY_RANGE` (v1: 2) of itself, so Drones must travel to stake ground, and built over `CLAIM_BUILD_TICKS` while a Drone stays by it (§5 Phase 4); cracked by firepower (esp. Artillery splash) |
+| **Claim Node** | scales high→~1 over match | Voronoi territory anchor; **shoots, very weakly** once finished: `CLAIM_ATTACK_DMG` (v1: 1) per tick at the nearest enemy unit it can see within `CLAIM_ATTACK_RANGE` (v1: 2), enough to see off a lone scout at full claim hp but not two, and out-ranged by Frigates and Artillery; deployed by a Drone onto a tile within `CLAIM_DEPLOY_RANGE` (v1: 2) of itself, so Drones must travel to stake ground, and built over `CLAIM_BUILD_TICKS` while a Drone stays by it (§5 Phase 4); cracked by firepower (esp. Artillery splash) |
 
 **Resources (2 types, v1):**
 - **Energy** — gates combat ships (spent at Factory).
@@ -422,7 +423,7 @@ The handful of numbers that drive the whole game's pace and balance:
 - **Tick cap** (~3000).
 - Claim **max influence distance** (~2–3% of map).
 - Claim **hp curve** (durable→~instant via `g`), **cost**, **build time**.
-- Claim **aura** (deters lone scout, ignorable by real force).
+- Claim **gun** (`CLAIM_ATTACK_DMG`/`RANGE`: deters a lone scout, ignorable by a real force).
 - Unit **stat blocks** (§6) — toward "counters feel real, no dominant unit."
 - **Unit cap** (soft economy gate + hard ceiling ~200–300).
 - **Per-tick fuel budget**, **startup budget**, **memory cap**.

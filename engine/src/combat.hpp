@@ -16,9 +16,9 @@ struct Unit;
 // when a caller passes a CombatLog; never read back by game logic, never hashed,
 // never shown to bots — so it is not part of the ABI or the replay format.
 struct ShotEvent {
-  UnitId      attacker;
+  UnitId      attacker;        // null when a Claim Node fired
   FactionId   faction;
-  UnitType    attacker_type;
+  UnitType    attacker_type;   // meaningless when a Claim Node fired
   Vec2        from;
   UnitId      target_unit;   // null when the target is a structure
   StructureId target_struct; // null when the target is a unit
@@ -26,6 +26,7 @@ struct ShotEvent {
   int32_t     damage;        // per entity hit
   bool        first_strike;
   bool        splash;
+  StructureId attacker_struct{}; // the Claim Node that fired; null for a unit's shot
 };
 
 // Recorded when hp crosses to <= 0, before purge_dead() erases the entity, so
@@ -53,7 +54,8 @@ struct CombatLog {
 // Sub-phase B (simultaneous): all other attackers (Interceptor, Artillery)
 //   compute damage against survivors, then apply it all at once.
 //   Mutual kills both die. Artillery splash hits a radius-1 area, friendly
-//   fire included, all simultaneous.
+//   fire included, all simultaneous. Finished Claim Nodes fire here too
+//   (CLAIM_ATTACK_DMG at the nearest enemy unit within CLAIM_ATTACK_RANGE).
 //
 // Targeting: explicit target if valid, in range and seen; else nearest enemy in
 //   range (Manhattan) that the attacker's faction sees (only a nebula hides); else no attack.

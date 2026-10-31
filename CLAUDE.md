@@ -10,7 +10,7 @@ Build order and acceptance criteria: `docs/IMPLEMENTATION_PLAN.md`.
 
 ## Current State
 
-**Phases 1–5 complete. 286/286 tests passing.**
+**Phases 1–5 complete. 290/290 tests passing.**
 
 | Phase | Status | Notes |
 |-------|--------|-------|
@@ -80,7 +80,7 @@ For LSP support: `ln -s build/compile_commands.json compile_commands.json`
 | `snapshot.hpp/.cpp` | Fog-masked snapshot builder, via `sees_tile()`. Own units and structures always included; enemy units and structures only on visible tiles. |
 | `command.hpp/.cpp` | `ValidatedCommands` and `validate_commands()`. |
 | `movement.hpp/.cpp` | Stepped simultaneous movement. Chains advance (a unit may enter a tile vacated on the same step); swaps and other closed loops are blocked whole. |
-| `combat.hpp/.cpp` | Sub-phase A: first-strike (Frigates). Sub-phase B: simultaneous; splash has friendly fire. |
+| `combat.hpp/.cpp` | Sub-phase A: first-strike (Frigates). Sub-phase B: simultaneous; splash has friendly fire; finished Claim Nodes fire here too. |
 | `economy.hpp/.cpp` | Harvest into Drone cargo, deposit at own Core/Claim Node, spend, production. Drone cap = 1 per claim + 1 per Core. |
 | `territory.hpp/.cpp` | `territory_owners()` (per-tile owner grid, the one definition of territory) and `territory_pct()`; Voronoi territory as a share of **passable** tiles (squared-Euclidean nearest Claim Node, cross-faction ties → neutral, `CLAIM_INFLUENCE` radius; each claim stamps only its radius), Claim Node hp fragility, `win_threshold()`. |
 | `wincheck.hpp/.cpp` | Fixed-order checks: base destruction → territory threshold → tick cap. |
@@ -217,6 +217,9 @@ Compile flags enforcing these: `-ffp-contract=off -fno-fast-math` (in `cmake/Com
 - **Claim construction:** a deployed claim needs `CLAIM_BUILD_TICKS` ticks with an own Drone
   within `CLAIM_DEPLOY_RANGE` (it waits, attackable, otherwise). Unfinished: no territory, no
   drop-off, no Drone slot.
+- **Claims shoot, very weakly:** a finished claim deals `CLAIM_ATTACK_DMG` (1) per tick to the
+  nearest visible enemy unit within `CLAIM_ATTACK_RANGE` (2). Sized to beat one Interceptor at
+  full claim hp but lose to two (`Combat.FullStrengthClaimSeesOffALoneScoutButNotTwo`).
 - **No Gather command:** harvesting is automatic; the kind value is reserved and rejected.
 - **No upkeep** for now; revisit only if calibration shows hoarding or spam.
 - **Terrain memory:** terrain once seen stays known (it is static). Units and structures need

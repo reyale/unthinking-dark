@@ -40,6 +40,11 @@ inline constexpr int32_t CLAIM_HP_FLOOR = 1;
 // and adds no Drone-cap slot.
 inline constexpr int32_t CLAIM_BUILD_TICKS = 20;
 inline constexpr int32_t CLAIM_BUILD_START_HP = 10;
+// Claims defend themselves, very weakly: each finished claim shoots one enemy unit within
+// CLAIM_ATTACK_RANGE per tick (nearest it can see, ties → lower id). Enough to see off a lone
+// Interceptor at full claim hp; two of them, or anything that out-ranges it, still take it.
+inline constexpr int32_t CLAIM_ATTACK_DMG = 1;
+inline constexpr int32_t CLAIM_ATTACK_RANGE = 2;
 
 // ---- Unit stats (v1 placeholders — iterate fast) -----------------------
 inline constexpr int32_t DRONE_HP = 8;

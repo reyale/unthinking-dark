@@ -216,6 +216,7 @@ struct Effect {
   int    ghost_shape  = -1;
   int    ghost_facing = 0;
   ImVec4 ghost_col{};
+  bool   claim = false; // Tracer: a Claim Node fired, so kClaimFx styles it
 };
 
 struct FxState {
@@ -365,7 +366,7 @@ static void compute_unit_facings() {
     std::map<game::UnitId, int> fired; // shooter -> facing toward its target
     for (const auto& sh : g.frames[f].shots) {
       const int fc = facing_from_step(sh.to.x - sh.from.x, sh.to.y - sh.from.y);
-      if (fc >= 0) fired[sh.attacker] = fc;
+      if (fc >= 0 && !sh.attacker.is_null()) fired[sh.attacker] = fc;
     }
     for (size_t i = 0; i < units.size(); ++i) {
       const auto& u = units[i];
@@ -482,6 +483,20 @@ static bool shot_visible(const game::FrameState& fr, const game::ShotEvent& sh) 
          tile_visible(g.map, fr, g.view, sh.to.x, sh.to.y);
 }
 
+// A Claim Node's shot: a thin, quick zap.
+static constexpr WeaponFx kClaimFx = {0.12, 1, 0.00, 0.06f, 0.55f, 0.5f, false, false};
+
+static bool claim_shot(const game::ShotEvent& sh) { return !sh.attacker_struct.is_null(); }
+
+static WeaponFx shot_fx(const game::ShotEvent& sh) {
+  return claim_shot(sh) ? kClaimFx : weapon_fx(sh.attacker_type);
+}
+
+static int shooter_shape(const game::ShotEvent& sh) {
+  return claim_shot(sh) ? shape_index(game::StructureType::ClaimNode)
+                        : shape_index(sh.attacker_type);
+}
+
 static int32_t splash_radius(const game::ShotEvent& sh) {
   return game::stats_for(sh.attacker_type).splash_radius;
 }
@@ -489,6 +504,7 @@ static int32_t splash_radius(const game::ShotEvent& sh) {
 // The shooter's facing on `frame` (it turned toward its target). A shooter killed in
 // the same tick isn't in the frame, so fall back to the shot direction.
 static int shooter_facing(int frame, const game::ShotEvent& sh) {
+  if (claim_shot(sh)) return structure_facing(g.map, sh.from.x, sh.from.y);
   const auto& units = g.frames[static_cast<size_t>(frame)].units;
   for (size_t i = 0; i < units.size(); ++i)
     if (units[i].id == sh.attacker) return g.unit_facing[static_cast<size_t>(frame)][i];
@@ -505,7 +521,7 @@ static void spawn_fx(int frame, double now) {
   double last_impact = now;
   for (size_t i = 0; i < fr.shots.size(); ++i) {
     const auto& sh  = fr.shots[i];
-    const WeaponFx w = weapon_fx(sh.attacker_type);
+    const WeaponFx w = shot_fx(sh);
     const double t0 = now + (sh.first_strike ? 0.0 : kFxDelayNormal) * k;
     impact[i]   = t0 + (w.travel + w.stagger * (w.bolts - 1)) * k;
     last_impact = std::max(last_impact, impact[i]);
@@ -513,11 +529,11 @@ static void spawn_fx(int frame, double now) {
 
     const ImVec4 fc = sh.faction.value == 0 ? kFactionA : kFactionB;
     const ImVec4 tc = mix_white(fc, sh.attacker_type == game::UnitType::Frigate ? 0.65f : 0.45f);
-    const int sshape = shape_index(sh.attacker_type), sface = shooter_facing(frame, sh);
+    const int sshape = shooter_shape(sh), sface = shooter_facing(frame, sh);
     for (int b = 0; b < w.bolts; ++b) {
       Effect e{FxKind::Tracer, sh.attacker_type, sh.from, sh.to, tc, t0 + b * w.stagger * k,
                w.travel * k};
-      e.shooter_shape = sshape; e.shooter_facing = sface;
+      e.shooter_shape = sshape; e.shooter_facing = sface; e.claim = claim_shot(sh);
       g.fx.live.push_back(e);
     }
     if (w.beam) {
@@ -631,9 +647,9 @@ static void draw_fx(ImDrawList* dl, ImVec2 iso_org, float cw2, float ch2, double
     for (const auto& sh : fr.shots) {
       if (!shot_visible(fr, sh)) continue;
       const ImVec4 fc = mix_white(sh.faction.value == 0 ? kFactionA : kFactionB, 0.3f);
-      const ImVec2 a = muzzle_at(sh.from, shape_index(sh.attacker_type), shooter_facing(g.cur, sh));
+      const ImVec2 a = muzzle_at(sh.from, shooter_shape(sh), shooter_facing(g.cur, sh));
       const ImVec2 b = ctr(sh.to, impact);
-      if (weapon_fx(sh.attacker_type).arc) {
+      if (shot_fx(sh).arc) {
         ImVec2 pts[13];
         for (int i = 0; i <= 12; ++i) pts[i] = arc_point(a, b, i / 12.0f, arc_h(sh.from, sh.to));
         dl->AddPolyline(pts, 13, with_a(fc, 0.45f), 0, 1.5f);
@@ -659,7 +675,7 @@ static void draw_fx(ImDrawList* dl, ImVec2 iso_org, float cw2, float ch2, double
     const float q = 1.0f - p;
     switch (e.kind) {
     case FxKind::Tracer: {
-      const WeaponFx w = weapon_fx(e.weapon);
+      const WeaponFx w = e.claim ? kClaimFx : weapon_fx(e.weapon);
       const ImVec2 a = muzzle_at(e.from, e.shooter_shape, e.shooter_facing);
       const ImVec2 b = ctr(e.to, impact);
       const float  wd = std::max(1.2f, ch2 * w.width);
