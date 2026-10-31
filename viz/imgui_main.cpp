@@ -67,7 +67,7 @@ static game::Map map_from_log(const game::ReplayLog& log) {
 
 static constexpr ImVec4 kFogBg    = {0.06f, 0.06f, 0.08f, 1.0f};
 static constexpr ImVec4 kOpenBg   = {0.14f, 0.14f, 0.18f, 1.0f};
-static constexpr ImVec4 kAsteroid = {0.35f, 0.30f, 0.22f, 1.0f};
+static constexpr ImVec4 kAsteroid = {0.19f, 0.17f, 0.15f, 1.0f}; // dust under the rocks
 static constexpr ImVec4 kNebula   = {0.22f, 0.15f, 0.35f, 1.0f};
 static constexpr ImVec4 kResource = {0.15f, 0.32f, 0.15f, 1.0f};
 
@@ -93,6 +93,7 @@ struct CellData {
   uint32_t id{0};        // unit or structure id, for hit flashes
   bool     is_struct{false};
   bool     fogged{false};
+  float    rock{0.0f}; // asteroid brightness to draw at; 0 = no asteroid
 };
 
 // ---- Cell data builder ----------------------------------------------------
@@ -854,6 +855,90 @@ static void draw_playback_bar(const game::FrameState& fr) {
   }
 }
 
+// ---- Asteroids --------------------------------------------------------------
+//
+// One to three lumpy boulders per tile. Shapes come from a hash of the tile position: they
+// vary across the field but never change between frames.
+
+static constexpr ImVec4 kRockBase   = {0.40f, 0.36f, 0.31f, 1.0f};
+static constexpr ImVec4 kRockLit    = {0.56f, 0.51f, 0.44f, 1.0f};
+static constexpr ImVec4 kRockShadow = {0.22f, 0.19f, 0.17f, 1.0f};
+static constexpr int    kRockPoints = 11;
+
+static uint32_t tile_hash(int32_t x, int32_t y, uint32_t salt) {
+  uint32_t h = static_cast<uint32_t>(x) * 0x9E3779B1u ^ static_cast<uint32_t>(y) * 0x85EBCA77u ^
+               salt * 0xC2B2AE3Du;
+  h ^= h >> 15;
+  h *= 0x2C1B3C6Du;
+  h ^= h >> 12;
+  return h;
+}
+
+// Uniform in [0, 1) from the hash stream for this tile.
+struct TileRand {
+  int32_t x, y;
+  uint32_t n = 0;
+  float next() { return static_cast<float>(tile_hash(x, y, n++) & 0xFFFF) / 65536.0f; }
+};
+
+static void draw_boulder(ImDrawList* dl, ImVec2 c, float rx, float ry, float bright,
+                         TileRand& rnd) {
+  auto col = [&](ImVec4 v) { return u32(dim_vec(v, bright)); };
+  dl->AddEllipseFilled({c.x + rx * 0.15f, c.y + ry * 0.55f}, {rx * 1.05f, ry * 0.45f},
+                       u32({0.0f, 0.0f, 0.0f, 0.35f * bright}));
+
+  ImVec2 body[kRockPoints], lit[kRockPoints];
+  const float phase = rnd.next() * 6.2832f;
+  for (int i = 0; i < kRockPoints; ++i) {
+    const float a = phase + 6.2832f * static_cast<float>(i) / kRockPoints;
+    const float r = 0.78f + 0.22f * rnd.next();
+    body[i] = {c.x + std::cos(a) * rx * r, c.y + std::sin(a) * ry * r};
+    // The lit face: the same outline shrunk toward the upper left.
+    lit[i] = {c.x - rx * 0.16f + std::cos(a) * rx * r * 0.68f,
+              c.y - ry * 0.22f + std::sin(a) * ry * r * 0.62f};
+  }
+  dl->AddConcavePolyFilled(body, kRockPoints, col(kRockShadow));
+  ImVec2 mid[kRockPoints];
+  for (int i = 0; i < kRockPoints; ++i)
+    mid[i] = {(body[i].x * 0.55f + lit[i].x * 0.45f), (body[i].y * 0.55f + lit[i].y * 0.45f)};
+  dl->AddConcavePolyFilled(mid, kRockPoints, col(kRockBase));
+  dl->AddConcavePolyFilled(lit, kRockPoints, col(kRockLit));
+
+  const int craters = 1 + static_cast<int>(rnd.next() * 2.0f);
+  for (int i = 0; i < craters; ++i) {
+    const ImVec2 p = {c.x + (rnd.next() - 0.6f) * rx * 0.9f, c.y + (rnd.next() - 0.6f) * ry * 0.8f};
+    const float cr = rx * (0.10f + 0.10f * rnd.next());
+    dl->AddEllipseFilled(p, {cr, cr * 0.6f}, col(kRockShadow));
+    dl->AddEllipse({p.x + cr * 0.15f, p.y + cr * 0.12f}, {cr, cr * 0.6f}, col(kRockLit), 0.0f, 0,
+                   std::max(1.0f, rx * 0.04f));
+  }
+  dl->AddPolyline(body, kRockPoints, u32({0.0f, 0.0f, 0.0f, 0.55f * bright}), ImDrawFlags_Closed,
+                  std::max(1.0f, rx * 0.05f));
+}
+
+static void draw_asteroid(ImDrawList* dl, ImVec2 ctr, float cw2, float ch2, int32_t x, int32_t y,
+                          float bright) {
+  TileRand rnd{x, y};
+  const int count = 1 + static_cast<int>(rnd.next() * 3.0f);
+  struct Rock { ImVec2 c; float s; };
+  Rock rocks[3];
+  for (int i = 0; i < count; ++i) {
+    // The first rock is big and central; extras are smaller and pushed toward the edges.
+    const float s = i == 0 ? 0.62f + 0.22f * rnd.next() : 0.28f + 0.18f * rnd.next();
+    const float spread = i == 0 ? 0.15f : 0.55f;
+    rocks[i] = {{ctr.x + (rnd.next() * 2.0f - 1.0f) * cw2 * spread,
+                 ctr.y + (rnd.next() * 2.0f - 1.0f) * ch2 * spread},
+                s};
+  }
+  // Back to front, so nearer rocks overlap farther ones.
+  std::sort(rocks, rocks + count, [](const Rock& a, const Rock& b) { return a.c.y < b.c.y; });
+  for (int i = 0; i < count; ++i) {
+    const float rx = cw2 * rocks[i].s;
+    const float ry = rx * 0.78f; // taller than the ground's 2:1, so they read as raised
+    draw_boulder(dl, {rocks[i].c.x, rocks[i].c.y - ry * 0.45f}, rx, ry, bright, rnd);
+  }
+}
+
 // ---- Claim zones ------------------------------------------------------------
 
 static constexpr float kZoneTint     = 0.30f; // faction colour mixed into an owned tile
@@ -925,6 +1010,7 @@ static void draw_tile_cell(ImDrawList* dl, ImVec2 ctr, float cw2, float ch2,
   dl->AddTriangleFilled(right, bottom, left, u32(dim_vec(cd.bg, 0.70f)));
   dl->AddQuad(top, right, bottom, left, u32({0.0f, 0.0f, 0.0f, 0.40f}), 0.5f);
   draw_zone_edges(dl, ctr, top, right, bottom, left, cd, x, y);
+  if (cd.rock > 0.0f) draw_asteroid(dl, ctr, cw2, ch2, x, y, cd.rock);
 
   if (cd.shape >= 0) {
     const float flash = hit_flash(cd.is_struct, cd.id, {x, y}, glfwGetTime());
@@ -975,6 +1061,9 @@ static void draw_grid(const game::FrameState& fr) {
   for (int32_t y = 0; y < g.map.height; ++y)
     for (int32_t x = 0; x < g.map.width; ++x) {
       CellData cd = make_cell(g.map, fr, g.unit_facing[g.cur], g.cur, g.view, x, y);
+      if (g.map.tile_at({x, y}).terrain == game::Terrain::Asteroid &&
+          (!cd.fogged || tile_explored(g.view, g.cur, x, y)))
+        cd.rock = cd.fogged ? kRememberedDim : 1.0f;
       tint_zone(cd, x, y);
       draw_tile_cell(dl, tile_ctr(x, y), cw2, ch2, cd, x, y, fr);
     }
