@@ -79,7 +79,7 @@ For LSP support: `ln -s build/compile_commands.json compile_commands.json`
 | `movement.hpp/.cpp` | Stepped simultaneous movement. Blocked unit stays put, no retry. |
 | `combat.hpp/.cpp` | Sub-phase A: first-strike (Frigates). Sub-phase B: simultaneous; splash has friendly fire. |
 | `economy.hpp/.cpp` | Harvest (Drones adjacent to ResourceNode), spend, production. |
-| `territory.hpp/.cpp` | Voronoi territory as a share of **passable** tiles (squared-Euclidean nearest Claim Node, cross-faction ties → neutral, `CLAIM_INFLUENCE` radius; each claim stamps only its radius), Claim Node hp fragility, `win_threshold()`. |
+| `territory.hpp/.cpp` | `territory_owners()` (per-tile owner grid, the one definition of territory) and `territory_pct()`; Voronoi territory as a share of **passable** tiles (squared-Euclidean nearest Claim Node, cross-faction ties → neutral, `CLAIM_INFLUENCE` radius; each claim stamps only its radius), Claim Node hp fragility, `win_threshold()`. |
 | `wincheck.hpp/.cpp` | Fixed-order checks: base destruction → territory threshold → tick cap. |
 | `statehash.hpp/.cpp` | Rolling xxh3 via xxhash (`XXH_INLINE_ALL`). |
 | `tick.hpp/.cpp` | Phase pipeline. `run_tick_phases()` (raw commands) and `run_tick()` (calls bots). |
@@ -137,7 +137,7 @@ Standard match setup (Command Core + starting units on free tiles near each spaw
 |---------------|-------------|
 | `ud_viz` | Terminal renderer (raw ANSI) |
 | `ud_viz_nc` | ncurses renderer (optional, requires libncurses) |
-| `ud_viz_imgui` | Dear ImGui, isometric 2:1 projection (optional, requires libglfw3-dev) |
+| `ud_viz_imgui` | Dear ImGui, isometric 2:1 projection (optional, requires libglfw3-dev). Z toggles claim zones, drawn with the engine's `territory_owners()` |
 | `ud_shape_editor` | ImGui editor for unit/structure render shapes; reads/writes `.udshapes` files (`shape_model.hpp`) |
 | `Makefile.em` | Emscripten browser build → `viz/web/index.html`; drag-and-drop `.ud` files |
 

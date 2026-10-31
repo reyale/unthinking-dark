@@ -1,6 +1,7 @@
 // Usage: ud_viz_imgui [replay.ud] [--shapes file.udshapes]   (shapes hot-reload on save)
 // Controls: Space=play/pause  ←/→=step  U=union  G=god  0/1=faction view  scroll=zoom  Q=quit
 //           R=replay this frame's shots  T=toggle static shot lines while paused
+//           Z=toggle claim zones (territory)
 
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
@@ -14,6 +15,7 @@
 #include "replay_io.hpp"
 #include "shape_model.hpp"
 #include "stats.hpp"
+#include "territory.hpp"
 #include "wincheck.hpp"
 
 #include <algorithm>
@@ -89,6 +91,7 @@ struct CellData {
   int     facing{0};
   uint32_t id{0};        // unit or structure id, for hit flashes
   bool     is_struct{false};
+  bool     fogged{false};
 };
 
 // ---- Cell data builder ----------------------------------------------------
@@ -117,7 +120,11 @@ static bool tile_visible(const game::FrameState& fr, int view, int32_t x, int32_
 static CellData make_cell(const game::Map& map, const game::FrameState& fr,
                            const std::vector<uint8_t>& facings,
                            int view, int32_t x, int32_t y) {
-  if (!tile_visible(fr, view, x, y)) return {kFogBg};
+  if (!tile_visible(fr, view, x, y)) {
+    CellData fog{kFogBg};
+    fog.fogged = true;
+    return fog;
+  }
 
   ImVec4 bg;
   switch (map.tile_at({x, y}).terrain) {
@@ -218,7 +225,31 @@ struct App {
   std::string       shapes_path = UD_DEFAULT_SHAPES_PATH;
   std::filesystem::file_time_type shapes_mtime{};
   double            shapes_checked_t = 0.0;
+  uint32_t          tick_cap = 0;
+  bool              show_zones = true;
+  int               zones_frame = -1;     // frame `zones` was computed for
+  std::vector<int8_t> zones;              // territory owner per tile (territory_owners)
+  game::TerritoryState zone_pct;
 } g;
+
+// Recomputed from the frame's live Claim Nodes with the engine's own rule, so the zones drawn
+// are exactly the territory the win check counted.
+static void update_zones() {
+  if (g.zones_frame == g.cur) return;
+  std::vector<game::ClaimAnchor> claims;
+  for (const auto& s : g.frames[static_cast<size_t>(g.cur)].structures)
+    if (s.type == game::StructureType::ClaimNode && s.hp > 0)
+      claims.push_back({s.pos, s.faction.value});
+  g.zones = game::territory_owners(g.map, claims);
+  g.zone_pct = game::territory_pct(g.map, g.zones);
+  g.zones_frame = g.cur;
+}
+
+static int8_t zone_at(int32_t x, int32_t y) {
+  if (x < 0 || y < 0 || x >= g.map.width || y >= g.map.height) return -1;
+  return g.zones[static_cast<size_t>(y) * static_cast<size_t>(g.map.width) +
+                 static_cast<size_t>(x)];
+}
 
 static bool load_shape_defs() {
   bool ok = load_shapes(g.shape_defs, g.shapes_path.c_str());
@@ -299,6 +330,8 @@ static void try_load(const char* path) {
         if (f.forfeits[static_cast<size_t>(i)] != game::TickFault::None) ++g.forfeit_total[i];
     g.cur    = 0;
     g.total  = static_cast<int>(g.frames.size());
+    g.tick_cap    = log.tick_cap;
+    g.zones_frame = -1;
     g.loaded = true;
     fprintf(stderr, "Loaded: %zu ticks on %dx%d map\n",
             log.ticks.size(), log.map_w, log.map_h);
@@ -665,6 +698,7 @@ static void handle_input(const ImGuiIO& io, GLFWwindow* win) {
         spawn_fx(g.cur, glfwGetTime());
       }
       if (ImGui::IsKeyPressed(ImGuiKey_T)) g.fx.show_static = !g.fx.show_static;
+      if (ImGui::IsKeyPressed(ImGuiKey_Z)) g.show_zones = !g.show_zones;
     }
     if (ImGui::IsKeyPressed(ImGuiKey_U)) g.view = -2;
     if (ImGui::IsKeyPressed(ImGuiKey_G)) g.view = -1;
@@ -732,6 +766,8 @@ static void draw_playback_bar(const game::FrameState& fr) {
   if (ImGui::Button(" B ")) g.view = 1;
   ImGui::PopStyleColor();
   ImGui::SameLine();
+  ImGui::Checkbox("Zones", &g.show_zones);
+  ImGui::SameLine();
   ImGui::SetNextItemWidth(65.0f);
   ImGui::SliderFloat("px##z", &g.cs, 16.0f, 128.0f, "%.0f");
   ImGui::SameLine();
@@ -766,6 +802,65 @@ static void draw_playback_bar(const game::FrameState& fr) {
   }
 }
 
+// ---- Claim zones ------------------------------------------------------------
+
+static constexpr float kZoneTint     = 0.30f; // faction colour mixed into an owned tile
+static constexpr float kZoneFogTint  = 0.18f; // ...into a fogged one
+static constexpr float kZoneEdgeInset = 0.86f; // edges drawn inside the tile, so a neighbour's
+                                               // fill can't cover them
+
+static ImVec4 faction_color(int8_t f) { return f == 0 ? kFactionA : kFactionB; }
+
+static ImVec4 mix(ImVec4 a, ImVec4 b, float t) {
+  return {a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t, a.w};
+}
+
+// A faction knows where its own claims are, so in its own view its territory shows through
+// fog; the enemy's shows only where it can see.
+static bool zone_shown(int8_t owner, const CellData& cd) {
+  if (!g.show_zones || owner < 0) return false;
+  return !cd.fogged || g.view < 0 || g.view == owner;
+}
+
+static void tint_zone(CellData& cd, int32_t x, int32_t y) {
+  const int8_t owner = zone_at(x, y);
+  if (!zone_shown(owner, cd)) return;
+  cd.bg = mix(cd.bg, faction_color(owner), cd.fogged ? kZoneFogTint : kZoneTint);
+}
+
+// Outline each tile edge where the owner changes, in this tile's owner's colour: a border
+// between two zones shows both colours side by side.
+static void draw_zone_edges(ImDrawList* dl, ImVec2 ctr, ImVec2 top, ImVec2 right, ImVec2 bottom,
+                            ImVec2 left, const CellData& cd, int32_t x, int32_t y) {
+  const int8_t owner = zone_at(x, y);
+  if (!zone_shown(owner, cd)) return;
+  auto in = [&](ImVec2 p) {
+    return ImVec2{ctr.x + (p.x - ctr.x) * kZoneEdgeInset, ctr.y + (p.y - ctr.y) * kZoneEdgeInset};
+  };
+  // DIRS order (N, E, S, W) → the diamond edge shared with that neighbour.
+  const ImVec2 edges[4][2] = {{top, right}, {right, bottom}, {bottom, left}, {left, top}};
+  const ImVec4 fc = faction_color(owner);
+  const ImU32 col = u32({fc.x, fc.y, fc.z, cd.fogged ? 0.45f : 0.9f});
+  const float w = std::max(1.0f, g.cs / 32.0f);
+  for (int i = 0; i < 4; ++i) {
+    const game::Vec2 n = game::Vec2{x, y} + game::DIRS[i];
+    if (zone_at(n.x, n.y) == owner) continue;
+    dl->AddLine(in(edges[i][0]), in(edges[i][1]), col, w);
+  }
+}
+
+// Territory held against the threshold that wins on this tick (it falls as the match goes on).
+static void draw_territory_bar(const game::FrameState& fr) {
+  ImGui::Text("Territory");
+  ImGui::SameLine();
+  ImGui::TextColored(kFactionA, "A %u%%", g.zone_pct.pct_faction[0]);
+  ImGui::SameLine();
+  ImGui::TextColored(kFactionB, "B %u%%", g.zone_pct.pct_faction[1]);
+  ImGui::SameLine();
+  ImGui::TextDisabled("| %d%% wins now | Z: zones %s", game::win_threshold(fr.tick, g.tick_cap),
+                      g.show_zones ? "on" : "off");
+}
+
 static void draw_tile_cell(ImDrawList* dl, ImVec2 ctr, float cw2, float ch2,
                             const CellData& cd, int32_t x, int32_t y,
                             const game::FrameState& fr) {
@@ -777,6 +872,7 @@ static void draw_tile_cell(ImDrawList* dl, ImVec2 ctr, float cw2, float ch2,
   dl->AddTriangleFilled(top, right, left, u32(cd.bg));
   dl->AddTriangleFilled(right, bottom, left, u32(dim_vec(cd.bg, 0.70f)));
   dl->AddQuad(top, right, bottom, left, u32({0.0f, 0.0f, 0.0f, 0.40f}), 0.5f);
+  draw_zone_edges(dl, ctr, top, right, bottom, left, cd, x, y);
 
   if (cd.shape >= 0) {
     const float flash = hit_flash(cd.is_struct, cd.id, {x, y}, glfwGetTime());
@@ -825,9 +921,11 @@ static void draw_grid(const game::FrameState& fr) {
   };
 
   for (int32_t y = 0; y < g.map.height; ++y)
-    for (int32_t x = 0; x < g.map.width; ++x)
-      draw_tile_cell(dl, tile_ctr(x, y), cw2, ch2,
-                     make_cell(g.map, fr, g.unit_facing[g.cur], g.view, x, y), x, y, fr);
+    for (int32_t x = 0; x < g.map.width; ++x) {
+      CellData cd = make_cell(g.map, fr, g.unit_facing[g.cur], g.view, x, y);
+      tint_zone(cd, x, y);
+      draw_tile_cell(dl, tile_ctr(x, y), cw2, ch2, cd, x, y, fr);
+    }
 
   draw_fx(dl, iso_org, cw2, ch2, glfwGetTime());
 
@@ -1046,7 +1144,9 @@ int main(int argc, char** argv) {
 
     if (g.loaded) {
       const auto& fr = g.frames[static_cast<size_t>(g.cur)];
+      update_zones();
       draw_playback_bar(fr);
+      draw_territory_bar(fr);
       ImGui::Separator();
       draw_grid(fr);
     } else {
