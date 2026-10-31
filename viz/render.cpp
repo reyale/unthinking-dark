@@ -103,7 +103,7 @@ RenderFrame build_render_frame(const game::FrameState& frame, const game::Map& m
     size_t idx = static_cast<size_t>(uf.pos.y * W + uf.pos.x);
     if (!rf.cells[idx].visible)
       continue;
-    rf.cells[idx].glyph = unit_glyph(uf.type);
+    rf.cells[idx].glyph = uf.carrying() ? 'D' : unit_glyph(uf.type);
     rf.cells[idx].color = faction_color(uf.faction.value);
   }
 

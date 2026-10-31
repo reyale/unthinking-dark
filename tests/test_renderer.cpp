@@ -60,6 +60,13 @@ TEST(Renderer, UnitGlyphs) {
   }
 }
 
+TEST(Renderer, CarryingDroneIsUppercase) {
+  auto map = make_map(5, 5);
+  auto f = one_unit_frame(game::UnitType::Drone, {0}, {2, 2});
+  f.units[0].cargo_alloy = 1;
+  EXPECT_EQ(viz::build_render_frame(f, map, -1, 0, 1).at(2, 2).glyph, 'D');
+}
+
 TEST(Renderer, StructureGlyphs) {
   auto map = make_map(5, 5);
   struct Case { game::StructureType type; char glyph; };

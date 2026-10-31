@@ -20,6 +20,10 @@ struct UnitFrame {
   Vec2 pos;
   int32_t hp;
   int32_t max_hp;
+  int32_t cargo_energy{0}; // Drones: carried, not yet deposited
+  int32_t cargo_alloy{0};
+
+  bool carrying() const { return cargo_energy > 0 || cargo_alloy > 0; }
 };
 
 struct StructureFrame {

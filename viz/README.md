@@ -25,6 +25,7 @@ file) and presents it frame by frame in the terminal.
 | Glyph | Meaning          |
 |-------|------------------|
 | `d`   | Drone            |
+| `D`   | Drone carrying cargo |
 | `i`   | Interceptor      |
 | `f`   | Frigate          |
 | `a`   | Artillery        |

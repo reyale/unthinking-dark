@@ -70,7 +70,8 @@ static constexpr ImVec4 kFogBg    = {0.06f, 0.06f, 0.08f, 1.0f};
 static constexpr ImVec4 kOpenBg   = {0.14f, 0.14f, 0.18f, 1.0f};
 static constexpr ImVec4 kAsteroid = {0.19f, 0.17f, 0.15f, 1.0f}; // dust under the rocks
 static constexpr ImVec4 kNebula   = {0.22f, 0.15f, 0.35f, 1.0f};
-static constexpr ImVec4 kResource = {0.15f, 0.32f, 0.15f, 1.0f};
+static constexpr ImVec4 kResource = {0.24f, 0.20f, 0.14f, 1.0f}; // ground under the crystals
+static constexpr ImVec4 kCargo    = {1.0f, 0.72f, 0.18f, 1.0f}; // Drone hold bar
 
 static ImU32  u32(const ImVec4& c) { return ImGui::ColorConvertFloat4ToU32(c); }
 static ImVec4 dim_vec(ImVec4 c, float f) { return {c.x*f, c.y*f, c.z*f, c.w}; }
@@ -95,6 +96,8 @@ struct CellData {
   bool     is_struct{false};
   bool     fogged{false};
   float    rock{0.0f}; // asteroid brightness to draw at; 0 = no asteroid
+  float    cargo{0.0f}; // Drone hold fill, 0..1
+  float    crystal{0.0f}; // resource-node brightness to draw at; 0 = no node
 };
 
 // ---- Cell data builder ----------------------------------------------------
@@ -136,6 +139,11 @@ static ImVec4 terrain_bg(const game::Map& map, int32_t x, int32_t y) {
 
 static bool tile_explored(int view, int frame, int32_t x, int32_t y);
 
+static float cargo_fill(const game::UnitFrame& u) {
+  return std::max(static_cast<float>(u.cargo_energy) / game::cfg::DRONE_CARGO_ENERGY,
+                  static_cast<float>(u.cargo_alloy) / game::cfg::DRONE_CARGO_ALLOY);
+}
+
 static CellData make_cell(const game::Map& map, const game::FrameState& fr,
                            const std::vector<uint8_t>& facings, int frame,
                            int view, int32_t x, int32_t y) {
@@ -165,7 +173,10 @@ static CellData make_cell(const game::Map& map, const game::FrameState& fr,
     const auto& u = fr.units[top];
     ImVec4 fg = u.faction.value == 0 ? kFactionA : kFactionB;
     int facing = top < static_cast<int>(facings.size()) ? facings[top] : 0;
-    return {bg, '\0', true, u.type, shape_index(u.type), fg, u.hp, u.max_hp, facing, u.id.value};
+    CellData cd{bg, '\0', true, u.type, shape_index(u.type), fg, u.hp, u.max_hp, facing,
+                u.id.value};
+    cd.cargo = cargo_fill(u);
+    return cd;
   }
 
   return {bg};
@@ -942,6 +953,63 @@ static void draw_asteroid(ImDrawList* dl, ImVec2 ctr, float cw2, float ch2, int3
   }
 }
 
+// Resource nodes are clusters of amber crystal shards: the same hue as a Drone's cargo bar, so
+// what a Drone carries visibly comes from them.
+static constexpr ImVec4 kCrystalLit    = {1.00f, 0.86f, 0.42f, 1.0f};
+static constexpr ImVec4 kCrystalBase   = {0.95f, 0.62f, 0.14f, 1.0f};
+static constexpr ImVec4 kCrystalShadow = {0.55f, 0.30f, 0.06f, 1.0f};
+static constexpr ImVec4 kCrystalGlow   = {1.00f, 0.70f, 0.20f, 0.22f};
+
+// One shard: a pointed prism leaning by `lean`, its left face in shadow and its right face lit.
+static void draw_shard(ImDrawList* dl, ImVec2 base, float w, float h, float lean, float bright) {
+  auto col = [&](ImVec4 v) { return u32(dim_vec(v, bright)); };
+  const float shoulder = 0.72f;
+  const ImVec2 bl = {base.x - w * 0.5f, base.y};
+  const ImVec2 bm = {base.x, base.y + w * 0.22f}; // front edge, a little lower: reads as 3D
+  const ImVec2 br = {base.x + w * 0.5f, base.y};
+  const ImVec2 sl = {bl.x + lean * h * shoulder, bl.y - h * shoulder};
+  const ImVec2 sm = {bm.x + lean * h * shoulder, bm.y - h * shoulder};
+  const ImVec2 sr = {br.x + lean * h * shoulder, br.y - h * shoulder};
+  const ImVec2 tip = {base.x + lean * h, base.y - h};
+
+  const ImVec2 left_face[4] = {bl, bm, sm, sl};
+  const ImVec2 right_face[4] = {bm, br, sr, sm};
+  dl->AddConvexPolyFilled(left_face, 4, col(kCrystalBase));
+  dl->AddConvexPolyFilled(right_face, 4, col(kCrystalLit));
+  dl->AddTriangleFilled(sl, sm, tip, col(kCrystalShadow));
+  dl->AddTriangleFilled(sm, sr, tip, col(kCrystalBase));
+
+  const ImVec2 outline[6] = {bl, bm, br, sr, tip, sl};
+  const float lw = std::max(1.0f, w * 0.08f);
+  dl->AddPolyline(outline, 6, u32({0.15f, 0.07f, 0.0f, 0.8f * bright}), ImDrawFlags_Closed, lw);
+  dl->AddLine({bm.x + w * 0.06f, bm.y - h * 0.08f}, {sm.x + w * 0.06f, sm.y - h * 0.02f},
+              u32({1.0f, 0.97f, 0.85f, 0.8f * bright}), lw);
+}
+
+static void draw_crystals(ImDrawList* dl, ImVec2 ctr, float cw2, float ch2, int32_t x, int32_t y,
+                          float bright) {
+  dl->AddEllipseFilled({ctr.x, ctr.y}, {cw2 * 0.62f, ch2 * 0.62f},
+                       u32({kCrystalGlow.x, kCrystalGlow.y, kCrystalGlow.z,
+                            kCrystalGlow.w * bright}));
+  TileRand rnd{x, y, 101};
+  struct Shard { ImVec2 base; float h, w, lean; };
+  Shard shards[4];
+  const int count = 3 + static_cast<int>(rnd.next() * 2.0f);
+  for (int i = 0; i < count; ++i) {
+    // The first shard is the tall centrepiece; the rest are shorter and splay outward.
+    const float ox = i == 0 ? 0.0f : (rnd.next() * 2.0f - 1.0f) * 0.42f;
+    const float oy = i == 0 ? 0.0f : (rnd.next() * 2.0f - 1.0f) * 0.38f;
+    const float h = cw2 * (i == 0 ? 0.95f + 0.25f * rnd.next() : 0.45f + 0.30f * rnd.next());
+    shards[i] = {{ctr.x + ox * cw2, ctr.y + oy * ch2 + ch2 * 0.15f}, h,
+                 cw2 * (i == 0 ? 0.30f : 0.20f + 0.06f * rnd.next()),
+                 i == 0 ? (rnd.next() - 0.5f) * 0.12f : ox * 0.55f};
+  }
+  std::sort(shards, shards + count,
+            [](const Shard& a, const Shard& b) { return a.base.y < b.base.y; });
+  for (int i = 0; i < count; ++i)
+    draw_shard(dl, shards[i].base, shards[i].w, shards[i].h, shards[i].lean, bright);
+}
+
 // ---- Claim zones ------------------------------------------------------------
 
 static constexpr float kZoneTint     = 0.30f; // faction colour mixed into an owned tile
@@ -1014,6 +1082,7 @@ static void draw_tile_cell(ImDrawList* dl, ImVec2 ctr, float cw2, float ch2,
   dl->AddQuad(top, right, bottom, left, u32({0.0f, 0.0f, 0.0f, 0.40f}), 0.5f);
   draw_zone_edges(dl, ctr, top, right, bottom, left, cd, x, y);
   if (cd.rock > 0.0f) draw_asteroid(dl, ctr, cw2, ch2, x, y, cd.rock);
+  if (cd.crystal > 0.0f) draw_crystals(dl, ctr, cw2, ch2, x, y, cd.crystal);
 
   if (cd.shape >= 0) {
     const float flash = hit_flash(cd.is_struct, cd.id, {x, y}, glfwGetTime());
@@ -1045,6 +1114,20 @@ static void draw_tile_cell(ImDrawList* dl, ImVec2 ctr, float cw2, float ch2,
     dl->AddLine(right, bottom, u32({0.08f, 0.08f, 0.08f, 1.0f}), bw);
     dl->AddLine(right, hp_end, u32(hp_color(ratio)), bw);
   }
+
+  // The hold mirrors the HP bar on the opposite lower edge. Too small for a bar, a pip.
+  if (cd.cargo > 0.0f) {
+    if (g.cs >= 32.0f) {
+      ImVec2 c_end = {left.x + cd.cargo * (bottom.x - left.x),
+                      left.y + cd.cargo * (bottom.y - left.y)};
+      float  bw    = std::max(2.0f, ch2 * 0.3f);
+      dl->AddLine(left, bottom, u32({0.08f, 0.08f, 0.08f, 1.0f}), bw);
+      dl->AddLine(left, c_end, u32(kCargo), bw);
+    } else {
+      dl->AddCircleFilled({(left.x + bottom.x) * 0.5f, (left.y + bottom.y) * 0.5f},
+                          std::max(1.5f, ch2 * 0.25f), u32(kCargo));
+    }
+  }
 }
 
 static void draw_grid(const game::FrameState& fr) {
@@ -1067,6 +1150,9 @@ static void draw_grid(const game::FrameState& fr) {
       if (g.map.tile_at({x, y}).terrain == game::Terrain::Asteroid &&
           (!cd.fogged || tile_explored(g.view, g.cur, x, y)))
         cd.rock = cd.fogged ? kRememberedDim : 1.0f;
+      if (g.map.tile_at({x, y}).terrain == game::Terrain::ResourceNode &&
+          (!cd.fogged || tile_explored(g.view, g.cur, x, y)))
+        cd.crystal = cd.fogged ? kRememberedDim : 1.0f;
       tint_zone(cd, x, y);
       draw_tile_cell(dl, tile_ctr(x, y), cw2, ch2, cd, x, y, fr);
     }
@@ -1160,6 +1246,11 @@ static void draw_sel_panel(const ImGuiIO& io) {
       ImGui::SameLine();
       ImGui::TextColored(hp_color(ratio), "%d / %d", sel->hp, sel->max_hp);
       ImGui::Text("Pos  %d, %d", sel->pos.x, sel->pos.y);
+      if (sel->type == game::UnitType::Drone)
+        ImGui::TextColored(sel->carrying() ? kCargo : ImVec4{0.6f, 0.6f, 0.6f, 1.0f},
+                           "Cargo  E %d/%d  A %d/%d", sel->cargo_energy,
+                           game::cfg::DRONE_CARGO_ENERGY, sel->cargo_alloy,
+                           game::cfg::DRONE_CARGO_ALLOY);
       ImGui::Separator();
 
       const game::UnitStats& st = game::stats_for(sel->type);

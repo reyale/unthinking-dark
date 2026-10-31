@@ -26,7 +26,8 @@ FrameState capture(const World& world, std::optional<MatchResult> result) {
   f.result = result;
 
   for (const auto& [uid, u] : world.units)
-    f.units.push_back({uid, u.faction, u.type, u.pos, u.hp, stats_for(u.type).hp});
+    f.units.push_back({uid, u.faction, u.type, u.pos, u.hp, stats_for(u.type).hp,
+                       u.cargo_energy, u.cargo_alloy});
 
   for (const auto& [sid, s] : world.structures)
     f.structures.push_back({sid, s.faction, s.type, s.pos, s.hp, structure_max_hp(s.type)});

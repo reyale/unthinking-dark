@@ -10,7 +10,7 @@ Build order and acceptance criteria: `docs/IMPLEMENTATION_PLAN.md`.
 
 ## Current State
 
-**Phases 1–5 complete. 275/275 tests passing.**
+**Phases 1–5 complete. 276/276 tests passing.**
 
 | Phase | Status | Notes |
 |-------|--------|-------|
@@ -139,7 +139,7 @@ Standard match setup (Command Core + starting units on free tiles near each spaw
 |---------------|-------------|
 | `ud_viz` | Terminal renderer (raw ANSI) |
 | `ud_viz_nc` | ncurses renderer (optional, requires libncurses) |
-| `ud_viz_imgui` | Dear ImGui, isometric 2:1 projection (optional, requires libglfw3-dev). Z toggles claim zones, drawn with the engine's `territory_owners()` |
+| `ud_viz_imgui` | Dear ImGui, isometric 2:1 projection (optional, requires libglfw3-dev). Z toggles claim zones, drawn with the engine's `territory_owners()`. Resource nodes are amber crystal clusters; a Drone's cargo is a matching amber bar on its lower-left edge (HP is lower-right) |
 | `ud_shape_editor` | ImGui editor for unit/structure render shapes; reads/writes `.udshapes` files (`shape_model.hpp`) |
 | `Makefile.em` | Emscripten browser build → `viz/web/index.html`; drag-and-drop `.ud` files |
 
@@ -213,7 +213,7 @@ Compile flags enforcing these: `-ffp-contract=off -fno-fast-math` (in `cmake/Com
 - **Terrain memory:** terrain once seen stays known (it is static). Units and structures need
   current sight. The snapshot still sends only in-sight tiles; bots remember the rest themselves.
 - **Economy:** Drones carry what they harvest and bank it at their own Core or a Claim Node.
-  Drone cap is 1 per Claim Node + 1 per Core. Nodes don't deplete yet.
+  Drone cap is 1 per Claim Node + 1 per Core. Nodes never deplete (decided, not an omission).
 - **Blocked movement:** a unit may follow into a tile vacated on the same step, so columns move
   together. Swaps and any closed loop of movers are blocked, with everyone queued behind them:
   that is bad bot behavior and is meant to cost the bot. A blocked unit stays put for the step.

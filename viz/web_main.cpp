@@ -8,6 +8,7 @@
 #include <GLFW/glfw3.h>
 #include <emscripten.h>
 
+#include "config.hpp"
 #include "entity.hpp"
 #include "frame.hpp"
 #include "grid.hpp"
@@ -42,7 +43,8 @@ static constexpr ImVec4 kFogBg    = {0.06f, 0.06f, 0.08f, 1.0f};
 static constexpr ImVec4 kOpenBg   = {0.14f, 0.14f, 0.18f, 1.0f};
 static constexpr ImVec4 kAsteroid = {0.35f, 0.30f, 0.22f, 1.0f};
 static constexpr ImVec4 kNebula   = {0.22f, 0.15f, 0.35f, 1.0f};
-static constexpr ImVec4 kResource = {0.15f, 0.32f, 0.15f, 1.0f};
+static constexpr ImVec4 kResource = {0.24f, 0.20f, 0.14f, 1.0f}; // ground under the crystals
+static constexpr ImVec4 kCargo    = {1.0f, 0.72f, 0.18f, 1.0f}; // Drone hold bar
 static constexpr ImVec4 kFactionA = {0.40f, 0.70f, 1.00f, 1.0f};
 static constexpr ImVec4 kFactionB = {1.00f, 0.42f, 0.32f, 1.0f};
 
@@ -55,7 +57,14 @@ struct CellData {
   char    glyph{'\0'};
   ImVec4  fg{};
   int32_t hp{-1}, max_hp{-1};
+  float   cargo{0.0f}; // Drone hold fill, 0..1
+  bool    node{false}; // resource node: drawn as amber crystals
 };
+
+static float cargo_fill(const game::UnitFrame& u) {
+  return std::max(static_cast<float>(u.cargo_energy) / game::cfg::DRONE_CARGO_ENERGY,
+                  static_cast<float>(u.cargo_alloy) / game::cfg::DRONE_CARGO_ALLOY);
+}
 
 static CellData make_cell(const game::Map& map, const game::FrameState& fr,
                            int view, int32_t x, int32_t y) {
@@ -90,20 +99,23 @@ static CellData make_cell(const game::Map& map, const game::FrameState& fr,
     ImVec4 fg = s.faction.value == 0 ? kFactionA : kFactionB;
     return {bg, g, fg, s.hp, s.max_hp};
   }
+  const bool node = map.tile_at({x, y}).terrain == game::Terrain::ResourceNode;
 
   const game::UnitFrame* top = nullptr;
   for (const auto& u : fr.units)
     if (u.pos.x == x && u.pos.y == y) top = &u;
   if (top) {
-    char g = top->type == game::UnitType::Drone       ? 'd' :
+    char g = top->type == game::UnitType::Drone       ? (top->carrying() ? 'D' : 'd') :
              top->type == game::UnitType::Interceptor  ? 'i' :
              top->type == game::UnitType::Frigate       ? 'f' :
              top->type == game::UnitType::Artillery     ? 'a' : 'b';
     ImVec4 fg = top->faction.value == 0 ? kFactionA : kFactionB;
-    return {bg, g, fg, top->hp, top->max_hp};
+    return {bg, g, fg, top->hp, top->max_hp, cargo_fill(*top), node};
   }
 
-  return {bg};
+  CellData cd{bg};
+  cd.node = node;
+  return cd;
 }
 
 // ---- Global state ---------------------------------------------------------
@@ -291,6 +303,19 @@ static void main_loop() {
         dl->AddTriangleFilled(right, bottom, left, u32(dim(cd.bg, 0.70f)));
         dl->AddQuad(top, right, bottom, left, u32({0.0f, 0.0f, 0.0f, 0.40f}), 0.5f);
 
+        if (cd.node) {
+          // Three amber shards, tallest in the middle; units draw over them.
+          const float s = cw2 * 0.22f;
+          for (int i = -1; i <= 1; ++i) {
+            const float h = (i == 0 ? 1.0f : 0.6f) * ch2 * 1.6f;
+            const ImVec2 b = {ctr.x + i * s, ctr.y + ch2 * 0.35f};
+            dl->AddTriangleFilled({b.x - s * 0.5f, b.y}, {b.x + s * 0.5f, b.y}, {b.x, b.y - h},
+                                  u32(kCargo));
+            dl->AddTriangleFilled({b.x, b.y}, {b.x + s * 0.5f, b.y}, {b.x, b.y - h},
+                                  u32({1.0f, 0.88f, 0.5f, 1.0f}));
+          }
+        }
+
         if (cd.glyph) {
           char   buf[2] = {cd.glyph, '\0'};
           ImVec2 tsz    = ImGui::CalcTextSize(buf);
@@ -306,6 +331,13 @@ static void main_loop() {
                 : ImVec4{1.0f, ratio * 1.7f, 0.1f, 1.0f};
             dl->AddLine(right, bottom, u32({0.08f, 0.08f, 0.08f, 1.0f}), bw);
             dl->AddLine(right, hp_end, u32(hc), bw);
+          }
+          if (cd.cargo > 0.0f && g.cs >= 32.0f) {
+            ImVec2 c_end = {left.x + cd.cargo * (bottom.x - left.x),
+                            left.y + cd.cargo * (bottom.y - left.y)};
+            float  bw    = std::max(2.0f, ch2 * 0.3f);
+            dl->AddLine(left, bottom, u32({0.08f, 0.08f, 0.08f, 1.0f}), bw);
+            dl->AddLine(left, c_end, u32(kCargo), bw);
           }
         }
       }
