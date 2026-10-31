@@ -10,7 +10,7 @@ Build order and acceptance criteria: `docs/IMPLEMENTATION_PLAN.md`.
 
 ## Current State
 
-**Phases 1–5 complete. 238/238 tests passing.**
+**Phases 1–5 complete. 254/254 tests passing.**
 
 | Phase | Status | Notes |
 |-------|--------|-------|
@@ -23,8 +23,12 @@ Build order and acceptance criteria: `docs/IMPLEMENTATION_PLAN.md`.
 | 7 — Calibration | 🔲 Not started | |
 
 Additional work:
-- `WinReason::Draw` — tick-cap result when territory difference ≤ `cfg::DRAW_TERRITORY_MARGIN` (5%).
-- `ABI_VERSION` is 7; bumping it invalidates all existing replay files.
+- **Draws are allowed** (`WinReason::Draw`): both Command Cores die the same tick, or the tick cap is
+  reached with territory difference ≤ `cfg::DRAW_TERRITORY_MARGIN` (5%). Don't "fix" them away.
+- `ABI_VERSION` is 9 (8 added `StructureView`: all own structures; 9 added `EnemyStructureView`:
+  enemy structures in sight). Bumping it invalidates all existing replay files and every compiled bot.
+- Hard caps `UNIT_HARD_CAP` (256, queued ships count) and `STRUCTURE_HARD_CAP` (128) are enforced in
+  `economy.cpp`: they bound the snapshot buffer, and the runner clamps to them when copying in.
 
 ---
 
@@ -70,12 +74,12 @@ For LSP support: `ln -s build/compile_commands.json compile_commands.json`
 | `stats.hpp/.cpp` | `UnitStats` and `stats_for(UnitType)`, built from `config.hpp`. |
 | `entity.hpp` | `UnitType`, `StructureType`, `OrderType` enums; core structs. |
 | `world.hpp/.cpp` | Authoritative game state. `std::map` for units/structures (never unordered). |
-| `snapshot.hpp/.cpp` | Fog-masked snapshot builder. LoS = Manhattan distance ≤ sight_radius only. |
+| `snapshot.hpp/.cpp` | Fog-masked snapshot builder. LoS = Manhattan distance ≤ sight_radius only. Own units and structures always included; enemy units and structures only on visible tiles. |
 | `command.hpp/.cpp` | `ValidatedCommands` and `validate_commands()`. |
 | `movement.hpp/.cpp` | Stepped simultaneous movement. Blocked unit stays put, no retry. |
 | `combat.hpp/.cpp` | Sub-phase A: first-strike (Frigates). Sub-phase B: simultaneous; splash has friendly fire. |
 | `economy.hpp/.cpp` | Harvest (Drones adjacent to ResourceNode), spend, production. |
-| `territory.hpp/.cpp` | Voronoi territory (squared-Euclidean nearest Claim Node, cross-faction ties → neutral, `CLAIM_INFLUENCE` radius), Claim Node hp fragility, `win_threshold()`. |
+| `territory.hpp/.cpp` | Voronoi territory as a share of **passable** tiles (squared-Euclidean nearest Claim Node, cross-faction ties → neutral, `CLAIM_INFLUENCE` radius; each claim stamps only its radius), Claim Node hp fragility, `win_threshold()`. |
 | `wincheck.hpp/.cpp` | Fixed-order checks: base destruction → territory threshold → tick cap. |
 | `statehash.hpp/.cpp` | Rolling xxh3 via xxhash (`XXH_INLINE_ALL`). |
 | `tick.hpp/.cpp` | Phase pipeline. `run_tick_phases()` (raw commands) and `run_tick()` (calls bots). |
@@ -86,7 +90,11 @@ For LSP support: `ln -s build/compile_commands.json compile_commands.json`
 | `match.hpp/.cpp` | `run_match()`: drives tick loop, records replay log. |
 | `file_io.cpp` | Raw + Zstd file I/O. Zstd sections are `#ifdef`'d out under `__EMSCRIPTEN__`. |
 
-`fixtures/idle_bot.hpp` — `IdleBot`: always returns empty commands. Used by determinism tests.
+`fixtures/` — native test bots: `IdleBot` (empty commands; determinism tests), `RushBot`, `EconBot`,
+`TurtleBot` (one home claim, guards its base) and `ExpanderBot` (claims outward, never attacks).
+`Turtle.*` in `map_tests` proves the turtle loses to the descending threshold on every map.
+`bot_util.hpp` has a BFS `Router`: the engine never re-routes a blocked unit, so bots route
+themselves; enemy structures out of sight are learned from failed steps.
 
 ### runner/ — Wasmtime WASM bot host
 

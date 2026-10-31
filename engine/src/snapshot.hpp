@@ -11,7 +11,9 @@ struct World; // forward — full type in world.hpp
 struct Snapshot {
   SnapshotHeader header{};
   std::vector<UnitView> my_units;
+  std::vector<StructureView> my_structures;
   std::vector<EnemyView> visible_enemies;
+  std::vector<EnemyStructureView> visible_enemy_structures;
   std::vector<TileView> visible_tiles;
 };
 

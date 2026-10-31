@@ -12,8 +12,7 @@ namespace game {
 // Non-drone units hold position — the combat engine auto-engages enemies that
 // wander into range, so they still fight defensively.
 //
-// NOTE: does not issue Produce or Build commands — structures are not exposed
-// in the snapshot ABI, so factory structure IDs are unknown to the bot.
+// Does not issue Produce or Build commands.
 class EconBot : public Bot {
 public:
   void on_init(const Map&, uint32_t) override {}

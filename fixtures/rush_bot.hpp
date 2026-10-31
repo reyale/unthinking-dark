@@ -12,8 +12,7 @@ namespace game {
 // Moves drones toward the nearest visible resource node; idles when within
 // harvest range (Manhattan distance ≤ 1) so auto-harvest kicks in.
 //
-// NOTE: does not issue Produce or Build commands — structures are not exposed
-// in the snapshot ABI, so factory structure IDs are unknown to the bot.
+// Does not issue Produce or Build commands.
 class RushBot : public Bot {
 public:
   void on_init(const Map& map, uint32_t faction_id) override {

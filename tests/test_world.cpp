@@ -10,6 +10,7 @@
 #include "economy.hpp"
 #include "fixed.hpp"
 #include "movement.hpp"
+#include "snapshot.hpp"
 #include "world.hpp"
 
 static game::World make_world() {
@@ -713,4 +714,188 @@ TEST(Movement, BlockedByEnemyStructure) {
   game::ValidatedCommands empty;
   game::run_movement(w, cmds, empty);
   EXPECT_EQ(unit.pos.x, 1); // cannot enter enemy structure tile either
+}
+
+// ---- Hard caps (bound the snapshot buffer) ----------------------------------
+
+static game::World make_big_world() {
+  game::World w;
+  w.map = game::Map::make(40, 40);
+  w.rng = game::Rng{0};
+  return w;
+}
+
+// Faction 0's claims fill columns 0-19 of the bottom half, faction 1's columns 20-39.
+static void fill_structures(game::World& w, game::FactionId f, int32_t n) {
+  const int32_t x0 = f.value == 0 ? 0 : 20;
+  for (int32_t i = 0; i < n; ++i)
+    w.spawn_structure(f, game::StructureType::ClaimNode, {x0 + i % 20, 20 + i / 20});
+}
+
+static size_t structures_of(const game::World& w, game::FactionId f) {
+  size_t n = 0;
+  for (const auto& [sid, s] : w.structures)
+    if (s.alive() && s.faction == f) ++n;
+  return n;
+}
+
+TEST(Economy, StructureCapRefusesBuildAndClaim) {
+  for (auto kind : {game::CommandKind::Build, game::CommandKind::DeployClaim}) {
+    auto w = make_big_world();
+    fill_structures(w, {0}, game::cfg::STRUCTURE_HARD_CAP);
+    auto& builder = w.spawn_unit({0}, game::UnitType::Drone, {3, 3});
+    w.res({0}).alloy = 1000;
+    game::Command c = make_cmd(builder.id.value, kind);
+    c.ax = 4; c.ay = 3;
+    c.aux = static_cast<uint16_t>(game::StructureType::Factory);
+    game::ValidatedCommands cmds, empty;
+    cmds.emplace(builder.id, c);
+    game::run_economy(w, cmds, empty);
+    EXPECT_EQ(structures_of(w, {0}), size_t{game::cfg::STRUCTURE_HARD_CAP});
+    EXPECT_EQ(w.res({0}).alloy, 1000) << "a refused placement costs nothing";
+  }
+}
+
+TEST(Economy, StructureCapIsPerFactionAndFreedByDeath) {
+  auto w = make_big_world();
+  fill_structures(w, {1}, game::cfg::STRUCTURE_HARD_CAP);
+  fill_structures(w, {0}, game::cfg::STRUCTURE_HARD_CAP - 1);
+  auto& builder = w.spawn_unit({0}, game::UnitType::Drone, {3, 3});
+  w.res({0}).alloy = 1000;
+  game::ValidatedCommands cmds, empty;
+  game::Command c = make_cmd(builder.id.value, game::CommandKind::DeployClaim);
+  c.ax = 4; c.ay = 3;
+  cmds.emplace(builder.id, c);
+  game::run_economy(w, cmds, empty);
+  EXPECT_EQ(structures_of(w, {0}), size_t{game::cfg::STRUCTURE_HARD_CAP})
+      << "the enemy's count is theirs";
+
+  w.structures.begin()->second.hp = 0; // faction 1's first claim dies
+  w.spawn_unit({1}, game::UnitType::Drone, {10, 3});
+  game::ValidatedCommands cmds_b;
+  game::Command cb = make_cmd(w.units.rbegin()->first.value, game::CommandKind::DeployClaim);
+  cb.ax = 11; cb.ay = 3;
+  cmds_b.emplace(w.units.rbegin()->first, cb);
+  w.res({1}).alloy = 1000;
+  game::run_economy(w, empty, cmds_b);
+  EXPECT_EQ(structures_of(w, {1}), size_t{game::cfg::STRUCTURE_HARD_CAP})
+      << "a dead structure frees its slot";
+}
+
+static game::ValidatedCommands produce(game::StructureId fac) {
+  game::Command c{};
+  c.unit_id   = 1;
+  c.kind      = static_cast<uint16_t>(game::CommandKind::Produce);
+  c.target_id = fac.value;
+  c.aux       = static_cast<uint16_t>(game::UnitType::Interceptor);
+  game::ValidatedCommands cmds;
+  cmds.emplace(game::UnitId{1}, c);
+  return cmds;
+}
+
+TEST(Economy, UnitCapRefusesProduce) {
+  auto w = make_big_world();
+  for (int32_t i = 0; i < game::cfg::UNIT_HARD_CAP; ++i)
+    w.spawn_unit({0}, game::UnitType::Drone, {i % 40, i / 40});
+  auto& fac = w.spawn_structure({0}, game::StructureType::Factory, {20, 30});
+  w.res({0}).energy = 1000;
+  w.res({0}).alloy  = 1000;
+  game::ValidatedCommands empty;
+  game::run_economy(w, produce(fac.id), empty);
+  EXPECT_FALSE(fac.production_queue.has_value());
+  EXPECT_EQ(w.res({0}).energy, 1000);
+}
+
+TEST(Economy, QueuedShipsCountTowardTheUnitCap) {
+  auto w = make_big_world();
+  for (int32_t i = 0; i < game::cfg::UNIT_HARD_CAP - 1; ++i)
+    w.spawn_unit({0}, game::UnitType::Drone, {i % 40, i / 40});
+  auto& f1 = w.spawn_structure({0}, game::StructureType::Factory, {20, 30});
+  auto& f2 = w.spawn_structure({0}, game::StructureType::Factory, {30, 30});
+  w.res({0}).energy = 1000;
+  w.res({0}).alloy  = 1000;
+  game::ValidatedCommands empty;
+  game::run_economy(w, produce(f1.id), empty);
+  ASSERT_TRUE(f1.production_queue.has_value());
+  game::run_economy(w, produce(f2.id), empty);
+  EXPECT_FALSE(f2.production_queue.has_value()) << "the first ship is already paid for";
+}
+
+// ---- Snapshot: my structures ------------------------------------------------
+
+TEST(Snapshot, ListsAllOwnLiveStructuresRegardlessOfFog) {
+  auto w = make_big_world();
+  w.spawn_unit({0}, game::UnitType::Drone, {0, 0});
+  auto& core = w.spawn_structure({0}, game::StructureType::CommandCore, {1, 1});
+  auto& fac  = w.spawn_structure({0}, game::StructureType::Factory, {39, 39}); // far outside sight
+  auto& dead = w.spawn_structure({0}, game::StructureType::ClaimNode, {20, 20});
+  dead.hp = 0;
+  w.spawn_structure({1}, game::StructureType::CommandCore, {2, 1}); // enemy, in sight
+  fac.production_queue = game::UnitType::Frigate;
+  fac.production_ticks_left = 2;
+
+  auto snap = game::build_snapshot(w, 0, game::cfg::TICK_CAP);
+  ASSERT_EQ(snap.my_structures.size(), 2u) << "own and alive only; enemy structures are not listed";
+  EXPECT_EQ(snap.header.my_structure_count, 2u);
+
+  const auto& c = snap.my_structures[0];
+  EXPECT_EQ(c.id, core.id.value);
+  EXPECT_EQ(c.type, static_cast<uint16_t>(game::StructureType::CommandCore));
+  EXPECT_EQ(c.x, 1);
+  EXPECT_EQ(c.y, 1);
+  EXPECT_EQ(c.hp, core.hp);
+  EXPECT_EQ(c.producing, game::PRODUCING_NONE);
+  EXPECT_EQ(c.production_ticks_left, 0u);
+
+  const auto& f = snap.my_structures[1];
+  EXPECT_EQ(f.id, fac.id.value);
+  EXPECT_EQ(f.producing, static_cast<uint16_t>(game::UnitType::Frigate));
+  EXPECT_EQ(f.production_ticks_left, 2u);
+}
+
+TEST(Snapshot, OffsetsLayOutArraysBackToBack) {
+  auto w = make_big_world();
+  w.spawn_unit({0}, game::UnitType::Drone, {0, 0});
+  w.spawn_unit({0}, game::UnitType::Drone, {1, 0});
+  w.spawn_unit({1}, game::UnitType::Drone, {2, 0});
+  w.spawn_structure({0}, game::StructureType::CommandCore, {1, 1});
+  w.spawn_structure({0}, game::StructureType::Factory, {3, 3});
+  w.spawn_structure({0}, game::StructureType::ClaimNode, {5, 5});
+  w.spawn_structure({1}, game::StructureType::Factory, {2, 1});
+  w.spawn_structure({1}, game::StructureType::ClaimNode, {3, 0});
+
+  const auto h = game::build_snapshot(w, 0, game::cfg::TICK_CAP).header;
+  EXPECT_EQ(h.my_units_off, sizeof(game::SnapshotHeader));
+  EXPECT_EQ(h.my_structures_off, h.my_units_off + 2 * sizeof(game::UnitView));
+  EXPECT_EQ(h.enemies_off, h.my_structures_off + 3 * sizeof(game::StructureView));
+  EXPECT_EQ(h.enemy_structures_off, h.enemies_off + 1 * sizeof(game::EnemyView));
+  EXPECT_EQ(h.visible_enemy_structure_count, 2u);
+  EXPECT_EQ(h.tiles_off, h.enemy_structures_off + 2 * sizeof(game::EnemyStructureView));
+}
+
+// Enemy structures follow the enemy-unit rule exactly: listed only while on a tile within sight
+// of one of our units. Nothing is remembered once it drops out of view.
+TEST(Snapshot, EnemyStructuresOnlyWithinSight) {
+  auto w = make_big_world();
+  auto& scout = w.spawn_unit({0}, game::UnitType::Drone, {10, 10});
+  const int32_t sight = game::stats_for(game::UnitType::Drone).sight;
+  auto& near = w.spawn_structure({1}, game::StructureType::Factory, {10 + sight, 10}); // edge
+  w.spawn_structure({1}, game::StructureType::CommandCore, {10 + sight + 1, 10});      // just out
+  w.spawn_structure({1}, game::StructureType::ClaimNode, {39, 39});                    // far
+  auto& dead = w.spawn_structure({1}, game::StructureType::ClaimNode, {10, 11});
+  dead.hp = 0;
+  w.spawn_structure({0}, game::StructureType::CommandCore, {11, 10}); // ours: not an enemy
+
+  auto snap = game::build_snapshot(w, 0, game::cfg::TICK_CAP);
+  ASSERT_EQ(snap.visible_enemy_structures.size(), 1u);
+  const auto& es = snap.visible_enemy_structures[0];
+  EXPECT_EQ(es.id, near.id.value);
+  EXPECT_EQ(es.type, static_cast<uint16_t>(game::StructureType::Factory));
+  EXPECT_EQ(es.x, near.pos.x);
+  EXPECT_EQ(es.y, near.pos.y);
+  EXPECT_EQ(es.hp, near.hp);
+
+  scout.pos = {0, 30};
+  EXPECT_TRUE(game::build_snapshot(w, 0, game::cfg::TICK_CAP).visible_enemy_structures.empty())
+      << "out of sight, out of the snapshot";
 }

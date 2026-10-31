@@ -28,7 +28,7 @@ Counter-triangle: Interceptor > Frigate > Artillery > Interceptor.
 2. **Territory control** — hold ≥ a descending threshold of Voronoi territory (starts ~78%, falls to ~51% at the tick cap), anchored by Claim Nodes
 3. **Tick cap** — if neither side wins by the cap, the side with more territory wins; if the difference is within 5 percentage points, the match is a **draw**
 
-The threshold falls over time so turtling loses. Draws are rare but possible when two evenly-matched sides reach the tick cap at near-equal territory.
+The threshold falls over time so turtling loses. **Draws are allowed**: both Command Cores destroyed on the same tick, or two sides reaching the tick cap at near-equal territory.
 
 ## Bot API
 

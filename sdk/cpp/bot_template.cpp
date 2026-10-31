@@ -26,8 +26,15 @@ static const game::SnapshotHeader* snap() {
 static const game::UnitView* my_units() {
   return reinterpret_cast<const game::UnitView*>(SNAPSHOT_ADDR + snap()->my_units_off);
 }
+static const game::StructureView* my_structures() {
+  return reinterpret_cast<const game::StructureView*>(SNAPSHOT_ADDR + snap()->my_structures_off);
+}
 static const game::EnemyView* enemies() {
   return reinterpret_cast<const game::EnemyView*>(SNAPSHOT_ADDR + snap()->enemies_off);
+}
+static const game::EnemyStructureView* enemy_structures() {
+  return reinterpret_cast<const game::EnemyStructureView*>(SNAPSHOT_ADDR +
+                                                           snap()->enemy_structures_off);
 }
 static const game::TileView* tiles() {
   return reinterpret_cast<const game::TileView*>(SNAPSHOT_ADDR + snap()->tiles_off);

@@ -155,6 +155,14 @@ struct SnapshotHeader {
   uint32_t visible_tile_count;
   // offsets (in bytes from SNAPSHOT_ADDR) to each array, for forward-compat
   uint32_t my_units_off, enemies_off, tiles_off;
+  uint32_t my_structure_count, my_structures_off; // appended in ABI 8
+  uint32_t visible_enemy_structure_count, enemy_structures_off; // appended in ABI 9
+};
+struct StructureView {       // my structures: all of them, regardless of fog (ABI 8)
+  uint32_t id; uint16_t type;
+  uint16_t producing;        // UnitType in the Factory queue, or PRODUCING_NONE (0xFFFF)
+  int32_t x, y; int32_t hp;
+  uint32_t production_ticks_left;
 };
 struct UnitView {            // my units: full info
   uint32_t id; uint16_t type; uint16_t _pad;
@@ -162,6 +170,10 @@ struct UnitView {            // my units: full info
   uint16_t cooldown; uint16_t current_order; // order enum (Move/MoveAttack/Attack/Idle/...)
 };
 struct EnemyView {           // visible enemies: observable info only
+  uint32_t id; uint16_t type; uint16_t _pad;
+  int32_t x, y; int32_t hp;
+};
+struct EnemyStructureView {  // enemy structures on fog-visible tiles only (ABI 9)
   uint32_t id; uint16_t type; uint16_t _pad;
   int32_t x, y; int32_t hp;
 };
@@ -255,7 +267,8 @@ phase's acceptance implicitly.
 **Stop-and-ask** — none expected.
 
 ### Phase 3 — Win Condition & Territory (§7)
-**Goal:** anti-draw spine: base-destruction OR Voronoi-territory ≥ descending threshold.
+**Goal:** decisive endings: base-destruction OR Voronoi-territory ≥ descending threshold.
+Draws are allowed (double base death; near-equal territory at the tick cap, DESIGN §7).
 
 **Deliverables**
 - `territory`: straight-line Voronoi by nearest living Claim Node, max influence distance,
@@ -267,8 +280,9 @@ phase's acceptance implicitly.
 
 **Acceptance**
 - Killing a claim re-partitions its region deterministically (assert tile-ownership flips).
-- Turtle bot reliably loses to the descending threshold (anti-draw works in sim).
-- Double-base-death same tick → ladder; ladder always names a winner.
+- Turtle bot reliably loses to the descending threshold (anti-turtle works in sim).
+- Double-base-death same tick → draw. The ladder (only reachable if both sides meet the
+  threshold together) always names a winner.
 - Determinism hash still green with territory active.
 
 **Stop-and-ask**
@@ -348,11 +362,11 @@ pre-match fuel/memory reports.
 **Deliverables**
 - Sim battery across sample bots/maps collecting §8 stats.
 - Tune §12 constants toward: decisive endings (base or threshold), mid-game contest + late
-  climax, **near-zero draws, near-zero turtle-offs**, no dominant unit. Keep values as named
+  climax, **rare draws, turtles lose**, no dominant unit. Keep values as named
   constants; document reasoning.
 
 **Acceptance (targets, expect iteration)**
-- Draw rate ≈ 0; turtles reliably lose; counter-triangle holds; durations cluster below cap.
+- Draw rate low (draws are allowed, not a defect); turtles reliably lose; counter-triangle holds; durations cluster below cap.
 
 **Stop-and-ask**
 - If no parameter set hits targets, the issue may be structural (mechanic, not number) —
@@ -372,7 +386,7 @@ pre-match fuel/memory reports.
 ## 5. Definition of Done (v1)
 - Two real `wasm32` bots play a full fog-of-war deterministic match that reproduces
   byte-identically across runs and x86-64 machines under pinned config; plays back from its
-  input-log via re-simulation; ends decisively with draws essentially impossible; tracks
+  input-log via re-simulation; ends decisively or in a rule-defined draw; tracks
   forfeits + §8 stats; re-simulates from its stored record.
 - An author clones `/sdk/cpp`, writes a bot, compiles to wasm32 (clang), runs it locally,
   and gets an exact fuel/memory profile matching ranked metering.

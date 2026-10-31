@@ -33,7 +33,14 @@ A valid bot module must export:
 The engine writes a flat snapshot buffer into `[SNAPSHOT_ADDR, SNAPSHOT_ADDR + N)`
 and reads commands from `[COMMAND_ADDR, COMMAND_ADDR + count * 24)` after `on_tick`
 returns. The bot must reserve enough linear memory to cover both regions for
-worst-case v1 caps (≈ 280 KB snapshot + 6 KB commands; 6 WASM pages suffices).
+worst-case v1 caps (`UNIT_HARD_CAP` units, `STRUCTURE_HARD_CAP` structures, 2× units of
+visible enemies, `STRUCTURE_HARD_CAP` visible enemy structures, the whole largest map of
+tiles: ≈ 278 KiB snapshot + 6 KiB commands; 6 WASM
+pages suffices). Array counts are clamped to those caps when the snapshot is copied in, so the
+copy can never run past the buffer the bot was validated to have.
+
+The snapshot holds, in order: header, my units, my structures (all of them, fog or not),
+visible enemy units, visible enemy structures, visible tiles. Use the header offsets rather than assuming the order.
 
 See `engine/src/abi.hpp` for the exact struct layouts.
 

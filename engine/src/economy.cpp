@@ -30,6 +30,24 @@ static void harvest(World& world) {
   }
 }
 
+// Live units plus ships already paid for and queued: a queued ship spawns whatever happens next,
+// so it counts against UNIT_HARD_CAP from the moment it is bought.
+static int32_t unit_count(const World& world, FactionId f) {
+  int32_t n = 0;
+  for (const auto& [uid, u] : world.units)
+    if (u.alive() && u.faction == f) ++n;
+  for (const auto& [sid, s] : world.structures)
+    if (s.alive() && s.faction == f && s.production_queue) ++n;
+  return n;
+}
+
+static int32_t structure_count(const World& world, FactionId f) {
+  int32_t n = 0;
+  for (const auto& [sid, s] : world.structures)
+    if (s.alive() && s.faction == f) ++n;
+  return n;
+}
+
 static void spend(World& world, const ValidatedCommands& cmds_a, const ValidatedCommands& cmds_b) {
   // Process in deterministic unit-id order across both factions.
   ValidatedCommands all;
@@ -45,6 +63,8 @@ static void spend(World& world, const ValidatedCommands& cmds_a, const Validated
       StructureId sid{cmd.target_id};
       Structure* fac = world.find_structure(sid);
       if (!fac || !fac->alive() || fac->production_queue.has_value())
+        continue;
+      if (unit_count(world, fac->faction) >= cfg::UNIT_HARD_CAP)
         continue;
 
       auto utype = static_cast<UnitType>(cmd.aux);
@@ -79,7 +99,7 @@ static void spend(World& world, const ValidatedCommands& cmds_a, const Validated
       res.energy -= cost_e;
       res.alloy -= cost_a;
       fac->production_queue = utype;
-      fac->production_ticks_left = 3; // v1 placeholder
+      fac->production_ticks_left = cfg::PRODUCTION_TICKS;
 
     } else if (kind == CommandKind::Build) {
       const Unit* builder = world.find_unit(uid);
@@ -91,6 +111,8 @@ static void spend(World& world, const ValidatedCommands& cmds_a, const Validated
         cost_e = cfg::FACTORY_COST_E;
         cost_a = cfg::FACTORY_COST_A;
       } else
+        continue;
+      if (structure_count(world, builder->faction) >= cfg::STRUCTURE_HARD_CAP)
         continue;
       // Checked here, after movement, rather than in validation: a tile vacated this
       // tick is buildable, and one just moved onto is not. Commands run in unit-id
@@ -107,6 +129,8 @@ static void spend(World& world, const ValidatedCommands& cmds_a, const Validated
     } else if (kind == CommandKind::DeployClaim) {
       const Unit* builder = world.find_unit(uid);
       if (!builder)
+        continue;
+      if (structure_count(world, builder->faction) >= cfg::STRUCTURE_HARD_CAP)
         continue;
       if (!world.tile_free({cmd.ax, cmd.ay}))
         continue;

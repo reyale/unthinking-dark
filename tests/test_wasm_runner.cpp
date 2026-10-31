@@ -794,3 +794,92 @@ TEST(SdkLifecycle, LargeCopiesRunAsMeteredLoops) {
     EXPECT_GT(bot.last_metrics().fuel_consumed, 50'000u) << "copies were not charged per word";
   }
 }
+
+// ---- Snapshot: my structures ------------------------------------------------
+
+// Reads my_structures_off (header offset 60) and my_structure_count (56); writes
+// StructureView[0].id as Command[0].unit_id and StructureView[0].x as ax; returns the count.
+static constexpr std::string_view STRUCTURE_ECHO_WAT = R"wat(
+(module
+  (memory (export "memory") 6)
+  (global (export "SNAPSHOT_ADDR") i32 (i32.const 0))
+  (global (export "COMMAND_ADDR")  i32 (i32.const 327680))
+  (func (export "abi_version") (result i32) i32.const @ABI@)
+  (func (export "init") (param i32))
+  (func (export "on_tick") (result i32)
+    (local $off i32)
+    (local.set $off (i32.load (i32.const 60)))
+    (i32.store (i32.const 327680) (i32.load (local.get $off)))
+    (i32.store (i32.const 327688) (i32.load (i32.add (local.get $off) (i32.const 8))))
+    (i32.load (i32.const 56)))
+)
+)wat";
+
+TEST(WasmBot, StructureViewRoundTripThroughSnapshot) {
+  static_assert(offsetof(game::SnapshotHeader, my_structures_off) == 60);
+  static_assert(offsetof(game::SnapshotHeader, my_structure_count) == 56);
+  runner::WasmBot bot(to_wasm(STRUCTURE_ECHO_WAT));
+  ASSERT_TRUE(bot.healthy()) << bot.last_error();
+
+  game::Snapshot snap;
+  snap.my_units.resize(2); // structures sit after the units: the offset must account for them
+  game::StructureView sv{};
+  sv.id = 4242;
+  sv.x = 17;
+  snap.my_structures.push_back(sv);
+  auto cmds = bot.on_tick(snap);
+  ASSERT_EQ(cmds.size(), 1u);
+  EXPECT_EQ(cmds[0].unit_id, 4242u);
+  EXPECT_EQ(cmds[0].ax, 17);
+}
+
+// Reads enemy_structures_off (header offset 68) and the count (64); writes
+// EnemyStructureView[0].id as Command[0].unit_id and its y as ay; returns the count.
+static constexpr std::string_view ENEMY_STRUCTURE_ECHO_WAT = R"wat(
+(module
+  (memory (export "memory") 6)
+  (global (export "SNAPSHOT_ADDR") i32 (i32.const 0))
+  (global (export "COMMAND_ADDR")  i32 (i32.const 327680))
+  (func (export "abi_version") (result i32) i32.const @ABI@)
+  (func (export "init") (param i32))
+  (func (export "on_tick") (result i32)
+    (local $off i32)
+    (local.set $off (i32.load (i32.const 68)))
+    (i32.store (i32.const 327680) (i32.load (local.get $off)))
+    (i32.store (i32.const 327692) (i32.load (i32.add (local.get $off) (i32.const 12))))
+    (i32.load (i32.const 64)))
+)
+)wat";
+
+TEST(WasmBot, EnemyStructureViewRoundTripThroughSnapshot) {
+  static_assert(offsetof(game::SnapshotHeader, enemy_structures_off) == 68);
+  static_assert(offsetof(game::SnapshotHeader, visible_enemy_structure_count) == 64);
+  runner::WasmBot bot(to_wasm(ENEMY_STRUCTURE_ECHO_WAT));
+  ASSERT_TRUE(bot.healthy()) << bot.last_error();
+
+  game::Snapshot snap; // arrays before it, so the offset has to account for each
+  snap.my_units.resize(2);
+  snap.my_structures.resize(3);
+  snap.visible_enemies.resize(4);
+  game::EnemyStructureView es{};
+  es.id = 777;
+  es.y = 23;
+  snap.visible_enemy_structures.push_back(es);
+  auto cmds = bot.on_tick(snap);
+  ASSERT_EQ(cmds.size(), 1u);
+  EXPECT_EQ(cmds[0].unit_id, 777u);
+  EXPECT_EQ(cmds[0].ay, 23);
+}
+
+// The engine never builds an over-cap snapshot; if one reached the runner, the copy must still
+// stay inside the buffer the bot was validated to have.
+TEST(WasmBot, OverCapSnapshotIsClampedToTheBuffer) {
+  runner::WasmBot bot(to_wasm(UNIT_COUNT_WAT));
+  ASSERT_TRUE(bot.healthy());
+  game::Snapshot snap;
+  snap.my_units.resize(game::cfg::UNIT_HARD_CAP + 50);
+  snap.my_structures.resize(game::cfg::STRUCTURE_HARD_CAP + 50);
+  snap.visible_enemy_structures.resize(game::cfg::STRUCTURE_HARD_CAP + 50);
+  auto cmds = bot.on_tick(snap);
+  EXPECT_EQ(cmds.size(), size_t{game::cfg::UNIT_HARD_CAP});
+}

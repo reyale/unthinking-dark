@@ -46,7 +46,9 @@ static game::TickFault classify_fault(wasmtime_error_t* err, wasm_trap_t* trap, 
 static constexpr size_t MAX_SNAPSHOT_BYTES =
     sizeof(game::SnapshotHeader) +
     game::cfg::UNIT_HARD_CAP * sizeof(game::UnitView) +
+    game::cfg::STRUCTURE_HARD_CAP * sizeof(game::StructureView) +
     game::cfg::UNIT_HARD_CAP * 2 * sizeof(game::EnemyView) +
+    game::cfg::STRUCTURE_HARD_CAP * sizeof(game::EnemyStructureView) +
     game::cfg::MAP_MAX_W * game::cfg::MAP_MAX_H * sizeof(game::TileView);
 
 static constexpr size_t MAX_COMMAND_BYTES =
@@ -322,29 +324,35 @@ std::vector<game::Command> WasmBot::on_tick(const game::Snapshot& snap) {
   auto* ctx = impl_->ctx();
   uint8_t* mem = wasmtime_memory_data(ctx, &impl_->memory);
 
-  // Serialize snapshot into WASM linear memory.
-  uint32_t my_units_off = static_cast<uint32_t>(sizeof(game::SnapshotHeader));
-  uint32_t enemies_off  = my_units_off +
-      static_cast<uint32_t>(snap.my_units.size()) * sizeof(game::UnitView);
-  uint32_t tiles_off    = enemies_off +
-      static_cast<uint32_t>(snap.visible_enemies.size()) * sizeof(game::EnemyView);
-
+  // Serialize snapshot into WASM linear memory. The engine enforces the caps these counts are
+  // clamped to; the clamp is what guarantees the copy stays inside the bot's validated buffer.
+  auto clamp = [](size_t n, size_t cap) { return static_cast<uint32_t>(std::min(n, cap)); };
   game::SnapshotHeader hdr = snap.header;
-  hdr.my_units_off = my_units_off;
-  hdr.enemies_off  = enemies_off;
-  hdr.tiles_off    = tiles_off;
+  hdr.my_unit_count       = clamp(snap.my_units.size(), game::cfg::UNIT_HARD_CAP);
+  hdr.my_structure_count  = clamp(snap.my_structures.size(), game::cfg::STRUCTURE_HARD_CAP);
+  hdr.visible_enemy_count = clamp(snap.visible_enemies.size(), game::cfg::UNIT_HARD_CAP * 2);
+  hdr.visible_enemy_structure_count =
+      clamp(snap.visible_enemy_structures.size(), game::cfg::STRUCTURE_HARD_CAP);
+  hdr.visible_tile_count  =
+      clamp(snap.visible_tiles.size(), game::cfg::MAP_MAX_W * game::cfg::MAP_MAX_H);
+  hdr.my_units_off      = static_cast<uint32_t>(sizeof(game::SnapshotHeader));
+  hdr.my_structures_off = hdr.my_units_off + hdr.my_unit_count * sizeof(game::UnitView);
+  hdr.enemies_off = hdr.my_structures_off + hdr.my_structure_count * sizeof(game::StructureView);
+  hdr.enemy_structures_off =
+      hdr.enemies_off + hdr.visible_enemy_count * sizeof(game::EnemyView);
+  hdr.tiles_off = hdr.enemy_structures_off +
+                  hdr.visible_enemy_structure_count * sizeof(game::EnemyStructureView);
 
   uint8_t* dest = mem + impl_->snapshot_addr;
   std::memcpy(dest, &hdr, sizeof(hdr));
-  if (!snap.my_units.empty())
-    std::memcpy(dest + my_units_off, snap.my_units.data(),
-                snap.my_units.size() * sizeof(game::UnitView));
-  if (!snap.visible_enemies.empty())
-    std::memcpy(dest + enemies_off, snap.visible_enemies.data(),
-                snap.visible_enemies.size() * sizeof(game::EnemyView));
-  if (!snap.visible_tiles.empty())
-    std::memcpy(dest + tiles_off, snap.visible_tiles.data(),
-                snap.visible_tiles.size() * sizeof(game::TileView));
+  auto copy = [&](uint32_t off, const auto& v, uint32_t n) {
+    if (n) std::memcpy(dest + off, v.data(), n * sizeof(v[0]));
+  };
+  copy(hdr.my_units_off, snap.my_units, hdr.my_unit_count);
+  copy(hdr.my_structures_off, snap.my_structures, hdr.my_structure_count);
+  copy(hdr.enemies_off, snap.visible_enemies, hdr.visible_enemy_count);
+  copy(hdr.enemy_structures_off, snap.visible_enemy_structures, hdr.visible_enemy_structure_count);
+  copy(hdr.tiles_off, snap.visible_tiles, hdr.visible_tile_count);
 
   // Refuel and call on_tick.
   wasmtime_context_set_fuel(ctx, game::cfg::FUEL_PER_TICK);

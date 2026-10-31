@@ -5,12 +5,10 @@ namespace game {
 
 struct World;
 
-// Phase 5 / Phase 6 — Voronoi territory + Claim Node fragility.
-// Stubbed for Phase 1; wired into the tick loop but returns 0 for all factions.
-// Full implementation in Phase 3.
+// Tick phase 6 — Voronoi territory + Claim Node fragility (DESIGN §7).
 
 struct TerritoryState {
-  uint32_t pct_faction[2]{0, 0}; // territory_pct per faction (0..100)
+  uint32_t pct_faction[2]{0, 0}; // owned share of passable tiles per faction (0..100)
 };
 
 // Recompute Voronoi territory and update Claim Node effective hp from the

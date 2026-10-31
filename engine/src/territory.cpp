@@ -2,14 +2,15 @@
 #include "world.hpp"
 #include "config.hpp"
 #include "entity.hpp"
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
 namespace game {
 
-// Voronoi: for each tile, find the nearest living Claim Node by squared Euclidean
-// distance. Ties between different factions → neutral. Tiles beyond CLAIM_INFLUENCE
-// radius → neutral. Pure integer math (no sqrt needed for comparison).
+// Voronoi: each tile goes to the nearest living Claim Node by squared Euclidean distance.
+// Ties between different factions → neutral. Tiles beyond CLAIM_INFLUENCE radius → neutral.
+// Pure integer math (no sqrt needed for comparison).
 TerritoryState run_territory(World& world, uint32_t tick_cap) {
   // Step 1 — Claim Node fragility: cap hp to eff_hp(g) = BASE*(1-g) + FLOOR
   uint32_t tick = world.tick;
@@ -44,31 +45,48 @@ TerritoryState run_territory(World& world, uint32_t tick_cap) {
   const int64_t influence_sq =
     static_cast<int64_t>(cfg::CLAIM_INFLUENCE) * cfg::CLAIM_INFLUENCE;
 
-  uint32_t tile_count[2]{0, 0};
-  const uint32_t total_tiles =
-    static_cast<uint32_t>(world.map.width) * static_cast<uint32_t>(world.map.height);
-
-  for (int32_t y = 0; y < world.map.height; ++y) {
-    for (int32_t x = 0; x < world.map.width; ++x) {
-      int64_t best_sq = INT64_MAX;
-      int32_t best_faction = -1; // -1 = neutral / contested
-
-      for (const auto& node : nodes) {
-        int64_t dx = x - node.pos.x;
-        int64_t dy = y - node.pos.y;
-        int64_t dist_sq = dx * dx + dy * dy;
-
-        if (dist_sq < best_sq) {
-          best_sq = dist_sq;
-          best_faction = static_cast<int32_t>(node.faction);
-        } else if (dist_sq == best_sq &&
-                   static_cast<int32_t>(node.faction) != best_faction) {
-          best_faction = -1; // equidistant from different factions
+  // Each claim stamps only the tiles within its influence radius (tiles beyond every claim's
+  // radius are neutral anyway), so the cost is claims × influence area rather than
+  // claims × map. A tile's owner is the faction of its nearest claim, or neutral if the
+  // nearest claims belong to different factions; that doesn't depend on stamping order.
+  const int32_t W = world.map.width;
+  const int32_t H = world.map.height;
+  std::vector<int64_t> best_sq(static_cast<size_t>(W) * static_cast<size_t>(H), INT64_MAX);
+  std::vector<int32_t> owner(best_sq.size(), -1); // -1 = neutral / contested
+  const int32_t r = cfg::CLAIM_INFLUENCE;
+  for (const auto& node : nodes) {
+    for (int32_t y = std::max(0, node.pos.y - r); y <= std::min(H - 1, node.pos.y + r); ++y) {
+      for (int32_t x = std::max(0, node.pos.x - r); x <= std::min(W - 1, node.pos.x + r); ++x) {
+        const int64_t dx = x - node.pos.x;
+        const int64_t dy = y - node.pos.y;
+        const int64_t dist_sq = dx * dx + dy * dy;
+        if (dist_sq > influence_sq)
+          continue;
+        const size_t i = static_cast<size_t>(y) * static_cast<size_t>(W) + static_cast<size_t>(x);
+        const auto faction = static_cast<int32_t>(node.faction);
+        if (dist_sq < best_sq[i]) {
+          best_sq[i] = dist_sq;
+          owner[i] = faction;
+        } else if (dist_sq == best_sq[i] && faction != owner[i]) {
+          owner[i] = -1; // equidistant from different factions
         }
       }
+    }
+  }
 
-      if (best_faction >= 0 && best_sq <= influence_sq)
-        tile_count[static_cast<uint32_t>(best_faction)]++;
+  // Territory is a share of passable tiles (§7.2): asteroids can't be held, so counting them
+  // would cap every faction below the opening threshold on asteroid-heavy maps.
+  uint32_t tile_count[2]{0, 0};
+  uint32_t total_tiles = 0;
+  for (int32_t y = 0; y < H; ++y) {
+    for (int32_t x = 0; x < W; ++x) {
+      if (!world.map.passable({x, y}))
+        continue;
+      ++total_tiles;
+      const int32_t o =
+          owner[static_cast<size_t>(y) * static_cast<size_t>(W) + static_cast<size_t>(x)];
+      if (o >= 0)
+        tile_count[static_cast<uint32_t>(o)]++;
     }
   }
 

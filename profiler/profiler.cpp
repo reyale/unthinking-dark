@@ -139,17 +139,37 @@ World wide_visibility() {
 }
 
 // The literal worst case the rules allow: largest map, full army, nearly all of it
-// in view, and a full enemy army (Battleships, so they survive a few volleys)
-// standing next to it.
+// in view, a full set of structures, and a full enemy army (Battleships, so they survive a
+// few volleys) standing next to it, with a full set of enemy structures in view too. The
+// structures are Factories: Claim Nodes would hand either side territory and could end the
+// scenario early.
 World max_legal() {
   World w = blank(game::cfg::MAP_MAX_W, game::cfg::MAP_MAX_H);
   const Vec2 enemy_core{game::cfg::MAP_MAX_W - 9, game::cfg::MAP_MAX_H - 9};
   w.spawn_structure(kBot, StructureType::CommandCore, {1, 1});
   fortified_enemy_core(w, enemy_core);
   sight_lattice(w, enemy_core);
+  for (int32_t i = 0, built = 1; built < game::cfg::STRUCTURE_HARD_CAP; ++i) {
+    const Vec2 p{4 + 2 * (i % 32), 4 + 2 * (i / 32)}; // spaced so every unit can still move
+    if (w.tile_free(p) && !inside_fortress(p, enemy_core)) {
+      w.spawn_structure(kBot, StructureType::Factory, p);
+      ++built;
+    }
+  }
   std::vector<Vec2> mine;
   for (const auto& [id, u] : w.units)
     if (u.faction == kBot) mine.push_back(u.pos);
+  // Each enemy Factory goes beside one of the bot's units, so all of them are in view.
+  int32_t enemy_built = 1; // the fortified Core
+  for (const Vec2& p : mine)
+    for (const Vec2& d : game::DIRS) {
+      if (enemy_built >= game::cfg::STRUCTURE_HARD_CAP) break;
+      if (w.tile_free(p + d) && !inside_fortress(p + d, enemy_core)) {
+        w.spawn_structure(kOpponent, StructureType::Factory, p + d);
+        ++enemy_built;
+        break;
+      }
+    }
   uint32_t enemies = 0;
   for (const Vec2& p : mine)
     for (const Vec2& d : game::DIRS) {
@@ -172,7 +192,8 @@ std::vector<Scenario> make_suite() {
   s.push_back({"dense_battle", "100 vs 100 interleaved, all in view", 30, dense_battle});
   s.push_back({"wide_visibility", "largest map, Battleship lattice sees nearly all of it", 10,
                wide_visibility});
-  s.push_back({"max_legal", "largest map, full army, full enemy army in view", 10, max_legal});
+  s.push_back({"max_legal", "largest map, full army and bases, full enemy army and bases in view",
+               10, max_legal});
   s.push_back({"long_running", "standard opening for 2000 ticks; watch memory for leaks", 2000,
                early_game});
   return s;

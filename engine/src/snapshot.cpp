@@ -69,6 +69,22 @@ Snapshot build_snapshot(const World& world, uint32_t faction_id, uint32_t tick_c
     snap.my_units.push_back(uv);
   }
 
+  for (const auto& [id, s] : world.structures) {
+    if (s.faction != my_faction || !s.alive())
+      continue;
+    StructureView sv{};
+    sv.id = id.value;
+    sv.type = static_cast<uint16_t>(s.type);
+    sv.producing =
+      s.production_queue ? static_cast<uint16_t>(*s.production_queue) : PRODUCING_NONE;
+    sv.x = s.pos.x;
+    sv.y = s.pos.y;
+    sv.hp = s.hp;
+    sv.production_ticks_left =
+      s.production_queue ? static_cast<uint32_t>(s.production_ticks_left) : 0;
+    snap.my_structures.push_back(sv);
+  }
+
   // Visible enemies and tiles
   for (int32_t y = 0; y < H; ++y) {
     for (int32_t x = 0; x < W; ++x) {
@@ -101,16 +117,41 @@ Snapshot build_snapshot(const World& world, uint32_t faction_id, uint32_t tick_c
     snap.visible_enemies.push_back(ev);
   }
 
+  for (const auto& [id, s] : world.structures) {
+    if (s.faction == my_faction || !s.alive())
+      continue;
+    if (!visible[static_cast<size_t>(s.pos.y * W + s.pos.x)])
+      continue;
+    EnemyStructureView es{};
+    es.id = id.value;
+    es.type = static_cast<uint16_t>(s.type);
+    es.x = s.pos.x;
+    es.y = s.pos.y;
+    es.hp = s.hp;
+    snap.visible_enemy_structures.push_back(es);
+  }
+
   snap.header.my_unit_count = static_cast<uint32_t>(snap.my_units.size());
   snap.header.visible_enemy_count = static_cast<uint32_t>(snap.visible_enemies.size());
   snap.header.visible_tile_count = static_cast<uint32_t>(snap.visible_tiles.size());
+  snap.header.my_structure_count = static_cast<uint32_t>(snap.my_structures.size());
+  snap.header.visible_enemy_structure_count =
+    static_cast<uint32_t>(snap.visible_enemy_structures.size());
 
-  // Byte offsets (for the flat WASM buffer — unused in engine-side code)
+  // Byte offsets into the flat WASM buffer: header, my units, my structures, enemy units,
+  // enemy structures, tiles.
   snap.header.my_units_off = sizeof(SnapshotHeader);
-  snap.header.enemies_off =
+  snap.header.my_structures_off =
     snap.header.my_units_off + static_cast<uint32_t>(snap.my_units.size() * sizeof(UnitView));
-  snap.header.tiles_off = snap.header.enemies_off +
-                          static_cast<uint32_t>(snap.visible_enemies.size() * sizeof(EnemyView));
+  snap.header.enemies_off =
+    snap.header.my_structures_off +
+    static_cast<uint32_t>(snap.my_structures.size() * sizeof(StructureView));
+  snap.header.enemy_structures_off =
+    snap.header.enemies_off +
+    static_cast<uint32_t>(snap.visible_enemies.size() * sizeof(EnemyView));
+  snap.header.tiles_off =
+    snap.header.enemy_structures_off +
+    static_cast<uint32_t>(snap.visible_enemy_structures.size() * sizeof(EnemyStructureView));
 
   return snap;
 }

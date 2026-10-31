@@ -94,6 +94,9 @@ These are non-negotiable; each one silently breaks replay if violated.
   friendly unit's sight radius and not blocked by nebula. No terrain memory in v1 (going
   blind when you leave is intended). Engine computes visibility and masks the snapshot —
   cheating is structurally impossible because hidden state is never serialized to the bot.
+  A faction always knows its **own** units and structures (position, hp, Factory queue)
+  regardless of fog. Enemy units and enemy structures appear only while on a tile within
+  sight, by the same rule, and drop out of the snapshot when they leave view (no memory).
 - **Maps (v1):** assume a small set of hand-authored, **point-symmetric** maps for
   fairness (1v1, deterministic — an asymmetric map advantages one side). Map generation
   is out of scope for v1; load maps from a file format (see §9).
@@ -210,10 +213,11 @@ for step in 1..=N:
 - Recompute Voronoi territory (§7), compute current threshold.
 - **Win checks, in fixed order:**
   1. **Base destroyed?** A faction whose Command Core died this tick loses. Both died same
-     tick → tie-break ladder.
+     tick → **draw**.
   2. **Territory ≥ threshold?** Faction at/over current threshold wins. Both qualify
      (guard; impossible while threshold > 50%) → tie-break ladder.
-  3. **Tick cap reached?** → tie-break ladder.
+  3. **Tick cap reached?** More territory wins; a difference within
+     `DRAW_TERRITORY_MARGIN` percentage points → **draw** (§7.3).
 - No win → advance tick, loop to Phase 0.
 
 ---
@@ -244,14 +248,22 @@ positioning beat raw numbers.
 - Drones harvest both from asteroid-embedded nodes. (A 3rd resource is a possible add if
   build orders prove too flat — defer.)
 
-**Unit cap:** economy-gated soft cap + a hard ceiling (v1 placeholder ~200–300) purely to
-bound fuel/memory worst-case and keep rendering legible.
+**Unit cap:** economy-gated soft cap + a hard ceiling (`UNIT_HARD_CAP`, v1 256 per side) purely
+to bound fuel/memory worst-case and keep rendering legible. A ship counts from the moment it is
+bought (queued in a Factory); Produce at the cap is refused at no cost.
+
+**Structure cap:** `STRUCTURE_HARD_CAP` (v1 128 per side, all types) bounds the snapshot the
+same way; Build and DeployClaim at the cap are refused at no cost. Destroyed structures free
+their slot.
 
 ---
 
-## 7. Win Condition & Territory (the anti-draw spine)
+## 7. Win Condition & Territory
 
-Two win paths, both decisive; designed so draws are essentially impossible.
+Two win paths, both decisive. The descending threshold keeps a side that only holds ground
+from waiting out the clock, so most matches end in a win. **Draws are allowed**, in exactly
+two cases: both Command Cores die on the same tick, or the tick cap is reached with the
+territory difference within `DRAW_TERRITORY_MARGIN` (§7.3).
 
 ### 7.1 Base destruction
 Destroy the enemy **Command Core** → instant win. The clean kill.
@@ -273,10 +285,13 @@ Destroy the enemy **Command Core** → instant win. The clean kill.
   cracks it"). This makes the endgame deliberately volatile and decisive.
 
 ### 7.3 Tick cap
-(v1 placeholder ~3000 — the point where threshold reaches ~51%.) Reaching it → tie-break.
+(v1 placeholder ~3000 — the point where threshold reaches ~51%.) Reaching it: the side with
+more territory wins, unless the difference is within `DRAW_TERRITORY_MARGIN` (v1
+placeholder 5 percentage points), which is a **draw**.
 
-### 7.4 Tie-break ladder (draw-killer floor; near-never reached)
-Evaluated in order until one side wins:
+### 7.4 Tie-break ladder (near-never reached)
+Used only if both sides meet the territory threshold on the same tick (impossible while the
+threshold is above 50%). Evaluated in order until one side wins:
 1. Higher territory %
 2. Higher total Command Core hp remaining
 3. More enemy units destroyed
@@ -373,7 +388,7 @@ The handful of numbers that drive the whole game's pace and balance:
 - Map **size** (~80×80) and asteroid/nebula/resource layout.
 
 Tuning goal: most games end decisively (base kill or threshold) with a mid-game contest
-and a late climax; near-zero draws; near-zero turtle-offs.
+and a late climax; draws rare (they are allowed, §7); turtles lose.
 
 ---
 

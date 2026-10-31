@@ -41,7 +41,9 @@ namespace ud {
 inline constexpr unsigned SNAPSHOT_BUFFER_SIZE =
     sizeof(game::SnapshotHeader)
     + (unsigned)game::cfg::UNIT_HARD_CAP * sizeof(game::UnitView)
+    + (unsigned)game::cfg::STRUCTURE_HARD_CAP * sizeof(game::StructureView)
     + (unsigned)game::cfg::UNIT_HARD_CAP * 2u * sizeof(game::EnemyView)
+    + (unsigned)game::cfg::STRUCTURE_HARD_CAP * sizeof(game::EnemyStructureView)
     + (unsigned)game::cfg::MAP_MAX_W * (unsigned)game::cfg::MAP_MAX_H
       * sizeof(game::TileView);
 

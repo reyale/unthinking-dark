@@ -1,6 +1,7 @@
 #include "config.hpp"
 #include "match.hpp"
 #include "profiler.hpp"
+#include "snapshot.hpp"
 #include "wasm_bot.hpp"
 #include <gtest/gtest.h>
 #include <filesystem>
@@ -97,6 +98,11 @@ TEST(Profiler, ScenariosRunFullLengthAndShowWhatTheyClaim) {
   const auto max = profiler::run_scenario(idle, scenario("max_legal"));
   EXPECT_GT(max.my_units, static_cast<uint32_t>(game::cfg::UNIT_HARD_CAP) * 9 / 10);
   EXPECT_EQ(max.visible_enemies, max.my_units) << "one enemy beside every friendly unit";
+  const auto world = scenario("max_legal").build();
+  const auto snap = game::build_snapshot(world, 0, game::cfg::TICK_CAP);
+  EXPECT_EQ(snap.my_structures.size(), size_t{game::cfg::STRUCTURE_HARD_CAP});
+  EXPECT_EQ(snap.visible_enemy_structures.size(), size_t{game::cfg::STRUCTURE_HARD_CAP} - 1)
+      << "every enemy structure but the walled-off Core";
 }
 
 // Acceptance: a deliberately O(n^2) bot shows the army-scaling spike; a bot whose

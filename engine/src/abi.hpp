@@ -60,6 +60,10 @@ struct SnapshotHeader {
   uint32_t my_units_off;
   uint32_t enemies_off;
   uint32_t tiles_off;
+  uint32_t my_structure_count;
+  uint32_t my_structures_off;
+  uint32_t visible_enemy_structure_count;
+  uint32_t enemy_structures_off;
 };
 
 struct UnitView { // my units: full info
@@ -72,9 +76,29 @@ struct UnitView { // my units: full info
   uint16_t _pad2;
 };
 
+// StructureView::producing when a Factory's queue is empty (and always, for other types).
+inline constexpr uint16_t PRODUCING_NONE = 0xFFFF;
+
+struct StructureView { // my structures: full info. All of them, regardless of fog.
+  uint32_t id;         // the Factory id for Produce's target_id
+  uint16_t type;       // StructureType
+  uint16_t producing;  // UnitType in the Factory's queue, or PRODUCING_NONE
+  int32_t x, y;
+  int32_t hp;
+  uint32_t production_ticks_left; // 0 when not producing
+};
+
 struct EnemyView { // visible enemies: observable info only
   uint32_t id;
   uint16_t type;
+  uint16_t _pad;
+  int32_t x, y;
+  int32_t hp;
+};
+
+struct EnemyStructureView { // enemy structures on fog-visible tiles: same rule as EnemyView
+  uint32_t id;               // Attack's target_id
+  uint16_t type;             // StructureType
   uint16_t _pad;
   int32_t x, y;
   int32_t hp;
@@ -105,7 +129,7 @@ static_assert(offsetof(Command, _pad)      == 22,         "Command layout change
 static_assert(std::is_same_v<std::underlying_type_t<CommandKind>, decltype(Command::kind)>,
               "CommandKind underlying type must match Command::kind");
 
-static_assert(sizeof(SnapshotHeader) == 56,                          "SnapshotHeader ABI size changed");
+static_assert(sizeof(SnapshotHeader) == 72,                          "SnapshotHeader ABI size changed");
 static_assert(offsetof(SnapshotHeader, tick)                 ==  0,  "SnapshotHeader layout changed");
 static_assert(offsetof(SnapshotHeader, my_faction_id)        ==  4,  "SnapshotHeader layout changed");
 static_assert(offsetof(SnapshotHeader, energy)               ==  8,  "SnapshotHeader layout changed");
@@ -120,6 +144,10 @@ static_assert(offsetof(SnapshotHeader, visible_tile_count)   == 40,  "SnapshotHe
 static_assert(offsetof(SnapshotHeader, my_units_off)         == 44,  "SnapshotHeader layout changed");
 static_assert(offsetof(SnapshotHeader, enemies_off)          == 48,  "SnapshotHeader layout changed");
 static_assert(offsetof(SnapshotHeader, tiles_off)            == 52,  "SnapshotHeader layout changed");
+static_assert(offsetof(SnapshotHeader, my_structure_count)   == 56,  "SnapshotHeader layout changed");
+static_assert(offsetof(SnapshotHeader, my_structures_off)    == 60,  "SnapshotHeader layout changed");
+static_assert(offsetof(SnapshotHeader, visible_enemy_structure_count) == 64, "SnapshotHeader layout changed");
+static_assert(offsetof(SnapshotHeader, enemy_structures_off) == 68,  "SnapshotHeader layout changed");
 
 static_assert(sizeof(UnitView) == 24,                    "UnitView ABI size changed");
 static_assert(offsetof(UnitView, id)            ==  0,   "UnitView layout changed");
@@ -131,6 +159,15 @@ static_assert(offsetof(UnitView, hp)            == 16,   "UnitView layout change
 static_assert(offsetof(UnitView, current_order) == 20,   "UnitView layout changed");
 static_assert(offsetof(UnitView, _pad2)         == 22,   "UnitView layout changed");
 
+static_assert(sizeof(StructureView) == 24,                             "StructureView ABI size changed");
+static_assert(offsetof(StructureView, id)                    ==  0,   "StructureView layout changed");
+static_assert(offsetof(StructureView, type)                  ==  4,   "StructureView layout changed");
+static_assert(offsetof(StructureView, producing)             ==  6,   "StructureView layout changed");
+static_assert(offsetof(StructureView, x)                     ==  8,   "StructureView layout changed");
+static_assert(offsetof(StructureView, y)                     == 12,   "StructureView layout changed");
+static_assert(offsetof(StructureView, hp)                    == 16,   "StructureView layout changed");
+static_assert(offsetof(StructureView, production_ticks_left) == 20,   "StructureView layout changed");
+
 static_assert(sizeof(EnemyView) == 20,               "EnemyView ABI size changed");
 static_assert(offsetof(EnemyView, id)   ==  0,       "EnemyView layout changed");
 static_assert(offsetof(EnemyView, type) ==  4,       "EnemyView layout changed");
@@ -138,6 +175,14 @@ static_assert(offsetof(EnemyView, _pad) ==  6,       "EnemyView layout changed")
 static_assert(offsetof(EnemyView, x)    ==  8,       "EnemyView layout changed");
 static_assert(offsetof(EnemyView, y)    == 12,       "EnemyView layout changed");
 static_assert(offsetof(EnemyView, hp)   == 16,       "EnemyView layout changed");
+
+static_assert(sizeof(EnemyStructureView) == 20,          "EnemyStructureView ABI size changed");
+static_assert(offsetof(EnemyStructureView, id)   ==  0,  "EnemyStructureView layout changed");
+static_assert(offsetof(EnemyStructureView, type) ==  4,  "EnemyStructureView layout changed");
+static_assert(offsetof(EnemyStructureView, _pad) ==  6,  "EnemyStructureView layout changed");
+static_assert(offsetof(EnemyStructureView, x)    ==  8,  "EnemyStructureView layout changed");
+static_assert(offsetof(EnemyStructureView, y)    == 12,  "EnemyStructureView layout changed");
+static_assert(offsetof(EnemyStructureView, hp)   == 16,  "EnemyStructureView layout changed");
 
 static_assert(sizeof(TileView) == 16,                          "TileView ABI size changed");
 static_assert(offsetof(TileView, x)                 ==  0,    "TileView layout changed");

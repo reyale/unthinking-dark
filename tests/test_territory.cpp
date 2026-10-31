@@ -9,6 +9,7 @@
 #include "tick.hpp"
 #include "wincheck.hpp"
 #include "world.hpp"
+#include <set>
 
 static game::World make_world(int32_t w = 20, int32_t h = 20) {
   game::World world;
@@ -50,6 +51,61 @@ TEST(Territory, TwoOpposingNodesSplitMap) {
                  static_cast<int32_t>(ts.pct_faction[1]);
   if (diff < 0) diff = -diff;
   EXPECT_LE(diff, 10);
+}
+
+TEST(Territory, PctIsShareOfPassableTiles) {
+  // Half the map is asteroid; one claim whose radius covers the whole map holds all of the
+  // passable half. Counting asteroids would report 50%.
+  auto w = make_world(10, 10);
+  for (int32_t y = 0; y < 10; ++y)
+    for (int32_t x = 5; x < 10; ++x) w.map.set_terrain({x, y}, game::Terrain::Asteroid);
+  w.spawn_structure({0}, game::StructureType::ClaimNode, {2, 5});
+  auto ts = game::run_territory(w, 1000);
+  EXPECT_EQ(ts.pct_faction[0], 100u);
+}
+
+// The territory pass only visits tiles within each claim's influence radius. Check it against
+// the definition (every passable tile against every claim) on random layouts.
+TEST(Territory, MatchesBruteForceVoronoi) {
+  game::Rng rng{2024};
+  auto below = [&](int32_t n) {
+    return static_cast<int32_t>(rng.next() % static_cast<uint64_t>(n));
+  };
+  for (int trial = 0; trial < 200; ++trial) {
+    const int32_t W = 8 + below(50), H = 8 + below(50);
+    auto w = make_world(W, H);
+    for (int32_t i = 0; i < W * H / 5; ++i)
+      w.map.set_terrain({below(W), below(H)}, game::Terrain::Asteroid);
+    const int32_t claims = below(12);
+    for (int32_t i = 0; i < claims; ++i) {
+      const game::Vec2 p{below(W), below(H)};
+      if (w.map.passable(p) && w.tile_free(p))
+        w.spawn_structure({static_cast<uint32_t>(below(2))}, game::StructureType::ClaimNode, p);
+    }
+
+    const int64_t r2 = int64_t{game::cfg::CLAIM_INFLUENCE} * game::cfg::CLAIM_INFLUENCE;
+    uint32_t count[2]{0, 0}, total = 0;
+    for (int32_t y = 0; y < H; ++y)
+      for (int32_t x = 0; x < W; ++x) {
+        if (!w.map.passable({x, y})) continue;
+        ++total;
+        int64_t best = INT64_MAX;
+        std::set<uint32_t> nearest;
+        for (const auto& [sid, s] : w.structures) {
+          const int64_t dx = x - s.pos.x, dy = y - s.pos.y, d = dx * dx + dy * dy;
+          if (d < best) nearest.clear();
+          if (d <= best) {
+            best = d;
+            nearest.insert(s.faction.value);
+          }
+        }
+        if (best <= r2 && nearest.size() == 1) ++count[*nearest.begin()];
+      }
+
+    auto ts = game::run_territory(w, 1000);
+    ASSERT_EQ(ts.pct_faction[0], total ? count[0] * 100 / total : 0) << "trial " << trial;
+    ASSERT_EQ(ts.pct_faction[1], total ? count[1] * 100 / total : 0) << "trial " << trial;
+  }
 }
 
 TEST(Territory, EquidistantTileIsNeutral) {
