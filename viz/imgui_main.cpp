@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <map>
@@ -103,6 +104,8 @@ static int structure_facing(const game::Map& map, int32_t x, int32_t y) {
 }
 
 // view: -1 = god (everything), -2 = union of both factions, 0/1 = that faction.
+// Line of sight this frame: what units and structures can be shown. Terrain stays known once
+// seen (tile_explored).
 static bool tile_visible(const game::FrameState& fr, int view, int32_t x, int32_t y) {
   if (view == -1) return true;
   for (const auto& u : fr.units) {
@@ -117,22 +120,31 @@ static bool tile_visible(const game::FrameState& fr, int view, int32_t x, int32_
   return false;
 }
 
+static constexpr float kRememberedDim = 0.45f; // terrain seen before but out of sight now
+
+static ImVec4 terrain_bg(const game::Map& map, int32_t x, int32_t y) {
+  switch (map.tile_at({x, y}).terrain) {
+    case game::Terrain::Asteroid:     return kAsteroid;
+    case game::Terrain::Nebula:       return kNebula;
+    case game::Terrain::ResourceNode: return kResource;
+    default:                          return kOpenBg;
+  }
+}
+
+static bool tile_explored(int view, int frame, int32_t x, int32_t y);
+
 static CellData make_cell(const game::Map& map, const game::FrameState& fr,
-                           const std::vector<uint8_t>& facings,
+                           const std::vector<uint8_t>& facings, int frame,
                            int view, int32_t x, int32_t y) {
   if (!tile_visible(fr, view, x, y)) {
-    CellData fog{kFogBg};
+    // Out of sight: terrain once seen is still known, but nothing on it is shown.
+    CellData fog{tile_explored(view, frame, x, y) ? dim_vec(terrain_bg(map, x, y), kRememberedDim)
+                                                  : kFogBg};
     fog.fogged = true;
     return fog;
   }
 
-  ImVec4 bg;
-  switch (map.tile_at({x, y}).terrain) {
-    case game::Terrain::Asteroid:     bg = kAsteroid; break;
-    case game::Terrain::Nebula:       bg = kNebula;   break;
-    case game::Terrain::ResourceNode: bg = kResource; break;
-    default:                          bg = kOpenBg;   break;
-  }
+  const ImVec4 bg = terrain_bg(map, x, y);
 
   for (const auto& s : fr.structures) {
     if (s.pos.x != x || s.pos.y != y) continue;
@@ -220,6 +232,8 @@ struct App {
   UnitShapeDef      shape_defs[kShapeCount];
   // unit_facing[f][i]: facing of frames[f].units[i], from its last move.
   std::vector<std::vector<uint8_t>> unit_facing;
+  // first_seen[f][y * width + x]: first frame faction f had the tile in sight (kNever if not).
+  std::vector<uint32_t> first_seen[game::MAX_FACTIONS];
   FxState           fx;
   uint32_t          forfeit_total[game::MAX_FACTIONS]{}; // stalled ticks per side, whole replay
   std::string       shapes_path = UD_DEFAULT_SHAPES_PATH;
@@ -280,6 +294,43 @@ static void poll_shape_reload(double now) {
 // Units face the way they last moved or fired; firing wins within a tick because
 // combat runs after movement. Before either, they face the map centre, so freshly
 // built units look toward the action rather than all NE.
+static constexpr uint32_t kNever = UINT32_MAX;
+
+// Same sight rule as tile_visible, accumulated over the replay once at load so any frame can
+// ask "seen yet?" with one comparison, scrubbing backwards included.
+static void compute_first_seen() {
+  const size_t n = static_cast<size_t>(g.map.width) * static_cast<size_t>(g.map.height);
+  for (auto& fs : g.first_seen) fs.assign(n, kNever);
+  auto mark = [&](uint32_t f, int32_t x, int32_t y, uint32_t frame) {
+    if (x < 0 || y < 0 || x >= g.map.width || y >= g.map.height || f >= game::MAX_FACTIONS)
+      return;
+    uint32_t& v = g.first_seen[f][static_cast<size_t>(y) * static_cast<size_t>(g.map.width) +
+                                  static_cast<size_t>(x)];
+    v = std::min(v, frame);
+  };
+  for (uint32_t frame = 0; frame < g.frames.size(); ++frame) {
+    const auto& fr = g.frames[frame];
+    for (const auto& u : fr.units) {
+      const int32_t r = game::stats_for(u.type).sight;
+      for (int32_t dy = -r; dy <= r; ++dy)
+        for (int32_t dx = -(r - std::abs(dy)); dx <= r - std::abs(dy); ++dx)
+          mark(u.faction.value, u.pos.x + dx, u.pos.y + dy, frame);
+    }
+    for (const auto& s : fr.structures) mark(s.faction.value, s.pos.x, s.pos.y, frame);
+  }
+}
+
+static bool tile_explored(int view, int frame, int32_t x, int32_t y) {
+  if (view == -1) return true;
+  const size_t i = static_cast<size_t>(y) * static_cast<size_t>(g.map.width) +
+                   static_cast<size_t>(x);
+  for (int f = 0; f < game::MAX_FACTIONS; ++f) {
+    if (view >= 0 && f != view) continue;
+    if (g.first_seen[f][i] <= static_cast<uint32_t>(frame)) return true;
+  }
+  return false;
+}
+
 static void compute_unit_facings() {
   g.unit_facing.assign(g.frames.size(), {});
   std::map<game::UnitId, std::pair<game::Vec2, uint8_t>> last; // pos, facing
@@ -323,6 +374,7 @@ static void try_load(const char* path) {
     g.map    = map_from_log(log);
     g.frames = game::replay_frames(log);
     compute_unit_facings();
+    compute_first_seen();
     g.fx     = FxState{};
     for (auto& n : g.forfeit_total) n = 0;
     for (const auto& f : g.frames)
@@ -922,7 +974,7 @@ static void draw_grid(const game::FrameState& fr) {
 
   for (int32_t y = 0; y < g.map.height; ++y)
     for (int32_t x = 0; x < g.map.width; ++x) {
-      CellData cd = make_cell(g.map, fr, g.unit_facing[g.cur], g.view, x, y);
+      CellData cd = make_cell(g.map, fr, g.unit_facing[g.cur], g.cur, g.view, x, y);
       tint_zone(cd, x, y);
       draw_tile_cell(dl, tile_ctr(x, y), cw2, ch2, cd, x, y, fr);
     }

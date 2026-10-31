@@ -90,9 +90,12 @@ These are non-negotiable; each one silently breaks replay if violated.
     Resource nodes are embedded in / adjacent to asteroid fields.
   - **Nebulae** — passable, **vision-blocking**. Amplify active-only fog; create ambush
     zones. (LoS interaction precise rules: see Deferred.)
-- **Fog of war:** **active-only.** A faction sees a tile only if currently within a
-  friendly unit's sight radius and not blocked by nebula. No terrain memory in v1 (going
-  blind when you leave is intended). Engine computes visibility and masks the snapshot —
+- **Fog of war:** **active-only for what moves.** A faction sees a tile only if currently
+  within a friendly unit's sight radius and not blocked by nebula. **Terrain, once seen,
+  stays known**: it never changes, so there is nothing to hide again. The snapshot carries
+  only the tiles in sight this tick; a bot keeps what it has seen (its memory persists
+  across ticks), and the viewer draws explored-but-out-of-sight terrain dimmed, with
+  nothing on it. Engine computes visibility and masks the snapshot —
   cheating is structurally impossible because hidden state is never serialized to the bot.
   A faction always knows its **own** units and structures (position, hp, Factory queue)
   regardless of fog. Enemy units and enemy structures appear only while on a tile within

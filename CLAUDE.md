@@ -208,6 +208,8 @@ Compile flags enforcing these: `-ffp-contract=off -fno-fast-math` (in `cmake/Com
 ## Decided Design Questions
 
 - **Line-of-sight:** Manhattan distance ≤ sight_radius only. No terrain blocking.
+- **Terrain memory:** terrain once seen stays known (it is static). Units and structures need
+  current sight. The snapshot still sends only in-sight tiles; bots remember the rest themselves.
 - **Blocked movement:** unit stays put, no retry. Deadlocks are accepted.
 
 ---
