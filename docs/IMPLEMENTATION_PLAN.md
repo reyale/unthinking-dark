@@ -160,7 +160,7 @@ struct StructureView {       // my structures: all of them, regardless of fog (A
   uint16_t producing;        // UnitType in the Factory queue, or PRODUCING_NONE (0xFFFF)
   int32_t x, y; int32_t hp;
   uint32_t production_ticks_left;
-  uint32_t build_ticks_left; // Claim Node under construction; 0 = finished (ABI 12)
+  uint32_t build_ticks_left; // under construction (Factory or claim); 0 = finished
 };
 struct UnitView {            // my units: full info
   uint32_t id; uint16_t type; uint16_t _pad;
@@ -173,7 +173,7 @@ struct EnemyView {           // visible enemies: observable info only
   int32_t x, y; int32_t hp;
 };
 struct EnemyStructureView {  // enemy structures on fog-visible tiles only (ABI 9)
-  uint32_t id; uint16_t type; uint16_t building; // 1 = Claim Node under construction (ABI 12)
+  uint32_t id; uint16_t type; uint16_t building; // 1 = under construction (ABI 12; Factories too from 13)
   int32_t x, y; int32_t hp;
 };
 struct TileView {            // only fog-visible tiles

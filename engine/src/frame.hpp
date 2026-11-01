@@ -33,7 +33,7 @@ struct StructureFrame {
   Vec2 pos;
   int32_t hp;
   int32_t max_hp;
-  int32_t build_ticks_left{0}; // Claim Node under construction; 0 once finished
+  int32_t build_ticks_left{0}; // under construction (Factory or claim); 0 once finished
 };
 
 struct FrameState {

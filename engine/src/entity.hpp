@@ -94,7 +94,7 @@ struct Structure {
   std::optional<UnitType> production_queue{};
   int32_t production_ticks_left{0};
 
-  int32_t build_ticks_left{0}; // Claim Node under construction; 0 once finished
+  int32_t build_ticks_left{0}; // Factory or Claim Node under construction; 0 once finished
 
   bool alive() const { return hp > 0; }
   bool complete() const { return build_ticks_left == 0; }

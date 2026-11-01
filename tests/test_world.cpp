@@ -354,7 +354,8 @@ TEST(Economy, ProduceInsufficientResourcesIgnored) {
 TEST(Economy, BuildFactorySpawnsStructure) {
   auto w = make_world();
   auto& builder = w.spawn_unit({0}, game::UnitType::Drone, {3, 3});
-  w.res({0}).alloy = 50; // FACTORY_COST_A
+  w.res({0}).energy = game::cfg::FACTORY_COST_E;
+  w.res({0}).alloy = game::cfg::FACTORY_COST_A;
   game::Command c = make_cmd(builder.id.value, game::CommandKind::Build);
   c.ax  = 4; c.ay = 3;
   c.aux = static_cast<uint16_t>(game::StructureType::Factory);
@@ -362,6 +363,7 @@ TEST(Economy, BuildFactorySpawnsStructure) {
   cmds.emplace(builder.id, c);
   game::ValidatedCommands empty;
   game::run_economy(w, cmds, empty);
+  EXPECT_EQ(w.res({0}).energy, 0);
   EXPECT_EQ(w.res({0}).alloy, 0);
   bool found = false;
   for (const auto& [sid, s] : w.structures)
@@ -404,6 +406,13 @@ static int count_structures(const game::World& w, game::StructureType t) {
   return n;
 }
 
+// Enough for any placement, so only the rule under test can refuse it.
+static constexpr int32_t kFunds = 1000;
+static void fund(game::World& w, game::FactionId f) {
+  w.res(f).energy = kFunds;
+  w.res(f).alloy = kFunds;
+}
+
 struct PlaceCase {
   game::CommandKind   kind;
   game::StructureType made;
@@ -419,12 +428,13 @@ TEST(Economy, PlacementOnUnitTileRejectedAndFree) {
     auto w = make_world();
     game::UnitId builder = w.spawn_unit({0}, game::UnitType::Drone, {3, 3}).id;
     w.spawn_unit({1}, game::UnitType::Interceptor, {4, 3}); // squatter, any faction
-    w.res({0}).alloy = 100;
+    fund(w, {0});
     game::ValidatedCommands cmds, empty;
     cmds.emplace(builder, place_cmd(builder, pc.kind, {4, 3}));
     game::run_economy(w, cmds, empty);
     EXPECT_EQ(count_structures(w, pc.made), 0);
-    EXPECT_EQ(w.res({0}).alloy, 100) << "a refused placement costs nothing";
+    EXPECT_EQ(w.res({0}).alloy, kFunds) << "a refused placement costs nothing";
+    EXPECT_EQ(w.res({0}).energy, kFunds);
   }
 }
 
@@ -432,12 +442,12 @@ TEST(Economy, PlacementOnBuilderOwnTileRejected) {
   for (const auto& pc : kPlaceCases) {
     auto w = make_world();
     game::UnitId builder = w.spawn_unit({0}, game::UnitType::Drone, {3, 3}).id;
-    w.res({0}).alloy = 100;
+    fund(w, {0});
     game::ValidatedCommands cmds, empty;
     cmds.emplace(builder, place_cmd(builder, pc.kind, {3, 3}));
     game::run_economy(w, cmds, empty);
     EXPECT_EQ(count_structures(w, pc.made), 0);
-    EXPECT_EQ(w.res({0}).alloy, 100);
+    EXPECT_EQ(w.res({0}).alloy, kFunds);
   }
 }
 
@@ -446,12 +456,12 @@ TEST(Economy, PlacementOnStructureTileRejectedAndLookupIntact) {
     auto w = make_world();
     game::StructureId core = w.spawn_structure({1}, game::StructureType::CommandCore, {4, 3}).id;
     game::UnitId builder = w.spawn_unit({0}, game::UnitType::Drone, {3, 3}).id;
-    w.res({0}).alloy = 100;
+    fund(w, {0});
     game::ValidatedCommands cmds, empty;
     cmds.emplace(builder, place_cmd(builder, pc.kind, {4, 3}));
     game::run_economy(w, cmds, empty);
     EXPECT_EQ(w.structures.size(), 1u);
-    EXPECT_EQ(w.res({0}).alloy, 100);
+    EXPECT_EQ(w.res({0}).alloy, kFunds);
     ASSERT_EQ(w.structure_by_pos.count({4, 3}), 1u);
     EXPECT_EQ(w.structure_by_pos.at({4, 3}), core);
   }
@@ -462,12 +472,12 @@ TEST(Economy, PlacementOnAsteroidRejected) {
     auto w = make_world();
     w.map.set_terrain({4, 3}, game::Terrain::Asteroid, 0);
     game::UnitId builder = w.spawn_unit({0}, game::UnitType::Drone, {3, 3}).id;
-    w.res({0}).alloy = 100;
+    fund(w, {0});
     game::ValidatedCommands cmds, empty;
     cmds.emplace(builder, place_cmd(builder, pc.kind, {4, 3}));
     game::run_economy(w, cmds, empty);
     EXPECT_EQ(count_structures(w, pc.made), 0);
-    EXPECT_EQ(w.res({0}).alloy, 100);
+    EXPECT_EQ(w.res({0}).alloy, kFunds);
   }
 }
 
@@ -476,13 +486,13 @@ TEST(Economy, TwoPlacementsOnOneTileLowerIdWins) {
     auto w = make_world();
     game::UnitId first  = w.spawn_unit({0}, game::UnitType::Drone, {3, 3}).id;
     game::UnitId second = w.spawn_unit({0}, game::UnitType::Drone, {5, 3}).id;
-    w.res({0}).alloy = 100;
+    fund(w, {0});
     game::ValidatedCommands cmds, empty;
     cmds.emplace(first,  place_cmd(first,  pc.kind, {4, 3}));
     cmds.emplace(second, place_cmd(second, pc.kind, {4, 3}));
     game::run_economy(w, cmds, empty);
     EXPECT_EQ(count_structures(w, pc.made), 1);
-    EXPECT_EQ(w.res({0}).alloy, 100 - pc.alloy_cost) << "only the winner pays";
+    EXPECT_EQ(w.res({0}).alloy, kFunds - pc.alloy_cost) << "only the winner pays";
   }
 }
 
@@ -490,16 +500,16 @@ TEST(Economy, BuildAcrossFactionsSameTileOnlyOneStands) {
   auto w = make_world();
   game::UnitId a = w.spawn_unit({0}, game::UnitType::Drone, {3, 3}).id;
   game::UnitId b = w.spawn_unit({1}, game::UnitType::Drone, {5, 3}).id;
-  w.res({0}).alloy = 100;
-  w.res({1}).alloy = 100;
+  fund(w, {0});
+  fund(w, {1});
   game::ValidatedCommands cmds_a, cmds_b;
   cmds_a.emplace(a, place_cmd(a, game::CommandKind::DeployClaim, {4, 3}));
   cmds_b.emplace(b, place_cmd(b, game::CommandKind::DeployClaim, {4, 3}));
   game::run_economy(w, cmds_a, cmds_b);
   ASSERT_EQ(w.structures.size(), 1u);
   EXPECT_EQ(w.structures.begin()->second.faction.value, 0u) << "lower unit id resolves first";
-  EXPECT_EQ(w.res({0}).alloy, 100 - game::cfg::CLAIM_COST_A);
-  EXPECT_EQ(w.res({1}).alloy, 100);
+  EXPECT_EQ(w.res({0}).alloy, kFunds - game::cfg::CLAIM_COST_A);
+  EXPECT_EQ(w.res({1}).alloy, kFunds);
 }
 
 // Free-tile check happens after movement, inside the same tick.
@@ -512,7 +522,7 @@ TEST(Economy, BuildOnTileVacatedThisTickSucceeds) {
   auto w = make_world();
   game::UnitId mover   = w.spawn_unit({0}, game::UnitType::Frigate, {4, 3}).id;
   game::UnitId builder = w.spawn_unit({0}, game::UnitType::Drone, {3, 3}).id;
-  w.res({0}).alloy = 100;
+  fund(w, {0});
   game::Command mv = make_cmd(mover.value, game::CommandKind::Move);
   mv.ax = 4; mv.ay = 6;
   tick_raw(w, {mv, place_cmd(builder, game::CommandKind::Build, {4, 3})});
@@ -524,13 +534,13 @@ TEST(Economy, BuildOnTileEnteredThisTickFails) {
   auto w = make_world();
   game::UnitId mover   = w.spawn_unit({0}, game::UnitType::Frigate, {4, 4}).id;
   game::UnitId builder = w.spawn_unit({0}, game::UnitType::Drone, {3, 3}).id;
-  w.res({0}).alloy = 100;
+  fund(w, {0});
   game::Command mv = make_cmd(mover.value, game::CommandKind::Move);
   mv.ax = 4; mv.ay = 3;
   tick_raw(w, {mv, place_cmd(builder, game::CommandKind::Build, {4, 3})});
   EXPECT_EQ(w.find_unit(mover)->pos, (game::Vec2{4, 3}));
   EXPECT_EQ(count_structures(w, game::StructureType::Factory), 0);
-  EXPECT_EQ(w.res({0}).alloy, 100);
+  EXPECT_EQ(w.res({0}).alloy, kFunds);
 }
 
 TEST(Economy, FactoryWithoutQueueDoesNothing) {
@@ -896,7 +906,7 @@ TEST(Economy, StructureCapRefusesBuildAndClaim) {
     auto w = make_big_world();
     fill_structures(w, {0}, game::cfg::STRUCTURE_HARD_CAP);
     auto& builder = w.spawn_unit({0}, game::UnitType::Drone, {3, 3});
-    w.res({0}).alloy = 1000;
+    fund(w, {0}); // enough for either, so only the cap refuses
     game::Command c = make_cmd(builder.id.value, kind);
     c.ax = 4; c.ay = 3;
     c.aux = static_cast<uint16_t>(game::StructureType::Factory);
@@ -904,7 +914,8 @@ TEST(Economy, StructureCapRefusesBuildAndClaim) {
     cmds.emplace(builder.id, c);
     game::run_economy(w, cmds, empty);
     EXPECT_EQ(structures_of(w, {0}), size_t{game::cfg::STRUCTURE_HARD_CAP});
-    EXPECT_EQ(w.res({0}).alloy, 1000) << "a refused placement costs nothing";
+    EXPECT_EQ(w.res({0}).alloy, kFunds) << "a refused placement costs nothing";
+    EXPECT_EQ(w.res({0}).energy, kFunds);
   }
 }
 
@@ -1211,11 +1222,60 @@ TEST(Economy, QueuedDroneCountsTowardTheDroneCap) {
   EXPECT_FALSE(core2.production_queue.has_value());
 }
 
+// Builds a Factory next to a fresh Drone; true if it went up.
+static bool build_factory(game::World& w, game::Vec2 drone_at) {
+  auto& d = w.spawn_unit({0}, game::UnitType::Drone, drone_at);
+  fund(w, {0});
+  const size_t before = w.structures.size();
+  game::ValidatedCommands cmds, empty;
+  cmds.emplace(d.id, place_cmd(d.id, game::CommandKind::Build, drone_at + game::Vec2{1, 0}));
+  game::run_economy(w, cmds, empty);
+  return w.structures.size() > before;
+}
+
+TEST(Economy, FactoryCapIsHalfTheClaimsButAtLeastOne) {
+  auto w = make_big_world();
+  EXPECT_TRUE(build_factory(w, {1, 1})); // no claims: still one
+  EXPECT_FALSE(build_factory(w, {1, 3}));
+  for (int32_t i = 0; i < 3; ++i)
+    w.spawn_structure({0}, game::StructureType::ClaimNode, {30 + i, 30});
+  EXPECT_FALSE(build_factory(w, {1, 5})); // 3 claims / 2 = 1
+  w.spawn_structure({0}, game::StructureType::ClaimNode, {33, 30});
+  EXPECT_TRUE(build_factory(w, {1, 7})); // 4 claims: 2
+  EXPECT_FALSE(build_factory(w, {1, 9}));
+}
+
+TEST(Economy, FactoryCapCountsOnlyOwnFinishedClaims) {
+  auto w = make_big_world();
+  for (int32_t i = 0; i < 4; ++i) {
+    w.spawn_structure({1}, game::StructureType::ClaimNode, {30 + i, 30});
+    w.spawn_structure({0}, game::StructureType::ClaimNode, {30 + i, 32}).build_ticks_left = 5;
+  }
+  EXPECT_TRUE(build_factory(w, {1, 1}));
+  EXPECT_FALSE(build_factory(w, {1, 3})) << "enemy and unfinished claims add nothing";
+}
+
+TEST(Economy, LosingClaimsKeepsFactoriesButBlocksMore) {
+  auto w = make_big_world();
+  std::vector<game::StructureId> claims;
+  for (int32_t i = 0; i < 4; ++i)
+    claims.push_back(w.spawn_structure({0}, game::StructureType::ClaimNode, {30 + i, 30}).id);
+  ASSERT_TRUE(build_factory(w, {1, 1}));
+  ASSERT_TRUE(build_factory(w, {1, 3}));
+  for (auto id : claims) w.find_structure(id)->hp = 0;
+  w.purge_dead();
+  int32_t factories = 0;
+  for (const auto& [sid, s] : w.structures) factories += s.type == game::StructureType::Factory;
+  EXPECT_EQ(factories, 2);
+  EXPECT_FALSE(build_factory(w, {1, 5}));
+}
+
 TEST(Economy, BuildRangeIsOne) {
   for (auto [at, ok] : std::vector<std::pair<game::Vec2, bool>>{
            {{4, 3}, true}, {{3, 4}, true}, {{5, 3}, false}, {{4, 4}, false}}) {
     auto w = make_world();
     auto& d = w.spawn_unit({0}, game::UnitType::Drone, {3, 3});
+    w.res({0}).energy = game::cfg::FACTORY_COST_E;
     w.res({0}).alloy = game::cfg::FACTORY_COST_A;
     game::Command c = make_cmd(d.id.value, game::CommandKind::Build);
     c.ax = at.x;
@@ -1264,8 +1324,8 @@ TEST(Claim, DeployStartsConstructionAndTheDeployTickCounts) {
   auto& d = w.spawn_unit({0}, game::UnitType::Drone, {3, 3});
   auto& c = deploy_claim(w, d, {4, 3});
   EXPECT_FALSE(c.complete());
-  EXPECT_EQ(c.build_ticks_left, game::cfg::CLAIM_BUILD_TICKS - 1);
-  EXPECT_GT(c.hp, game::cfg::CLAIM_BUILD_START_HP);
+  EXPECT_EQ(c.build_ticks_left, game::cfg::BUILD_TICKS - 1);
+  EXPECT_GT(c.hp, game::cfg::BUILD_START_HP);
   EXPECT_LT(c.hp, game::cfg::CLAIM_HP_BASE);
 }
 
@@ -1273,7 +1333,7 @@ TEST(Claim, FinishesAtFullHpAfterBuildTicks) {
   auto w = make_world();
   auto& d = w.spawn_unit({0}, game::UnitType::Drone, {3, 3});
   auto& c = deploy_claim(w, d, {5, 3}); // distance 2: the edge of CLAIM_DEPLOY_RANGE
-  economy_ticks(w, game::cfg::CLAIM_BUILD_TICKS - 2);
+  economy_ticks(w, game::cfg::BUILD_TICKS - 2);
   EXPECT_EQ(c.build_ticks_left, 1);
   economy_ticks(w, 1);
   EXPECT_TRUE(c.complete());
@@ -1397,4 +1457,47 @@ TEST(Nebula, MoveAttackDoesNotHaltForAHiddenEnemy) {
   EXPECT_EQ(f.pos.x, 1); // the Drone is at distance 4 from (1,1) but unseen: keeps going
   game::run_movement(w, move_cmd(f.id, 3, 1, game::CommandKind::MoveAttack), empty);
   EXPECT_EQ(f.pos.x, 2);
+}
+
+TEST(Construction, FactoriesAreBuiltTheSameWayWithinBuildRange) {
+  auto w = make_world();
+  auto& d = w.spawn_unit({0}, game::UnitType::Drone, {3, 3});
+  fund(w, {0});
+  game::ValidatedCommands cmds, empty;
+  cmds.emplace(d.id, place_cmd(d.id, game::CommandKind::Build, {4, 3}));
+  game::run_economy(w, cmds, empty);
+  auto& f = *w.find_structure(w.structure_by_pos.at({4, 3}));
+  EXPECT_FALSE(f.complete());
+  EXPECT_EQ(f.build_ticks_left, game::cfg::BUILD_TICKS - 1);
+
+  d.pos = {2, 3}; // distance 2: in range for a claim, not for a Factory
+  economy_ticks(w, 3);
+  EXPECT_EQ(f.build_ticks_left, game::cfg::BUILD_TICKS - 1);
+
+  d.pos = {3, 3};
+  economy_ticks(w, game::cfg::BUILD_TICKS - 1);
+  EXPECT_TRUE(f.complete());
+  EXPECT_EQ(f.hp, game::cfg::FACTORY_HP);
+}
+
+TEST(Construction, UnfinishedFactoryCannotProduce) {
+  auto w = make_world();
+  auto& f = w.spawn_structure({0}, game::StructureType::Factory, {5, 5});
+  f.build_ticks_left = 3;
+  fund(w, {0});
+  game::ValidatedCommands cmds, empty;
+  cmds.emplace(f.id, produce_cmd(f.id.value, game::UnitType::Interceptor));
+  game::run_economy(w, cmds, empty);
+  EXPECT_FALSE(f.production_queue.has_value());
+  EXPECT_EQ(w.res({0}).energy, kFunds) << "refused at no cost";
+  f.build_ticks_left = 0;
+  game::run_economy(w, cmds, empty);
+  EXPECT_TRUE(f.production_queue.has_value());
+}
+
+TEST(Construction, UnfinishedFactoryCountsTowardTheFactoryCap) {
+  auto w = make_big_world();
+  ASSERT_TRUE(build_factory(w, {1, 1}));
+  EXPECT_FALSE(w.structures.begin()->second.complete());
+  EXPECT_FALSE(build_factory(w, {1, 3}));
 }

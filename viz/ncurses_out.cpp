@@ -155,7 +155,7 @@ void draw_ncurses_frame(const RenderFrame& rf) {
   mvprintw(leg_row, 0,
     "[n/SPC] next  [p] prev  [g] god  [0] F0 fog  [1] F1 fog  [q] quit");
   mvprintw(leg_row + 1, 0,
-    "d=drone D=carrying i=interceptor f=frigate a=artillery  C=core T=factory N=claim n=building");
+    "d=drone D=carrying i=interceptor f=frigate a=artillery  C=core T=factory N=claim t/n=building");
   attroff(COLOR_PAIR(CP_HUD));
 
   refresh();

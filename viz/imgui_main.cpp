@@ -73,7 +73,7 @@ static constexpr ImVec4 kAsteroid = {0.19f, 0.17f, 0.15f, 1.0f}; // dust under t
 static constexpr ImVec4 kNebula   = {0.17f, 0.13f, 0.26f, 1.0f}; // ground under the gas
 static constexpr ImVec4 kResource = {0.24f, 0.20f, 0.14f, 1.0f}; // ground under the crystals
 static constexpr ImVec4 kCargo    = {1.0f, 0.72f, 0.18f, 1.0f}; // Drone hold bar
-static constexpr float  kGhostAlpha = 0.45f; // a Claim Node still under construction
+static constexpr float  kGhostAlpha = 0.45f; // a structure still under construction
 
 static ImU32  u32(const ImVec4& c) { return ImGui::ColorConvertFloat4ToU32(c); }
 static ImVec4 dim_vec(ImVec4 c, float f) { return {c.x*f, c.y*f, c.z*f, c.w}; }
@@ -100,7 +100,7 @@ struct CellData {
   float    rock{0.0f}; // asteroid brightness to draw at; 0 = no asteroid
   float    cargo{0.0f}; // Drone hold fill, 0..1
   float    crystal{0.0f}; // resource-node brightness to draw at; 0 = no node
-  float    built{1.0f};   // Claim Node construction progress, 0..1; below 1 it draws as a ghost
+  float    built{1.0f};   // construction progress, 0..1; below 1 it draws as a ghost
   float    gas{0.0f};     // nebula brightness to draw at; 0 = no nebula
 };
 
@@ -168,7 +168,7 @@ static CellData make_cell(const game::Map& map, const game::FrameState& fr,
     CellData cd{bg, g, false, game::UnitType::Drone, shape_index(s.type), fg, s.hp, s.max_hp,
                 structure_facing(map, x, y), s.id.value, true};
     if (s.build_ticks_left > 0)
-      cd.built = 1.0f - static_cast<float>(s.build_ticks_left) / game::cfg::CLAIM_BUILD_TICKS;
+      cd.built = 1.0f - static_cast<float>(s.build_ticks_left) / game::cfg::BUILD_TICKS;
     return cd;
   }
 
@@ -1373,8 +1373,8 @@ static void draw_sel_panel(const ImGuiIO& io) {
       ImGui::Text("Pos  %d, %d", sel->pos.x, sel->pos.y);
       if (sel->build_ticks_left > 0)
         ImGui::TextColored({0.9f, 0.85f, 0.4f, 1.0f}, "Building  %d/%d  (needs a Drone within %d)",
-                           game::cfg::CLAIM_BUILD_TICKS - sel->build_ticks_left,
-                           game::cfg::CLAIM_BUILD_TICKS, game::cfg::CLAIM_DEPLOY_RANGE);
+                           game::cfg::BUILD_TICKS - sel->build_ticks_left,
+                           game::cfg::BUILD_TICKS, game::placement_range(sel->type));
     }
   } else {
     const game::Tile& tile = g.map.tile_at(g.sel_tile);

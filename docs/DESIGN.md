@@ -215,21 +215,23 @@ for step in 1..=N:
   Drone between a node and a drop-off banks every tick. A Drone that dies loses its cargo.
 - Spend resolves in deterministic id order: builds, production, claim deployment; costs
   deducted. Insufficient resources → action fails (logged). Producing a Drone also fails at
-  the **Drone cap** (§6).
+  the **Drone cap**, and building a Factory at the **Factory cap** (§6).
 - Only Drones Build or DeployClaim (anything else is rejected at validation). Both need a
   free target tile at this point (after movement): passable, no structure, no living unit.
   The tile must also be near the Drone (Manhattan): within `BUILD_RANGE` (v1: 1) for a
   Factory, `CLAIM_DEPLOY_RANGE` (v1: 2) for a Claim Node. Otherwise the action fails and
   nothing is deducted. (There is no Gather command: harvesting is automatic. Its kind value
   is reserved and always rejected.)
-- **Claim construction:** a deployed Claim Node starts at `CLAIM_BUILD_START_HP` and needs
-  `CLAIM_BUILD_TICKS` (v1: 20) ticks of work. It gets a tick of work only while one of its
-  faction's Drones is within `CLAIM_DEPLOY_RANGE`; with none there it waits, still
-  standing and attackable. A Drone works on one claim at a time (claims take nearby Drones
-  in id order, lowest structure id first); the deploy tick counts. Its hp rises with each
-  tick of work, reaching `CLAIM_HP_BASE` (then the fragility cap) when done. Until finished
-  it holds **no territory**, is **no drop-off** and adds **no Drone-cap slot**. Bots see
-  `build_ticks_left` on their own claims and a `building` flag on enemy ones.
+- **Construction** (Factories and Claim Nodes alike): a placed structure starts at
+  `BUILD_START_HP` and needs `BUILD_TICKS` (v1: 20) ticks of work. It gets a tick of work
+  only while one of its faction's Drones is within its placement range (`BUILD_RANGE` for a
+  Factory, `CLAIM_DEPLOY_RANGE` for a claim); with none there it waits, still standing and
+  attackable. A Drone works on one structure at a time (they take nearby Drones in id
+  order, lowest structure id first); the placing tick counts. Its hp rises with each tick
+  of work to the type's full hp (a claim's then meets the fragility cap). Until finished a
+  claim holds **no territory**, is **no drop-off**, adds **no Drone or Factory slot** and
+  **doesn't shoot**; a Factory **can't produce** (it does count toward the Factory cap).
+  Bots see `build_ticks_left` on their own structures and a `building` flag on enemy ones.
 
 ### Phase 5 — Spawn / Upkeep
 - Newly produced ships appear on the first free tile adjacent to their Factory, checked
@@ -271,11 +273,11 @@ positioning beat raw numbers.
 | Structure | hp | role |
 |-----------|----|------|
 | **Command Core** (base) | 600 | destroyed = instant loss; produces Drones (only); stationary |
-| **Factory** | 150 | produces combat ships only (Interceptor/Frigate/Artillery/Battleship); stationary; built by a Drone within `BUILD_RANGE` (v1: 1) |
+| **Factory** | 150 | produces combat ships only (Interceptor/Frigate/Artillery/Battleship); stationary; built by a Drone within `BUILD_RANGE` (v1: 1) over `BUILD_TICKS` while it stays by (§5 Phase 4); costs `FACTORY_COST_E`/`FACTORY_COST_A` (v1: 50 Energy + 100 Alloy) |
 
 Every structure sees `STRUCTURE_SIGHT` (v1: 2, Manhattan) around itself, so a base without
 units nearby is not blind.
-| **Claim Node** | scales high→~1 over match | Voronoi territory anchor; **shoots, very weakly** once finished: `CLAIM_ATTACK_DMG` (v1: 1) per tick at the nearest enemy unit it can see within `CLAIM_ATTACK_RANGE` (v1: 2), enough to see off a lone scout at full claim hp but not two, and out-ranged by Frigates and Artillery; deployed by a Drone onto a tile within `CLAIM_DEPLOY_RANGE` (v1: 2) of itself, so Drones must travel to stake ground, and built over `CLAIM_BUILD_TICKS` while a Drone stays by it (§5 Phase 4); cracked by firepower (esp. Artillery splash) |
+| **Claim Node** | scales high→~1 over match | Voronoi territory anchor; **shoots, very weakly** once finished: `CLAIM_ATTACK_DMG` (v1: 1) per tick at the nearest enemy unit it can see within `CLAIM_ATTACK_RANGE` (v1: 2), enough to see off a lone scout at full claim hp but not two, and out-ranged by Frigates and Artillery; deployed by a Drone onto a tile within `CLAIM_DEPLOY_RANGE` (v1: 2) of itself, so Drones must travel to stake ground, and built over `BUILD_TICKS` while a Drone stays by it (§5 Phase 4); cracked by firepower (esp. Artillery splash) |
 
 **Resources (2 types, v1):**
 - **Energy** — gates combat ships (spent at Factory).
@@ -289,6 +291,10 @@ units nearby is not blind.
 (v1: 1) per living Command Core, so a side starts with room for one Drone and grows its
 economy by expanding. Drones queued in the Core count. Produce at the cap is refused at no
 cost; losing a claim never kills Drones, it only blocks producing more until back under.
+
+**Factory cap:** max(finished Claim Nodes / `CLAIMS_PER_FACTORY` (v1: 2), `MIN_FACTORY_CAP`
+(v1: 1)), rounded down: one Factory with 0–3 claims, two with 4–5, and so on. Build at the cap
+is refused at no cost; losing claims never destroys Factories, it only blocks building more.
 
 **Unit cap:** economy-gated soft cap + a hard ceiling (`UNIT_HARD_CAP`, v1 256 per side) purely
 to bound fuel/memory worst-case and keep rendering legible. A ship counts from the moment it is

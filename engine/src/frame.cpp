@@ -10,15 +10,6 @@ namespace game {
 
 namespace {
 
-int32_t structure_max_hp(StructureType t) {
-  switch (t) {
-    case StructureType::CommandCore: return cfg::CMD_CORE_HP;
-    case StructureType::Factory:     return cfg::FACTORY_HP;
-    case StructureType::ClaimNode:   return cfg::CLAIM_HP_BASE;
-  }
-  return 0;
-}
-
 FrameState capture(const World& world, std::optional<MatchResult> result) {
   FrameState f;
   f.tick = world.tick;

@@ -98,7 +98,8 @@ RenderFrame build_render_frame(const game::FrameState& frame, const game::Map& m
     size_t idx = static_cast<size_t>(sf.pos.y * W + sf.pos.x);
     if (!rf.cells[idx].visible)
       continue;
-    rf.cells[idx].glyph = sf.build_ticks_left > 0 ? 'n' : structure_glyph(sf.type);
+    const char g = structure_glyph(sf.type);
+    rf.cells[idx].glyph = sf.build_ticks_left > 0 ? static_cast<char>(g - 'A' + 'a') : g;
     rf.cells[idx].color = faction_color(sf.faction.value);
   }
   for (const auto& uf : frame.units) {

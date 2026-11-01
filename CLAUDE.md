@@ -10,7 +10,7 @@ Build order and acceptance criteria: `docs/IMPLEMENTATION_PLAN.md`.
 
 ## Current State
 
-**Phases 1–5 complete. 290/290 tests passing.**
+**Phases 1–5 complete. 296/296 tests passing.**
 
 | Phase | Status | Notes |
 |-------|--------|-------|
@@ -25,10 +25,11 @@ Build order and acceptance criteria: `docs/IMPLEMENTATION_PLAN.md`.
 Additional work:
 - **Draws are allowed** (`WinReason::Draw`): both Command Cores die the same tick, or the tick cap is
   reached with territory difference ≤ `cfg::DRAW_TERRITORY_MARGIN` (5%). Don't "fix" them away.
-- `ABI_VERSION` is 12 (8 added `StructureView`: all own structures; 9 added `EnemyStructureView`:
+- `ABI_VERSION` is 13 (8 added `StructureView`: all own structures; 9 added `EnemyStructureView`:
   enemy structures in sight; 10 renamed `Command::unit_id` → `entity_id`: Produce is issued by the
   Core (Drones) or a Factory (ships) itself; 11 added `UnitView::cargo_energy/cargo_alloy`; 12 added `StructureView::build_ticks_left` and
-  `EnemyStructureView::building` for claim construction). Bumping it invalidates all existing replay files and every compiled bot.
+  `EnemyStructureView::building` for claim construction; 13: Factories are built the same way,
+  so those fields now apply to them too). Bumping it invalidates all existing replay files and every compiled bot.
 - Hard caps `UNIT_HARD_CAP` (256, queued ships count) and `STRUCTURE_HARD_CAP` (128) are enforced in
   `economy.cpp`: they bound the snapshot buffer, and the runner clamps to them when copying in.
 
@@ -81,7 +82,7 @@ For LSP support: `ln -s build/compile_commands.json compile_commands.json`
 | `command.hpp/.cpp` | `ValidatedCommands` and `validate_commands()`. |
 | `movement.hpp/.cpp` | Stepped simultaneous movement. Chains advance (a unit may enter a tile vacated on the same step); swaps and other closed loops are blocked whole. |
 | `combat.hpp/.cpp` | Sub-phase A: first-strike (Frigates). Sub-phase B: simultaneous; splash has friendly fire; finished Claim Nodes fire here too. |
-| `economy.hpp/.cpp` | Harvest into Drone cargo, deposit at own Core/Claim Node, spend, production. Drone cap = 1 per claim + 1 per Core. |
+| `economy.hpp/.cpp` | Harvest into Drone cargo, deposit at own Core/Claim Node, spend, production. Drone cap = 1 per claim + 1 per Core; Factory cap = max(claims / 2, 1). |
 | `territory.hpp/.cpp` | `territory_owners()` (per-tile owner grid, the one definition of territory) and `territory_pct()`; Voronoi territory as a share of **passable** tiles (squared-Euclidean nearest Claim Node, cross-faction ties → neutral, `CLAIM_INFLUENCE` radius; each claim stamps only its radius), Claim Node hp fragility, `win_threshold()`. |
 | `wincheck.hpp/.cpp` | Fixed-order checks: base destruction → territory threshold → tick cap. |
 | `statehash.hpp/.cpp` | Rolling xxh3 via xxhash (`XXH_INLINE_ALL`). |
@@ -214,9 +215,11 @@ Compile flags enforcing these: `-ffp-contract=off -fno-fast-math` (in `cmake/Com
 - **Line-of-sight:** Manhattan distance ≤ sight_radius, no rays. Nebulae hide what is inside:
   a nebula tile (and its occupant) is seen only from within `NEBULA_SIGHT` (1), and can't be
   targeted by a side that doesn't see it. Asteroids don't block sight.
-- **Claim construction:** a deployed claim needs `CLAIM_BUILD_TICKS` ticks with an own Drone
-  within `CLAIM_DEPLOY_RANGE` (it waits, attackable, otherwise). Unfinished: no territory, no
-  drop-off, no Drone slot.
+- **Construction:** every Drone-placed structure (Factory, Claim Node) needs `BUILD_TICKS`
+  ticks with an own Drone within its placement range (`placement_range()`: 1 for a Factory,
+  2 for a claim); it waits, attackable, otherwise. Unfinished claim: no territory, no
+  drop-off, no Drone/Factory slot, doesn't shoot. Unfinished Factory: can't produce, but
+  counts toward the Factory cap.
 - **Claims shoot, very weakly:** a finished claim deals `CLAIM_ATTACK_DMG` (1) per tick to the
   nearest visible enemy unit within `CLAIM_ATTACK_RANGE` (2). Sized to beat one Interceptor at
   full claim hp but lose to two (`Combat.FullStrengthClaimSeesOffALoneScoutButNotTwo`).
@@ -225,7 +228,8 @@ Compile flags enforcing these: `-ffp-contract=off -fno-fast-math` (in `cmake/Com
 - **Terrain memory:** terrain once seen stays known (it is static). Units and structures need
   current sight. The snapshot still sends only in-sight tiles; bots remember the rest themselves.
 - **Economy:** Drones carry what they harvest and bank it at their own Core or a Claim Node.
-  Drone cap is 1 per Claim Node + 1 per Core. Nodes never deplete (decided, not an omission).
+  Drone cap is 1 per Claim Node + 1 per Core. Factory cap is max(finished claims / 2, 1).
+  Factories cost 50 Energy + 100 Alloy. Nodes never deplete (decided, not an omission).
 - **Blocked movement:** a unit may follow into a tile vacated on the same step, so columns move
   together. Swaps and any closed loop of movers are blocked, with everyone queued behind them:
   that is bad bot behavior and is meant to cost the bot. A blocked unit stays put for the step.

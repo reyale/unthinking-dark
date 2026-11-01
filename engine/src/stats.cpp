@@ -29,4 +29,17 @@ const UnitStats& stats_for(UnitType t) {
   return UNIT_STATS[static_cast<uint8_t>(t)];
 }
 
+int32_t structure_max_hp(StructureType t) {
+  switch (t) {
+  case StructureType::CommandCore: return cfg::CMD_CORE_HP;
+  case StructureType::Factory:     return cfg::FACTORY_HP;
+  case StructureType::ClaimNode:   return cfg::CLAIM_HP_BASE;
+  }
+  return 0;
+}
+
+int32_t placement_range(StructureType t) {
+  return t == StructureType::ClaimNode ? cfg::CLAIM_DEPLOY_RANGE : cfg::BUILD_RANGE;
+}
+
 } // namespace game

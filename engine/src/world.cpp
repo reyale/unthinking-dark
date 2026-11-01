@@ -24,17 +24,7 @@ Structure& World::spawn_structure(FactionId faction, StructureType type, Vec2 po
   s.faction = faction;
   s.type = type;
   s.pos = pos;
-  switch (type) {
-  case StructureType::CommandCore:
-    s.hp = cfg::CMD_CORE_HP;
-    break;
-  case StructureType::Factory:
-    s.hp = cfg::FACTORY_HP;
-    break;
-  case StructureType::ClaimNode:
-    s.hp = cfg::CLAIM_HP_BASE;
-    break;
-  }
+  s.hp = structure_max_hp(type);
   auto [it, ok] = structures.emplace(id, s);
   (void)ok;
   structure_by_pos.emplace(pos, id);

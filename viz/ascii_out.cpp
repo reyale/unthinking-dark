@@ -80,9 +80,9 @@ void print_ascii_frame(const RenderFrame& rf) {
 
   printf("[n/space] next  [p] prev  [u] union  [g] god  [0] faction 0  [1] faction 1  [q] quit\n");
   printf("%sd%s drone (%sD%s carrying)  %si%s interceptor  %sf%s frigate  %sa%s artillery  "
-         "%sC%s core  %sT%s factory  %sN%s claim (%sn%s building)\n",
+         "%sC%s core  %sT%s factory  %sN%s claim (lower case: building)\n",
          CYAN, RESET, CYAN, RESET, CYAN, RESET, CYAN, RESET, CYAN, RESET,
-         CYAN, RESET, CYAN, RESET, CYAN, RESET, CYAN, RESET);
+         CYAN, RESET, CYAN, RESET, CYAN, RESET);
   fflush(stdout);
 }
 

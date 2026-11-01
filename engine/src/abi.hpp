@@ -88,7 +88,7 @@ struct StructureView { // my structures: full info. All of them, regardless of f
   int32_t x, y;
   int32_t hp;
   uint32_t production_ticks_left; // 0 when not producing
-  uint32_t build_ticks_left;      // Claim Node: ticks of Drone work still needed; 0 = finished
+  uint32_t build_ticks_left;      // ticks of Drone work still needed (Factory, claim); 0 = done
 };
 
 struct EnemyView { // visible enemies: observable info only
@@ -102,7 +102,7 @@ struct EnemyView { // visible enemies: observable info only
 struct EnemyStructureView { // enemy structures on fog-visible tiles: same rule as EnemyView
   uint32_t id;               // Attack's target_id
   uint16_t type;             // StructureType
-  uint16_t building;         // 1 while a Claim Node is still under construction
+  uint16_t building;         // 1 while a Factory or Claim Node is under construction
   int32_t x, y;
   int32_t hp;
 };

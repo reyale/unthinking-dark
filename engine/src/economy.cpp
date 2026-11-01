@@ -59,6 +59,21 @@ static int32_t drone_cap(const World& world, FactionId f) {
   return cap;
 }
 
+static int32_t factory_cap(const World& world, FactionId f) {
+  int32_t claims = 0;
+  for (const auto& [sid, s] : world.structures)
+    if (s.alive() && s.faction == f && s.type == StructureType::ClaimNode && s.complete())
+      ++claims;
+  return std::max(claims / cfg::CLAIMS_PER_FACTORY, cfg::MIN_FACTORY_CAP);
+}
+
+static int32_t factory_count(const World& world, FactionId f) {
+  int32_t n = 0;
+  for (const auto& [sid, s] : world.structures)
+    if (s.alive() && s.faction == f && s.type == StructureType::Factory) ++n;
+  return n;
+}
+
 static int32_t drone_count(const World& world, FactionId f) {
   int32_t n = 0;
   for (const auto& [uid, u] : world.units)
@@ -86,6 +101,11 @@ static int32_t structure_count(const World& world, FactionId f) {
   return n;
 }
 
+static void start_construction(Structure& s) {
+  s.hp = cfg::BUILD_START_HP;
+  s.build_ticks_left = cfg::BUILD_TICKS;
+}
+
 static void spend(World& world, const ValidatedCommands& cmds_a, const ValidatedCommands& cmds_b) {
   // Process in deterministic unit-id order across both factions.
   ValidatedCommands all;
@@ -99,7 +119,7 @@ static void spend(World& world, const ValidatedCommands& cmds_a, const Validated
 
     if (kind == CommandKind::Produce) {
       Structure* fac = world.find_structure(uid.structure());
-      if (!fac || !fac->alive() || fac->production_queue.has_value())
+      if (!fac || !fac->alive() || !fac->complete() || fac->production_queue.has_value())
         continue;
       if (unit_count(world, fac->faction) >= cfg::UNIT_HARD_CAP)
         continue;
@@ -152,6 +172,8 @@ static void spend(World& world, const ValidatedCommands& cmds_a, const Validated
       if (stype == StructureType::Factory) {
         cost_e = cfg::FACTORY_COST_E;
         cost_a = cfg::FACTORY_COST_A;
+        if (factory_count(world, builder->faction) >= factory_cap(world, builder->faction))
+          continue;
       } else
         continue;
       if (structure_count(world, builder->faction) >= cfg::STRUCTURE_HARD_CAP)
@@ -166,7 +188,7 @@ static void spend(World& world, const ValidatedCommands& cmds_a, const Validated
         continue;
       res.energy -= cost_e;
       res.alloy -= cost_a;
-      world.spawn_structure(builder->faction, stype, {cmd.ax, cmd.ay});
+      start_construction(world.spawn_structure(builder->faction, stype, {cmd.ax, cmd.ay}));
 
     } else if (kind == CommandKind::DeployClaim) {
       const Unit* builder = world.find_unit(uid.unit());
@@ -184,10 +206,8 @@ static void spend(World& world, const ValidatedCommands& cmds_a, const Validated
       if (res.alloy < cfg::CLAIM_COST_A)
         continue;
       res.alloy -= cfg::CLAIM_COST_A;
-      Structure& claim =
-          world.spawn_structure(builder->faction, StructureType::ClaimNode, {cmd.ax, cmd.ay});
-      claim.hp = cfg::CLAIM_BUILD_START_HP;
-      claim.build_ticks_left = cfg::CLAIM_BUILD_TICKS;
+      start_construction(
+          world.spawn_structure(builder->faction, StructureType::ClaimNode, {cmd.ax, cmd.ay}));
     }
   }
 }
@@ -216,24 +236,24 @@ static void tick_production(World& world) {
   }
 }
 
-// A claim under construction gets one tick of work when an own Drone is within
-// CLAIM_DEPLOY_RANGE, and waits otherwise. A Drone works on one claim at a time: claims take
-// the nearby Drones in id order, lowest structure id first. The deploy tick counts as work.
+// A structure under construction gets one tick of work when an own Drone is within its
+// placement range, and waits otherwise. A Drone works on one structure at a time: they take
+// the nearby Drones in id order, lowest structure id first. The placing tick counts as work.
 static void tick_construction(World& world) {
-  const int32_t span = cfg::CLAIM_HP_BASE - cfg::CLAIM_BUILD_START_HP;
   std::set<UnitId> busy;
   for (auto& [sid, s] : world.structures) {
     if (!s.alive() || s.complete())
       continue;
+    const int32_t span = structure_max_hp(s.type) - cfg::BUILD_START_HP;
     for (const auto& [uid, u] : world.units) {
       if (!u.alive() || u.faction != s.faction || u.type != UnitType::Drone ||
-          busy.contains(uid) || manhattan(u.pos, s.pos) > cfg::CLAIM_DEPLOY_RANGE)
+          busy.contains(uid) || manhattan(u.pos, s.pos) > placement_range(s.type))
         continue;
       busy.insert(uid);
-      // Gains sum to exactly `span`, so an undamaged claim finishes at CLAIM_HP_BASE (before
-      // the fragility cap).
-      const int32_t done = cfg::CLAIM_BUILD_TICKS - s.build_ticks_left;
-      s.hp += span * (done + 1) / cfg::CLAIM_BUILD_TICKS - span * done / cfg::CLAIM_BUILD_TICKS;
+      // Gains sum to exactly `span`, so an undamaged structure finishes at full hp (a claim's
+      // then meets the fragility cap).
+      const int32_t done = cfg::BUILD_TICKS - s.build_ticks_left;
+      s.hp += span * (done + 1) / cfg::BUILD_TICKS - span * done / cfg::BUILD_TICKS;
       --s.build_ticks_left;
       break;
     }
