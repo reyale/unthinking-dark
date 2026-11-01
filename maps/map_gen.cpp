@@ -40,15 +40,6 @@ static MapData generate_once(const GenParams& p, game::Rng& rng) {
     data.map.set_terrain(mirror, t, ra);
   };
 
-  for (int32_t x = 0; x < w; ++x) {
-    data.map.set_terrain({x, 0}, game::Terrain::Asteroid);
-    data.map.set_terrain({x, h - 1}, game::Terrain::Asteroid);
-  }
-  for (int32_t y = 0; y < h; ++y) {
-    data.map.set_terrain({0, y}, game::Terrain::Asteroid);
-    data.map.set_terrain({w - 1, y}, game::Terrain::Asteroid);
-  }
-
   constexpr int32_t kOffsets[4][2] = {{3, 0}, {0, 3}, {4, 2}, {2, 4}};
   for (auto& off : kOffsets) {
     game::Vec2 pos{data.spawn[0].x + off[0], data.spawn[0].y + off[1]};
@@ -87,7 +78,7 @@ static MapData generate_once(const GenParams& p, game::Rng& rng) {
       bx += DX[dir];
       by += DY[dir];
 
-      if (bx <= 0 || bx >= w - 1 || by <= 0 || by >= h - 1)
+      if (bx < 0 || bx >= w || by < 0 || by >= h)
         continue;
 
       game::Vec2 pos{bx, by};
@@ -115,8 +106,8 @@ static MapData generate_once(const GenParams& p, game::Rng& rng) {
             rng.next_u32(static_cast<uint32_t>(NEBULA_MAX_TILES - NEBULA_MIN_TILES + 1)));
     for (int32_t t = 0; t < size; ++t) {
       const uint32_t dir = rng.next_u32(4);
-      bx = std::clamp(bx + DX[dir], 1, w - 2);
-      by = std::clamp(by + DY[dir], 1, h - 2);
+      bx = std::clamp(bx + DX[dir], 0, w - 1);
+      by = std::clamp(by + DY[dir], 0, h - 1);
       const game::Vec2 pos{bx, by};
       if (data.map.tile_at(pos).terrain != game::Terrain::Open) continue;
       if (game::manhattan(pos, data.spawn[0]) < MIN_SPAWN_CLEARANCE ||
