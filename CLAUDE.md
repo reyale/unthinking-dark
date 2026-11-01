@@ -10,7 +10,7 @@ Build order and acceptance criteria: `docs/IMPLEMENTATION_PLAN.md`.
 
 ## Current State
 
-**Phases 1–5 complete. 296/296 tests passing.**
+**Phases 1–5 complete. 300/300 tests passing.**
 
 | Phase | Status | Notes |
 |-------|--------|-------|
@@ -96,11 +96,20 @@ For LSP support: `ln -s build/compile_commands.json compile_commands.json`
 
 `fixtures/` — native test bots: `IdleBot` (empty commands; determinism tests), `RushBot`, `EconBot`,
 `TurtleBot` (one home claim, guards its base) and `ExpanderBot` (its Core produces Drones,
-walks claimers out to a claim lattice, never attacks).
-`Turtle.*` in `map_tests` proves the turtle loses to the descending threshold on every map.
+walks claimers out to a claim lattice, never attacks), and `AdaptiveBot`, the combat fixture
+that plays every system: Factories, counter-picked ships (Battleships when rich), an
+Interceptor scout hidden in a nebula by the enemy Core, a home ambush in a nebula, and pushes
+in waves (gather out of sight, then enemy claims, unfinished first, then the Core) when its
+army outweighs what it has seen; it fights enemy ships near its structures first. Ships fire
+only on a tick they are ordered to Attack/MoveAttack, so it orders every ship every tick, with
+focus fire via `target_id`.
+`Turtle.*` in `map_tests` proves the turtle loses to the descending threshold on every map;
+`Adaptive.*` proves the adaptive bot destroys both and that two of them fight.
 `bot_util.hpp` has a BFS `Router`: the engine never re-routes a blocked unit, so bots route
 themselves (own units block only the first step, lower id has right of way; enemy structures
-are remembered once seen). `harvest_step()` runs a Drone's carry loop: node, then drop-off.
+are remembered once seen). `waypoint()` lets a fast unit cover its full speed along a route;
+`harvest_step()` runs a Drone's carry loop: node, then drop-off; `builders()` keeps a Drone
+by each unfinished structure; `ClaimLattice` hands out claim sites.
 
 ### runner/ — Wasmtime WASM bot host
 

@@ -24,7 +24,6 @@ public:
   static constexpr int32_t kSpacing = cfg::CLAIM_INFLUENCE / 2;
   static constexpr size_t kHarvesters = 1;
   static constexpr size_t kMaxDrones = 4;
-  static constexpr int32_t kMaxAttempts = 3; // deploys at one site before giving it up
   static constexpr int32_t kClearRadius = 8;
 
   void on_init(const Map& map, uint32_t) override {
@@ -74,12 +73,12 @@ public:
       if (step != pos) issue(move_cmd(u.id, CommandKind::Move, step));
     }
 
-    const auto builders = claim_builders(snap);
+    const auto builds = builders(snap);
     for (size_t i = 0; i < drones.size(); ++i) {
       const UnitView& d = *drones[i];
       if (busy.contains(d.id)) continue;
       const Vec2 pos{d.x, d.y};
-      if (auto b = builders.find(d.id); b != builders.end()) {
+      if (auto b = builds.find(d.id); b != builds.end()) {
         const Vec2 step = builder_step(router_, d, b->second);
         if (step != pos) issue(move_cmd(d.id, CommandKind::Move, step));
         continue;
@@ -88,12 +87,12 @@ public:
       // afford a claim, then goes to stake it.
       const bool lone_claimer = drones.size() == 1 && alloy >= cfg::CLAIM_COST_A;
       if (i < kHarvesters && !lone_claimer) {
-        assigned_.erase(d.id);
+        lattice_.release(d.id);
         const Vec2 step = harvest_step(router_, map_, snap, d);
         if (step != pos) issue(move_cmd(d.id, CommandKind::Move, step));
         continue;
       }
-      claim_with(d, claimed, taken, alloy, issue);
+      lattice_.step(router_, d, claimed, taken, alloy, issue);
     }
     return out;
   }
@@ -101,68 +100,16 @@ public:
   bool healthy() const override { return true; }
 
 private:
-  struct Assignment {
-    size_t site;
-    int32_t attempts;
-  };
   Map map_;
   Router router_;
+  ClaimLattice lattice_;
   bool have_home_{false};
   Vec2 home_{};
-  std::vector<Vec2> sites_;
-  size_t next_site_{0};
-  std::map<uint32_t, Assignment> assigned_; // claimer drone id → its site
-
-  template <class Issue>
-  void claim_with(const UnitView& d, const std::set<Vec2>& claimed, const std::set<Vec2>& taken,
-                  int32_t& alloy, Issue&& issue) {
-    const Vec2 pos{d.x, d.y};
-    for (;;) {
-      auto it = assigned_.find(d.id);
-      if (it == assigned_.end()) {
-        if (next_site_ >= sites_.size()) return;
-        it = assigned_.emplace(d.id, Assignment{next_site_++, 0}).first;
-      }
-      const Vec2 site = sites_[it->second.site];
-      if (claimed.contains(site) || it->second.attempts >= kMaxAttempts) {
-        assigned_.erase(it);
-        continue;
-      }
-      if (manhattan(pos, site) <= cfg::CLAIM_DEPLOY_RANGE) {
-        if (taken.contains(site)) {
-          assigned_.erase(it);
-          continue;
-        }
-        if (alloy >= cfg::CLAIM_COST_A) {
-          issue(move_cmd(d.id, CommandKind::DeployClaim, site));
-          alloy -= cfg::CLAIM_COST_A;
-          ++it->second.attempts;
-        }
-        return;
-      }
-      const Vec2 step = router_.next_step(
-          pos, [&](Vec2 p) { return manhattan(p, site) <= cfg::CLAIM_DEPLOY_RANGE; });
-      if (step == pos) { // unreachable from here
-        assigned_.erase(it);
-        continue;
-      }
-      issue(move_cmd(d.id, CommandKind::Move, step));
-      return;
-    }
-  }
 
   void init_sites(const Snapshot& snap) {
     have_home_ = true;
     home_ = core_pos(snap);
-    // Anchored on home so both sides of a point-symmetric map get mirror-image sites.
-    for (int32_t y = 0; y < map_.height; ++y)
-      for (int32_t x = 0; x < map_.width; ++x)
-        if ((x - home_.x) % kSpacing == 0 && (y - home_.y) % kSpacing == 0 &&
-            map_.passable({x, y}) && Vec2{x, y} != home_)
-          sites_.push_back({x, y});
-    std::stable_sort(sites_.begin(), sites_.end(), [&](Vec2 a, Vec2 b) {
-      return manhattan(a, home_) < manhattan(b, home_);
-    });
+    lattice_.init(map_, home_, kSpacing);
   }
 };
 

@@ -60,11 +60,11 @@ public:
       out.push_back(c); // refused at no cost once at the Drone cap
     }
 
-    const auto builders = claim_builders(snap);
+    const auto builds = builders(snap);
     for (const auto& u : snap.my_units) {
       if (u.id == deployer) continue;
       const Vec2 pos{u.x, u.y};
-      if (auto b = builders.find(u.id); b != builders.end()) {
+      if (auto b = builds.find(u.id); b != builds.end()) {
         const Vec2 step = builder_step(router_, u, b->second);
         if (step != pos) out.push_back(move_cmd(u.id, CommandKind::Move, step));
         continue;
