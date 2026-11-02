@@ -71,6 +71,8 @@ Snapshot build_snapshot(const World& world, uint32_t faction_id, uint32_t tick_c
     uv.current_order = static_cast<uint16_t>(unit.current_order);
     uv.cargo_energy = unit.cargo_energy;
     uv.cargo_alloy = unit.cargo_alloy;
+    uv.shield = unit.shield;
+    uv.shield_wait = unit.shield_wait;
     snap.my_units.push_back(uv);
   }
 
@@ -120,6 +122,7 @@ Snapshot build_snapshot(const World& world, uint32_t faction_id, uint32_t tick_c
     ev.x = unit.pos.x;
     ev.y = unit.pos.y;
     ev.hp = unit.hp;
+    ev.shield = unit.shield;
     snap.visible_enemies.push_back(ev);
   }
 

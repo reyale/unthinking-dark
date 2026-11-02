@@ -39,13 +39,16 @@ TEST(Combat, FrigateFirstStrikeKillsBeforeSimultaneous) {
 
   game::run_combat(w, cmds_a, cmds_b);
 
-  // Frigate fires first-strike: Interceptor (hp=60, dmg=14) should take 14 dmg
-  // but the Frigate (hp=35) fires first and the Interceptor is dead or weakened
-  // before firing. Interceptor dmg=12, so:
-  //   Frigate first-strike: Interceptor hp 60 → 46 (not dead)
-  //   Interceptor simultaneous: Frigate hp 35 → 23
-  EXPECT_EQ(inter.hp, game::cfg::INTERCEPTOR_HP - game::cfg::FRIGATE_DMG);
-  EXPECT_EQ(frigate.hp, game::cfg::FRIGATE_HP - game::cfg::INTERCEPTOR_DMG);
+  // The Frigate's first strike breaks the Interceptor's shield and dents its hull without
+  // killing it, so it fires back in the simultaneous phase, into the Frigate's shield.
+  using namespace game::cfg;
+  static_assert(FRIGATE_DMG > INTERCEPTOR_SHIELD &&
+                FRIGATE_DMG < INTERCEPTOR_SHIELD + INTERCEPTOR_HP);
+  static_assert(INTERCEPTOR_DMG < FRIGATE_SHIELD);
+  EXPECT_EQ(inter.shield, 0);
+  EXPECT_EQ(inter.hp, INTERCEPTOR_HP + INTERCEPTOR_SHIELD - FRIGATE_DMG);
+  EXPECT_EQ(frigate.shield, FRIGATE_SHIELD - INTERCEPTOR_DMG);
+  EXPECT_EQ(frigate.hp, FRIGATE_HP);
 }
 
 TEST(Combat, FrigateKillsWeakTargetBeforeSimultaneous) {
@@ -55,6 +58,7 @@ TEST(Combat, FrigateKillsWeakTargetBeforeSimultaneous) {
   game::UnitId frigate_id = w.spawn_unit({0}, game::UnitType::Frigate, {5, 5}).id;
   game::UnitId inter_id = w.spawn_unit({1}, game::UnitType::Interceptor, {6, 5}).id;
   w.find_unit(inter_id)->hp = 1;
+  w.find_unit(inter_id)->shield = 0;
 
   auto cmds_a = attack_cmd(frigate_id);
   auto cmds_b = attack_cmd(inter_id);
@@ -70,11 +74,13 @@ TEST(Combat, FrigateKillsWeakTargetBeforeSimultaneous) {
 
 TEST(Combat, MutualKillBothDie) {
   auto w = make_combat_world();
-  // Two Interceptors at 1 hp each — simultaneous, both should die
+  // Two Interceptors at 1 hp, shields down — simultaneous, both should die
   auto& a = w.spawn_unit({0}, game::UnitType::Interceptor, {5, 5});
   auto& b = w.spawn_unit({1}, game::UnitType::Interceptor, {6, 5});
   a.hp = 1;
   b.hp = 1;
+  a.shield = 0;
+  b.shield = 0;
 
   auto cmds_a = attack_cmd(a.id);
   auto cmds_b = attack_cmd(b.id);
@@ -411,11 +417,13 @@ TEST(Combat, ClaimShootsNearestEnemyUnitInRangeOnly) {
   game::ValidatedCommands empty;
   game::CombatLog log;
   game::run_combat(w, empty, empty, &log);
-  const int32_t full = game::stats_for(game::UnitType::Frigate).hp;
-  EXPECT_EQ(near.hp, full - game::cfg::CLAIM_ATTACK_DMG);
-  EXPECT_EQ(tie.hp, full);
-  EXPECT_EQ(far.hp, full);
-  EXPECT_EQ(own.hp, full);
+  const auto& st = game::stats_for(game::UnitType::Frigate);
+  const int32_t full = st.hp + st.shield;
+  auto pool = [](const game::Unit& u) { return u.hp + u.shield; };
+  EXPECT_EQ(pool(near), full - game::cfg::CLAIM_ATTACK_DMG);
+  EXPECT_EQ(pool(tie), full);
+  EXPECT_EQ(pool(far), full);
+  EXPECT_EQ(pool(own), full);
   ASSERT_EQ(log.shots.size(), 1u);
   EXPECT_TRUE(log.shots[0].attacker.is_null());
   EXPECT_FALSE(log.shots[0].attacker_struct.is_null());
@@ -440,4 +448,92 @@ TEST(Combat, ClaimCannotShootIntoANebulaItCannotSee) {
   game::ValidatedCommands empty;
   game::run_combat(w, empty, empty);
   EXPECT_EQ(e.hp, game::stats_for(game::UnitType::Frigate).hp);
+}
+
+// ---- Shields -------------------------------------------------------------
+
+TEST(Shields, ShipsSpawnWithFullShieldsAndDronesHaveNone) {
+  auto w = make_combat_world();
+  EXPECT_EQ(w.spawn_unit({0}, game::UnitType::Frigate, {1, 1}).shield, game::cfg::FRIGATE_SHIELD);
+  EXPECT_EQ(w.spawn_unit({0}, game::UnitType::Drone, {2, 2}).shield, 0);
+}
+
+TEST(Shields, ShieldTakesTheHitAndOnlyTheOverflowReachesTheHull) {
+  using namespace game::cfg;
+  static_assert(ARTILLERY_DMG > FRIGATE_SHIELD);
+  auto w = make_combat_world();
+  auto& art = w.spawn_unit({0}, game::UnitType::Artillery, {1, 5});
+  auto& fr = w.spawn_unit({1}, game::UnitType::Frigate, {5, 5});
+  auto cmds = attack_cmd(art.id);
+  game::ValidatedCommands empty;
+  game::run_combat(w, cmds, empty);
+  EXPECT_EQ(fr.shield, 0);
+  EXPECT_EQ(fr.hp, FRIGATE_HP - (ARTILLERY_DMG - FRIGATE_SHIELD));
+}
+
+// Ships fire only when ordered, so after one ordered shot, empty commands are quiet ticks.
+TEST(Shields, RegenerateOnlyAfterTheDelayAndStopAtFull) {
+  using namespace game::cfg;
+  auto w = make_combat_world();
+  auto& in = w.spawn_unit({0}, game::UnitType::Interceptor, {5, 5});
+  auto& fr = w.spawn_unit({1}, game::UnitType::Frigate, {6, 5});
+  auto cmds = attack_cmd(in.id);
+  game::ValidatedCommands empty;
+  game::run_combat(w, cmds, empty);
+  const int32_t hit = FRIGATE_SHIELD - INTERCEPTOR_DMG;
+  EXPECT_EQ(fr.shield, hit); // a unit hit this tick doesn't regenerate
+  EXPECT_EQ(fr.shield_wait, SHIELD_REGEN_DELAY - 1);
+  for (int32_t t = 1; t < SHIELD_REGEN_DELAY; ++t) {
+    game::run_combat(w, empty, empty);
+    EXPECT_EQ(fr.shield, hit) << "quiet tick " << t;
+  }
+  game::run_combat(w, empty, empty);
+  EXPECT_EQ(fr.shield, hit + FRIGATE_SHIELD_REGEN);
+  for (int32_t t = 0; t < FRIGATE_SHIELD; ++t)
+    game::run_combat(w, empty, empty);
+  EXPECT_EQ(fr.shield, FRIGATE_SHIELD);
+  EXPECT_EQ(fr.hp, FRIGATE_HP);
+}
+
+TEST(Shields, AFullyAbsorbedHitStillRestartsTheWait) {
+  using namespace game::cfg;
+  auto w = make_combat_world();
+  auto& in = w.spawn_unit({0}, game::UnitType::Interceptor, {5, 5});
+  auto& fr = w.spawn_unit({1}, game::UnitType::Frigate, {6, 5});
+  auto cmds = attack_cmd(in.id);
+  game::ValidatedCommands empty;
+  game::run_combat(w, cmds, empty);
+  for (int32_t t = 1; t < SHIELD_REGEN_DELAY; ++t)
+    game::run_combat(w, empty, empty);
+  game::run_combat(w, cmds, empty); // the tick it would have regenerated
+  EXPECT_EQ(fr.shield, FRIGATE_SHIELD - 2 * INTERCEPTOR_DMG);
+  EXPECT_EQ(fr.shield_wait, SHIELD_REGEN_DELAY - 1);
+}
+
+TEST(Shields, FriendlySplashCountsAsAHit) {
+  using namespace game::cfg;
+  auto w = make_combat_world();
+  auto& art = w.spawn_unit({0}, game::UnitType::Artillery, {1, 5});
+  w.spawn_unit({1}, game::UnitType::Frigate, {5, 5});
+  auto& mate = w.spawn_unit({0}, game::UnitType::Battleship, {5, 6});
+  auto cmds = attack_cmd(art.id);
+  game::ValidatedCommands empty;
+  game::run_combat(w, cmds, empty);
+  EXPECT_EQ(mate.shield, BATTLESHIP_SHIELD - ARTILLERY_DMG);
+  EXPECT_EQ(mate.shield_wait, SHIELD_REGEN_DELAY - 1);
+}
+
+TEST(Shields, SnapshotShowsOwnShieldAndWaitAndEnemyShield) {
+  auto w = make_combat_world();
+  auto& mine = w.spawn_unit({0}, game::UnitType::Frigate, {5, 5});
+  auto& theirs = w.spawn_unit({1}, game::UnitType::Interceptor, {6, 5});
+  mine.shield = 7;
+  mine.shield_wait = 3;
+  theirs.shield = 2;
+  const game::Snapshot snap = game::build_snapshot(w, 0, 100);
+  ASSERT_EQ(snap.my_units.size(), 1u);
+  EXPECT_EQ(snap.my_units[0].shield, 7);
+  EXPECT_EQ(snap.my_units[0].shield_wait, 3);
+  ASSERT_EQ(snap.visible_enemies.size(), 1u);
+  EXPECT_EQ(snap.visible_enemies[0].shield, 2);
 }

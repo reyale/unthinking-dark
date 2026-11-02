@@ -134,14 +134,19 @@ TEST(RushBot, ReplayFrameShotsAccountForDamage) {
     }
     if (any_splash) continue; // splash damage isn't attributed per victim
 
+    // Hull + shield. A unit hit this tick doesn't regenerate, so its loss is exactly the
+    // damage; an unhit one can only gain shield.
     std::map<game::UnitId, int32_t> prev_hp;
-    for (const auto& u : prev.units) prev_hp[u.id] = u.hp;
+    for (const auto& u : prev.units) prev_hp[u.id] = u.hp + u.shield;
     std::map<game::UnitId, int32_t> cur_hp;
-    for (const auto& u : cur.units) cur_hp[u.id] = u.hp;
+    for (const auto& u : cur.units) cur_hp[u.id] = u.hp + u.shield;
     for (const auto& [id, hp] : prev_hp) {
       auto it = cur_hp.find(id);
       if (it != cur_hp.end()) {
-        EXPECT_EQ(hp - it->second, unit_dmg[id]) << "unit " << id.value << " frame " << f;
+        if (unit_dmg[id] > 0)
+          EXPECT_EQ(hp - it->second, unit_dmg[id]) << "unit " << id.value << " frame " << f;
+        else
+          EXPECT_GE(it->second, hp) << "unit " << id.value << " frame " << f;
       } else {
         bool logged = false;
         for (const auto& k : cur.kills) logged |= (k.unit == id);

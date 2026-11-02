@@ -66,7 +66,9 @@ struct Unit {
   FactionId faction;
   UnitType type;
   Vec2 pos;
-  int32_t hp;
+  int32_t hp; // hull
+  int32_t shield{0};
+  int32_t shield_wait{0}; // unhit ticks still needed before the shield regenerates
 
   OrderType current_order{OrderType::Idle};
   Vec2 order_target{};    // tile target for Move/MoveAttack/Attack

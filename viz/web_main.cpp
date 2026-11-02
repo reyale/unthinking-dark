@@ -60,6 +60,7 @@ struct CellData {
   int32_t hp{-1}, max_hp{-1};
   float   cargo{0.0f}; // Drone hold fill, 0..1
   bool    node{false}; // resource node: drawn as amber crystals
+  float   shield{-1.0f}; // shield fill, 0..1; below 0 = the unit has none
 };
 
 static float cargo_fill(const game::UnitFrame& u) {
@@ -112,7 +113,10 @@ static CellData make_cell(const game::Map& map, const game::FrameState& fr,
              top->type == game::UnitType::Frigate       ? 'f' :
              top->type == game::UnitType::Artillery     ? 'a' : 'b';
     ImVec4 fg = top->faction.value == 0 ? kFactionA : kFactionB;
-    return {bg, g, fg, top->hp, top->max_hp, cargo_fill(*top), node};
+    const float sh = top->max_shield > 0 ? static_cast<float>(top->shield) /
+                                               static_cast<float>(top->max_shield)
+                                         : -1.0f;
+    return {bg, g, fg, top->hp, top->max_hp, cargo_fill(*top), node, sh};
   }
 
   CellData cd{bg};
@@ -334,6 +338,15 @@ static void main_loop() {
                 : ImVec4{1.0f, ratio * 1.7f, 0.1f, 1.0f};
             dl->AddLine(right, bottom, u32({0.08f, 0.08f, 0.08f, 1.0f}), bw);
             dl->AddLine(right, hp_end, u32(hc), bw);
+            // Just inside the HP bar, toward the tile centre (inward normal (-1,-2)/√5).
+            if (cd.shield >= 0.0f) {
+              const ImVec2 a = {right.x - 0.447f * bw * 1.2f, right.y - 0.894f * bw * 1.2f};
+              const ImVec2 b = {bottom.x - 0.447f * bw * 1.2f, bottom.y - 0.894f * bw * 1.2f};
+              dl->AddLine(a, b, u32({0.08f, 0.08f, 0.08f, 1.0f}), bw);
+              if (cd.shield > 0.0f)
+                dl->AddLine(a, {a.x + cd.shield * (b.x - a.x), a.y + cd.shield * (b.y - a.y)},
+                            u32({0.35f, 0.85f, 1.0f, 1.0f}), bw);
+            }
           }
           if (cd.cargo > 0.0f && g.cs >= 32.0f) {
             ImVec2 c_end = {left.x + cd.cargo * (bottom.x - left.x),

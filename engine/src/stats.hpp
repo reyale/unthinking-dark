@@ -8,7 +8,9 @@ enum class UnitType : uint8_t;      // full definitions in entity.hpp
 enum class StructureType : uint8_t;
 
 struct UnitStats {
-  int32_t hp;
+  int32_t hp; // hull
+  int32_t shield;
+  int32_t shield_regen; // per tick, once SHIELD_REGEN_DELAY ticks pass unhit
   int32_t dmg;
   int32_t range;
   int32_t sight;

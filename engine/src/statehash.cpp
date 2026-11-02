@@ -43,6 +43,8 @@ void StateHash::update(const World& world) {
     s.write(unit.pos.x);
     s.write(unit.pos.y);
     s.write(unit.hp);
+    s.write(unit.shield);
+    s.write(unit.shield_wait);
     s.write(static_cast<uint8_t>(unit.current_order));
     s.write(unit.cargo_energy);
     s.write(unit.cargo_alloy);

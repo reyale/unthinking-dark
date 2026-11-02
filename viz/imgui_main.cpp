@@ -73,6 +73,7 @@ static constexpr ImVec4 kAsteroid = {0.19f, 0.17f, 0.15f, 1.0f}; // dust under t
 static constexpr ImVec4 kNebula   = {0.17f, 0.13f, 0.26f, 1.0f}; // ground under the gas
 static constexpr ImVec4 kResource = {0.24f, 0.20f, 0.14f, 1.0f}; // ground under the crystals
 static constexpr ImVec4 kCargo    = {1.0f, 0.72f, 0.18f, 1.0f}; // Drone hold bar
+static constexpr ImVec4 kShield   = {0.35f, 0.85f, 1.0f, 1.0f};  // shield bar, inside the HP bar
 static constexpr float  kGhostAlpha = 0.45f; // a structure still under construction
 
 static ImU32  u32(const ImVec4& c) { return ImGui::ColorConvertFloat4ToU32(c); }
@@ -102,6 +103,7 @@ struct CellData {
   float    crystal{0.0f}; // resource-node brightness to draw at; 0 = no node
   float    built{1.0f};   // construction progress, 0..1; below 1 it draws as a ghost
   float    gas{0.0f};     // nebula brightness to draw at; 0 = no nebula
+  int32_t  shield{0}, max_shield{0};
 };
 
 // ---- Cell data builder ----------------------------------------------------
@@ -182,6 +184,8 @@ static CellData make_cell(const game::Map& map, const game::FrameState& fr,
     CellData cd{bg, '\0', true, u.type, shape_index(u.type), fg, u.hp, u.max_hp, facing,
                 u.id.value};
     cd.cargo = cargo_fill(u);
+    cd.shield = u.shield;
+    cd.max_shield = u.max_shield;
     return cd;
   }
 
@@ -1180,6 +1184,17 @@ static void draw_tile_cell(ImDrawList* dl, ImVec2 ctr, float cw2, float ch2,
     float  bw     = std::max(2.0f, ch2 * 0.3f);
     dl->AddLine(right, bottom, u32({0.08f, 0.08f, 0.08f, 1.0f}), bw);
     dl->AddLine(right, hp_end, u32(hp_color(ratio)), bw);
+
+    // Just inside the HP bar, toward the tile centre (the edge's inward normal is (-1,-2)/√5).
+    if (cd.max_shield > 0) {
+      const float  sr  = static_cast<float>(cd.shield) / static_cast<float>(cd.max_shield);
+      const ImVec2 off = {-0.447f * bw * 1.2f, -0.894f * bw * 1.2f};
+      const ImVec2 a   = {right.x + off.x, right.y + off.y};
+      const ImVec2 b   = {bottom.x + off.x, bottom.y + off.y};
+      dl->AddLine(a, b, u32({0.08f, 0.08f, 0.08f, 1.0f}), bw);
+      if (sr > 0.0f)
+        dl->AddLine(a, {a.x + sr * (b.x - a.x), a.y + sr * (b.y - a.y)}, u32(kShield), bw);
+    }
   }
 
   // Construction progress sits where a Drone's cargo would (structures carry none).
@@ -1333,6 +1348,11 @@ static void draw_sel_panel(const ImGuiIO& io) {
       ImGui::Text("HP   ");
       ImGui::SameLine();
       ImGui::TextColored(hp_color(ratio), "%d / %d", sel->hp, sel->max_hp);
+      if (sel->max_shield > 0) {
+        ImGui::Text("Shld ");
+        ImGui::SameLine();
+        ImGui::TextColored(kShield, "%d / %d", sel->shield, sel->max_shield);
+      }
       ImGui::Text("Pos  %d, %d", sel->pos.x, sel->pos.y);
       if (sel->type == game::UnitType::Drone)
         ImGui::TextColored(sel->carrying() ? kCargo : ImVec4{0.6f, 0.6f, 0.6f, 1.0f},

@@ -5,6 +5,7 @@
 #include "occupancy.hpp"
 #include "vision.hpp"
 #include "config.hpp"
+#include <algorithm>
 #include <map>
 #include <limits>
 
@@ -88,6 +89,26 @@ static void log_shot(CombatLog* log, const Unit& attacker, const CombatTarget& t
                         tgt.unit_id, tgt.struct_id, to, st.dmg, first_strike, st.splash});
 }
 
+// The shield takes the hit first and the hull the overflow. Any hit, even one the shield
+// absorbs whole, restarts the wait before it regenerates.
+static void take_damage(Unit& u, int32_t dmg) {
+  const int32_t absorbed = std::min(u.shield, dmg);
+  u.shield -= absorbed;
+  u.hp -= dmg - absorbed;
+  u.shield_wait = cfg::SHIELD_REGEN_DELAY;
+}
+
+// After the tick's damage: a unit hit this tick (or within the delay) only counts down.
+static void regenerate_shields(World& world) {
+  for (auto& [uid, u] : world.units) {
+    if (u.shield_wait > 0) {
+      --u.shield_wait;
+      continue;
+    }
+    u.shield = std::min(u.shield + u.stats().shield_regen, u.stats().shield);
+  }
+}
+
 static void log_kill(CombatLog* log, const Unit& u) {
   if (log)
     log->kills.push_back({u.id, {}, u.faction, u.type, StructureType::CommandCore, u.pos});
@@ -141,7 +162,7 @@ void run_combat(World& world, const ValidatedCommands& cmds_a, const ValidatedCo
       Unit* t = world.find_unit(tgt.unit_id);
       if (t) {
         log_shot(log, unit, tgt, t->pos, true);
-        t->hp -= unit.stats().dmg;
+        take_damage(*t, unit.stats().dmg);
         if (!t->alive()) {
           t->hp = 0;
           log_kill(log, *t);
@@ -211,7 +232,7 @@ void run_combat(World& world, const ValidatedCommands& cmds_a, const ValidatedCo
     if (!u)
       continue;
     const bool was_alive = u->alive();
-    u->hp -= dmg;
+    take_damage(*u, dmg);
     if (was_alive && !u->alive())
       log_kill(log, *u);
   }
@@ -225,6 +246,7 @@ void run_combat(World& world, const ValidatedCommands& cmds_a, const ValidatedCo
       log_kill(log, *s);
   }
   world.purge_dead();
+  regenerate_shields(world);
 }
 
 } // namespace game

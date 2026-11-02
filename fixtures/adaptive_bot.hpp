@@ -33,9 +33,9 @@ namespace game {
 //
 // A ship fires only on a tick it is ordered to Attack or MoveAttack, so every ship gets one:
 // Attack aimed at a focus-fire target when something is in range, MoveAttack when moving.
-// Focus fire: each ship (ascending id) takes the in-range enemy with the least hp left after
-// the shots already assigned, so damage lands on one target at a time and isn't wasted on a
-// ship already dead.
+// Focus fire: each ship (ascending id) takes the in-range enemy with the least hp + shield left
+// after the shots already assigned, so damage lands on one target at a time and isn't wasted on
+// a ship already dead.
 class AdaptiveBot : public Bot {
 public:
   static constexpr int32_t kSpacing = cfg::CLAIM_INFLUENCE / 2;
@@ -595,7 +595,7 @@ private:
   void plan_focus(const Snapshot& snap) {
     focus_.clear();
     std::map<uint32_t, int32_t> left;
-    for (const auto& e : snap.visible_enemies) left[e.id] = e.hp;
+    for (const auto& e : snap.visible_enemies) left[e.id] = e.hp + e.shield;
     std::vector<const UnitView*> shooters = army_;
     for (const auto& u : snap.my_units)
       if (u.id == scout_) shooters.push_back(&u);

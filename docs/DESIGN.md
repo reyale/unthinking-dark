@@ -123,9 +123,10 @@ fn on_tick(world: WorldView) -> Vec<Command>   // per tick, lean fuel budget
 Contains only what fog permits:
 - `tick`: current tick number
 - `my_faction_id`
-- `my_units`: full info — `{id, type, pos, hp, current_order, cargo}` (cargo: a Drone's
-  carried Energy/Alloy, not yet deposited)
-- `visible_enemies`: `{id, type, pos, hp, ...}` for enemies currently in vision
+- `my_units`: full info — `{id, type, pos, hp, current_order, cargo, shield, shield_wait}`
+  (cargo: a Drone's carried Energy/Alloy, not yet deposited; `shield_wait`: unhit ticks still
+  needed before the shield regenerates, 0 = regenerating)
+- `visible_enemies`: `{id, type, pos, hp, shield, ...}` for enemies currently in vision
 - `visible_tiles`: terrain / resources / occupancy within vision
 - `my_resources`: `{energy, alloy}`
 - `territory_pct`: current Voronoi territory share for this faction
@@ -204,7 +205,13 @@ for step in 1..=N:
   (Artillery) resolves here: damage to every unit in radius, **friendly fire included**,
   all simultaneous. Finished **Claim Nodes** fire in this sub-phase too (§6): nearest
   visible enemy unit within `CLAIM_ATTACK_RANGE`, ties → lower id; never structures.
+- **Shields:** every hit, in either sub-phase, goes into the target's shield first; only
+  the overflow reaches its hp (the hull), and a unit dies when its hull reaches 0.
 - Apply deaths at end of phase.
+- **Shield regen, last:** a unit that has gone `SHIELD_REGEN_DELAY` (v1: 5) ticks without
+  being hit regains its type's `_SHIELD_REGEN` per tick, up to full. Any hit restarts the
+  wait: one the shield absorbs whole, splash, friendly fire, a claim's shot. Firing doesn't.
+  A unit hit this tick never regenerates this tick. Hull never recovers.
 
 ### Phase 4 — Economy
 - Harvest: a Drone on or adjacent to a resource node adds `HARVEST_ENERGY` /
@@ -260,12 +267,17 @@ for step in 1..=N:
 
 All stats integer. Numbers are starting guesses for the simulator to tune.
 
-| Unit | hp | dmg | range | sight | speed | special | counters |
-|------|----|----|------|------|------|---------|----------|
-| **Drone** (fabricator) | 20 | — | — | 4 | 1 | harvests, builds structures, deploys claims | n/a (soft economy unit) |
-| **Interceptor** (brawler) | 60 | 12 | 1 | 5 | 2 | simultaneous dmg; **high collision priority**; cheap | strong vs Frigate, weak vs Artillery |
-| **Frigate** (ranged) | 35 | 14 | 4 | 6 | 2 | **first-strike**; low collision priority | strong vs Artillery, weak vs Interceptor |
-| **Artillery** (siege) | 30 | 10 | 3 | 5 | 1 | **radius-1 splash, friendly fire ON**; simultaneous dmg; slow; expensive; cracks claims | strong vs Interceptor (clumps), weak vs Frigate |
+| Unit | hull | shield (regen/tick) | dmg | range | sight | speed | special | counters |
+|------|------|--------|-----|------|------|------|---------|----------|
+| **Drone** (fabricator) | 8 | — | — | — | 3 | 1 | harvests, builds structures, deploys claims | n/a (soft economy unit) |
+| **Interceptor** (brawler) | 7 | 8 (2) | 5 | 2 | 3 | 2 | simultaneous dmg; **high collision priority**; cheap; mostly shield, so it recovers between hit-and-run passes | strong vs Frigate, weak vs Artillery |
+| **Frigate** (ranged) | 45 | 20 (2) | 12 | 3 | 3 | 1 | **first-strike** | strong vs Artillery, weak vs Interceptor |
+| **Artillery** (siege) | 20 | 5 (1) | 22 | 6 | 2 | 1 | **radius-1 splash, friendly fire ON**; simultaneous dmg; expensive; cracks claims; its range is its armour | strong vs Interceptor (clumps), weak vs Frigate |
+| **Battleship** (capital) | 110 | 40 (4) | 35 | 4 | 5 | 1 | very expensive; anchors a push, and tops up its shield between them | — (calibrate) |
+
+Values are `config.hpp`'s at the time of writing; that file is the source of truth. Ships
+have shields (§5 Phase 3); Drones and structures don't. Shield tops a unit up after a fight
+it got out of, so pulling a damaged ship back is worth something; hull loss is permanent.
 
 Counter-triangle: Interceptor > Frigate > Artillery > Interceptor. Composition and
 positioning beat raw numbers.
@@ -430,7 +442,8 @@ The handful of numbers that drive the whole game's pace and balance:
 - Claim **max influence distance** (~2–3% of map).
 - Claim **hp curve** (durable→~instant via `g`), **cost**, **build time**.
 - Claim **gun** (`CLAIM_ATTACK_DMG`/`RANGE`: deters a lone scout, ignorable by a real force).
-- Unit **stat blocks** (§6) — toward "counters feel real, no dominant unit."
+- Unit **stat blocks** (§6) — toward "counters feel real, no dominant unit." Includes each
+  ship's hull/shield split and shield regen, and the shared `SHIELD_REGEN_DELAY`.
 - **Unit cap** (soft economy gate + hard ceiling ~200–300).
 - **Per-tick fuel budget**, **startup budget**, **memory cap**.
 - Map **size** (~80×80) and asteroid/nebula/resource layout.
@@ -456,6 +469,10 @@ and a late climax; draws rare (they are allowed, §7); turtles lose.
   tiles, jump lanes, sensor/interference zones.
 - Scratch memory region zeroed each tick.
 - 3rd resource type, additional unit types (Scout, etc.), claim tiers.
+- Weapons that treat shields differently from hull (e.g. splash weak vs shields): another
+  counter axis on top of the triangle, once plain shields have been watched in fights.
+- Shields on structures (a Command Core shield would make chip damage pointless and push
+  games toward the tick cap).
 - Procedural map generation.
 - 8-connectivity / diagonals.
 

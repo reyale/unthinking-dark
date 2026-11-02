@@ -12,6 +12,7 @@ Unit& World::spawn_unit(FactionId faction, UnitType type, Vec2 pos) {
   u.type = type;
   u.pos = pos;
   u.hp = stats_for(type).hp;
+  u.shield = stats_for(type).shield;
   auto [it, ok] = units.emplace(id, u);
   (void)ok;
   return it->second;

@@ -10,7 +10,7 @@ Build order and acceptance criteria: `docs/IMPLEMENTATION_PLAN.md`.
 
 ## Current State
 
-**Phases 1–5 complete. 300/300 tests passing.**
+**Phases 1–5 complete. 306/306 tests passing.**
 
 | Phase | Status | Notes |
 |-------|--------|-------|
@@ -25,11 +25,12 @@ Build order and acceptance criteria: `docs/IMPLEMENTATION_PLAN.md`.
 Additional work:
 - **Draws are allowed** (`WinReason::Draw`): both Command Cores die the same tick, or the tick cap is
   reached with territory difference ≤ `cfg::DRAW_TERRITORY_MARGIN` (5%). Don't "fix" them away.
-- `ABI_VERSION` is 13 (8 added `StructureView`: all own structures; 9 added `EnemyStructureView`:
+- `ABI_VERSION` is 14 (8 added `StructureView`: all own structures; 9 added `EnemyStructureView`:
   enemy structures in sight; 10 renamed `Command::unit_id` → `entity_id`: Produce is issued by the
   Core (Drones) or a Factory (ships) itself; 11 added `UnitView::cargo_energy/cargo_alloy`; 12 added `StructureView::build_ticks_left` and
   `EnemyStructureView::building` for claim construction; 13: Factories are built the same way,
-  so those fields now apply to them too). Bumping it invalidates all existing replay files and every compiled bot.
+  so those fields now apply to them too; 14 added shields: `UnitView::shield/shield_wait`,
+  `EnemyView::shield`). Bumping it invalidates all existing replay files and every compiled bot.
 - Hard caps `UNIT_HARD_CAP` (256, queued ships count) and `STRUCTURE_HARD_CAP` (128) are enforced in
   `economy.cpp`: they bound the snapshot buffer, and the runner clamps to them when copying in.
 
@@ -152,7 +153,7 @@ Standard match setup (Command Core + starting units on free tiles near each spaw
 |---------------|-------------|
 | `ud_viz` | Terminal renderer (raw ANSI) |
 | `ud_viz_nc` | ncurses renderer (optional, requires libncurses) |
-| `ud_viz_imgui` | Dear ImGui, isometric 2:1 projection (optional, requires libglfw3-dev). Z toggles claim zones, drawn with the engine's `territory_owners()`. Resource nodes are amber crystal clusters, nebulae drifting violet gas (thin veil drawn over units inside); a Drone's cargo is a matching amber bar on its lower-left edge (HP is lower-right) |
+| `ud_viz_imgui` | Dear ImGui, isometric 2:1 projection (optional, requires libglfw3-dev). Z toggles claim zones, drawn with the engine's `territory_owners()`. Resource nodes are amber crystal clusters, nebulae drifting violet gas (thin veil drawn over units inside); a Drone's cargo is a matching amber bar on its lower-left edge (HP is lower-right, with a cyan shield bar just inside it) |
 | `ud_shape_editor` | ImGui editor for unit/structure render shapes; reads/writes `.udshapes` files (`shape_model.hpp`) |
 | `Makefile.em` | Emscripten browser build → `viz/web/index.html`; drag-and-drop `.ud` files |
 
@@ -234,6 +235,11 @@ Compile flags enforcing these: `-ffp-contract=off -fno-fast-math` (in `cmake/Com
   nearest visible enemy unit within `CLAIM_ATTACK_RANGE` (2). Sized to beat one Interceptor at
   full claim hp but lose to two (`Combat.FullStrengthClaimSeesOffALoneScoutButNotTwo`).
 - **No Gather command:** harvesting is automatic; the kind value is reserved and rejected.
+- **Shields:** ships have a shield over their hull (`hp`). Hits take shield first, overflow
+  to hull; hull never recovers. A ship unhit for `SHIELD_REGEN_DELAY` ticks regains its type's
+  `_SHIELD_REGEN` per tick (end of combat). Any hit restarts the wait, even one the shield
+  absorbs whole, splash and friendly fire included; firing doesn't. Drones and structures
+  have none (a Core shield would stall games). Weapon-vs-shield modifiers: deferred.
 - **No upkeep** for now; revisit only if calibration shows hoarding or spam.
 - **Terrain memory:** terrain once seen stays known (it is static). Units and structures need
   current sight. The snapshot still sends only in-sight tiles; bots remember the rest themselves.

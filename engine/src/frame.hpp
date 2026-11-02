@@ -22,6 +22,8 @@ struct UnitFrame {
   int32_t max_hp;
   int32_t cargo_energy{0}; // Drones: carried, not yet deposited
   int32_t cargo_alloy{0};
+  int32_t shield{0};
+  int32_t max_shield{0};
 
   bool carrying() const { return cargo_energy > 0 || cargo_alloy > 0; }
 };
