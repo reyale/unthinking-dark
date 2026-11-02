@@ -51,7 +51,9 @@ struct FrameState {
 };
 
 // Re-simulate a replay log and collect one FrameState per completed tick, plus
-// the initial state before tick 1. The last frame has result set.
-std::vector<FrameState> replay_frames(const ReplayLog& log);
+// the initial state before tick 1. The last frame has result set. `fingerprint`, if given,
+// receives the same state hash replay() returns, so a viewer needn't simulate twice to check
+// the log against its expected_hash.
+std::vector<FrameState> replay_frames(const ReplayLog& log, uint64_t* fingerprint = nullptr);
 
 } // namespace game

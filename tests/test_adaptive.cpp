@@ -1,6 +1,7 @@
 #include "adaptive_bot.hpp"
 #include "config.hpp"
 #include "expander_bot.hpp"
+#include "frame.hpp"
 #include "map_gen.hpp"
 #include "map_io.hpp"
 #include "match.hpp"
@@ -126,4 +127,7 @@ TEST(Adaptive, ReplayReproducesHash) {
   game::AdaptiveBot a, b;
   const auto rec = play(md, a, b);
   EXPECT_EQ(game::replay(rec.replay), rec.replay.expected_hash);
+  uint64_t fingerprint = 0;
+  game::replay_frames(rec.replay, &fingerprint);
+  EXPECT_EQ(fingerprint, rec.replay.expected_hash) << "viewers check the log with this alone";
 }

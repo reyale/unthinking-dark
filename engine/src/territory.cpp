@@ -100,7 +100,10 @@ TerritoryState run_territory(World& world, uint32_t tick_cap) {
       claims.push_back({s.pos, s.faction.value});
   if (claims.empty())
     return {};
-  return territory_pct(world.map, territory_owners(world.map, claims));
+  if (claims == world.territory_claims)
+    return world.last_territory;
+  world.territory_claims = std::move(claims);
+  return territory_pct(world.map, territory_owners(world.map, world.territory_claims));
 }
 
 int32_t win_threshold(uint32_t tick, uint32_t tick_cap) {

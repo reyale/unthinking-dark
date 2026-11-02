@@ -29,7 +29,7 @@ FrameState capture(const World& world, std::optional<MatchResult> result) {
 
 } // namespace
 
-std::vector<FrameState> replay_frames(const ReplayLog& log) {
+std::vector<FrameState> replay_frames(const ReplayLog& log, uint64_t* fingerprint) {
   // Rebuild map — mirrors replay() in replay.cpp intentionally; both must stay in sync.
   Map map = Map::make(log.map_w, log.map_h);
   for (int32_t y = 0; y < log.map_h; ++y) {
@@ -73,6 +73,7 @@ std::vector<FrameState> replay_frames(const ReplayLog& log) {
       break;
   }
 
+  if (fingerprint) *fingerprint = hash.fingerprint();
   return frames;
 }
 

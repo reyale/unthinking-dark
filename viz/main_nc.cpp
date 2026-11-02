@@ -42,12 +42,11 @@ int main(int argc, char** argv) {
   fprintf(stderr, "Replay: %zu ticks, %dx%d map — re-simulating...\n",
           log.ticks.size(), log.map_w, log.map_h);
 
-  uint64_t replayed = game::replay(log);
+  uint64_t replayed = 0;
+  game::Map map = map_from_log(log);
+  auto frames   = game::replay_frames(log, &replayed);
   if (replayed != log.expected_hash)
     fprintf(stderr, "warning: hash mismatch — replay may not reproduce the original match\n");
-
-  game::Map map = map_from_log(log);
-  auto frames   = game::replay_frames(log);
   if (frames.empty()) {
     fprintf(stderr, "error: empty replay\n");
     return 1;

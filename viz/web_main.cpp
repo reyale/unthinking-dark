@@ -147,10 +147,11 @@ extern "C" EMSCRIPTEN_KEEPALIVE void load_replay_from_fs() {
   g.error_msg.clear();
   try {
     game::ReplayLog log = game::read_replay_file("/replay.ud");
-    if (game::replay(log) != log.expected_hash)
-      fprintf(stderr, "warning: hash mismatch — replay may not reproduce original\n");
+    uint64_t fingerprint = 0;
     g.map    = map_from_log(log);
-    g.frames = game::replay_frames(log);
+    g.frames = game::replay_frames(log, &fingerprint);
+    if (fingerprint != log.expected_hash)
+      fprintf(stderr, "warning: hash mismatch — replay may not reproduce original\n");
     g.cur    = 0;
     g.total  = static_cast<int>(g.frames.size());
     g.state  = AppState::Playing;

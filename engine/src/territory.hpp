@@ -16,6 +16,7 @@ struct TerritoryState {
 struct ClaimAnchor {
   Vec2 pos;
   uint32_t faction;
+  bool operator==(const ClaimAnchor&) const = default;
 };
 
 // Owner of every tile (row-major, y * width + x): 0/1 for a faction, -1 for neutral, contested

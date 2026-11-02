@@ -2,6 +2,7 @@
 #include "world.hpp"
 #include "entity.hpp"
 #include "grid.hpp"
+#include "occupancy.hpp"
 #include "vision.hpp"
 #include "config.hpp"
 #include <map>
@@ -16,23 +17,18 @@ struct CombatTarget {
   bool is_null() const { return unit_id.is_null() && struct_id.is_null(); }
 };
 
-bool target_in_range(const World& world, const Unit& unit, const NebulaSight& sight) {
+bool target_in_range(const World&, const Unit& unit, const NebulaSight& sight,
+                     const Occupancy& occ) {
   const int32_t range = unit.stats().range;
   if (range == 0)
     return false;
-  for (const auto& [eid, enemy] : world.units)
-    if (enemy.faction != unit.faction && enemy.alive() &&
-        manhattan(unit.pos, enemy.pos) <= range && sight.sees(unit.faction, enemy.pos))
-      return true;
-  for (const auto& [sid, s] : world.structures)
-    if (s.faction != unit.faction && s.alive() && manhattan(unit.pos, s.pos) <= range &&
-        sight.sees(unit.faction, s.pos))
-      return true;
-  return false;
+  return occ.any_within(unit.pos, range, [&](const auto& e) {
+    return e.faction != unit.faction && sight.sees(unit.faction, e.pos);
+  });
 }
 
 bool target_in_range(const World& world, const Unit& unit) {
-  return target_in_range(world, unit, NebulaSight(world));
+  return target_in_range(world, unit, NebulaSight(world), Occupancy(world));
 }
 
 // Pick the best target for `attacker`, among enemies in range that its faction can see (only
@@ -42,7 +38,7 @@ bool target_in_range(const World& world, const Unit& unit) {
 //   3. Nearest enemy unit in range (ties: ascending unit-id)
 //   4. Nearest enemy structure in range (ties: ascending structure-id)
 static CombatTarget pick_target(const World& world, const Unit& attacker, const Command* cmd,
-                                const NebulaSight& sight) {
+                                const NebulaSight& sight, const Occupancy& occ) {
   const int32_t range = attacker.stats().range;
   if (range == 0)
     return {};
@@ -64,57 +60,23 @@ static CombatTarget pick_target(const World& world, const Unit& attacker, const 
       return {{}, sid};
   }
 
-  // Auto: nearest enemy unit, ties broken by ascending unit-id
-  UnitId best_unit{};
-  int32_t best_dist = std::numeric_limits<int32_t>::max();
-  for (const auto& [eid, enemy] : world.units) {
-    if (enemy.faction == attacker.faction || !enemy.alive())
-      continue;
-    if (!targetable(enemy.pos))
-      continue;
-    int32_t d = manhattan(attacker.pos, enemy.pos);
-    if (d < best_dist || (d == best_dist && eid < best_unit)) {
-      best_dist = d;
-      best_unit = eid;
-    }
-  }
-  if (!best_unit.is_null())
-    return {best_unit, {}};
-
-  // Auto fallback: nearest enemy structure, ties broken by ascending structure-id
-  StructureId best_struct{};
-  int32_t best_struct_dist = std::numeric_limits<int32_t>::max();
-  for (const auto& [sid, s] : world.structures) {
-    if (s.faction == attacker.faction || !s.alive())
-      continue;
-    if (!targetable(s.pos))
-      continue;
-    int32_t d = manhattan(attacker.pos, s.pos);
-    if (d < best_struct_dist || (d == best_struct_dist && sid < best_struct)) {
-      best_struct_dist = d;
-      best_struct = sid;
-    }
-  }
-  return {{}, best_struct};
+  // Auto: nearest enemy unit, then nearest enemy structure; ties to the lower id.
+  auto enemy_seen = [&](const auto& e) {
+    return e.faction != attacker.faction && sight.sees(attacker.faction, e.pos);
+  };
+  const auto [unit, structure] = occ.nearest_target(attacker.pos, range, enemy_seen);
+  if (!unit.is_null())
+    return {unit, {}};
+  return {{}, structure};
 }
 
 // Splash damage centered on `center`, radius 1.  Hits all living units and
 // structures (friendly fire applies to both).
-static void apply_splash(World& world, Vec2 center, int32_t dmg,
+static void apply_splash(const Occupancy& occ, Vec2 center, int32_t dmg,
                          std::map<UnitId, int32_t>&      pending_units,
                          std::map<StructureId, int32_t>& pending_structs) {
-  for (const auto& [uid, unit] : world.units) {
-    if (!unit.alive())
-      continue;
-    if (manhattan(unit.pos, center) <= 1)
-      pending_units[uid] += dmg;
-  }
-  for (const auto& [sid, s] : world.structures) {
-    if (!s.alive())
-      continue;
-    if (manhattan(s.pos, center) <= 1)
-      pending_structs[sid] += dmg;
-  }
+  occ.each_unit_within(center, 1, [&](UnitId id) { pending_units[id] += dmg; });
+  occ.each_structure_within(center, 1, [&](StructureId id) { pending_structs[id] += dmg; });
 }
 
 static void log_shot(CombatLog* log, const Unit& attacker, const CombatTarget& tgt, Vec2 to,
@@ -138,19 +100,20 @@ static void log_kill(CombatLog* log, const Structure& s) {
 
 void run_combat(World& world, const ValidatedCommands& cmds_a, const ValidatedCommands& cmds_b,
                 CombatLog* log) {
-  ValidatedCommands all_cmds;
-  for (const auto& [k, v] : cmds_a)
-    all_cmds.emplace(k, v);
-  for (const auto& [k, v] : cmds_b)
-    all_cmds.emplace(k, v);
-
+  // A unit belongs to one faction, so at most one side holds its command.
   auto get_cmd = [&](UnitId uid) -> const Command* {
-    auto it = all_cmds.find(uid);
-    return it != all_cmds.end() ? &it->second : nullptr;
+    if (auto it = cmds_a.find(uid); it != cmds_a.end())
+      return &it->second;
+    auto it = cmds_b.find(uid);
+    return it != cmds_b.end() ? &it->second : nullptr;
   };
 
-  // Who sees into which nebula is fixed at the start of combat, from post-movement positions.
+  // Who sees into which nebula, and who stands where, are fixed at the start of combat, from
+  // post-movement positions; entities killed meanwhile drop out through their hp. The index's
+  // storage is reused across calls; every rebuild refills it.
   const NebulaSight sight(world);
+  thread_local Occupancy occ;
+  occ.rebuild(world);
 
   // --- Sub-phase A: first-strike (Frigates only) ---------------------------
   for (auto& [uid, unit] : world.units) {
@@ -161,7 +124,7 @@ void run_combat(World& world, const ValidatedCommands& cmds_a, const ValidatedCo
     if (kind != CommandKind::Attack && kind != CommandKind::MoveAttack)
       continue;
 
-    CombatTarget tgt = pick_target(world, unit, cmd, sight);
+    CombatTarget tgt = pick_target(world, unit, cmd, sight, occ);
     if (tgt.is_null())
       continue;
 
@@ -187,6 +150,7 @@ void run_combat(World& world, const ValidatedCommands& cmds_a, const ValidatedCo
     }
   }
   world.purge_dead();
+  occ.rebuild(world); // the purge freed what it pointed at
 
   // --- Sub-phase B: simultaneous -------------------------------------------
   std::map<UnitId, int32_t>      pending_units;
@@ -200,7 +164,7 @@ void run_combat(World& world, const ValidatedCommands& cmds_a, const ValidatedCo
     if (kind != CommandKind::Attack && kind != CommandKind::MoveAttack)
       continue;
 
-    CombatTarget tgt = pick_target(world, unit, cmd, sight);
+    CombatTarget tgt = pick_target(world, unit, cmd, sight, occ);
     if (tgt.is_null())
       continue;
 
@@ -212,7 +176,7 @@ void run_combat(World& world, const ValidatedCommands& cmds_a, const ValidatedCo
         continue;
       log_shot(log, unit, tgt, s->pos, false);
       if (unit.stats().splash)
-        apply_splash(world, s->pos, unit.stats().dmg, pending_units, pending_structs);
+        apply_splash(occ, s->pos, unit.stats().dmg, pending_units, pending_structs);
       else
         pending_structs[tgt.struct_id] += unit.stats().dmg;
     } else {
@@ -221,7 +185,7 @@ void run_combat(World& world, const ValidatedCommands& cmds_a, const ValidatedCo
         continue;
       log_shot(log, unit, tgt, t->pos, false);
       if (unit.stats().splash)
-        apply_splash(world, t->pos, unit.stats().dmg, pending_units, pending_structs);
+        apply_splash(occ, t->pos, unit.stats().dmg, pending_units, pending_structs);
       else
         pending_units[tgt.unit_id] += unit.stats().dmg;
     }
@@ -231,17 +195,9 @@ void run_combat(World& world, const ValidatedCommands& cmds_a, const ValidatedCo
   for (const auto& [sid, s] : world.structures) {
     if (!s.alive() || s.type != StructureType::ClaimNode || !s.complete())
       continue;
-    UnitId best{};
-    int32_t best_dist = std::numeric_limits<int32_t>::max();
-    for (const auto& [uid, u] : world.units) {
-      if (!u.alive() || u.faction == s.faction || !sight.sees(s.faction, u.pos))
-        continue;
-      const int32_t d = manhattan(s.pos, u.pos);
-      if (d <= cfg::CLAIM_ATTACK_RANGE && d < best_dist) {
-        best_dist = d;
-        best = uid;
-      }
-    }
+    const UnitId best = occ.nearest_unit(s.pos, cfg::CLAIM_ATTACK_RANGE, [&](const Unit& u) {
+      return u.faction != s.faction && sight.sees(s.faction, u.pos);
+    });
     if (best.is_null())
       continue;
     pending_units[best] += cfg::CLAIM_ATTACK_DMG;

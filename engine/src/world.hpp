@@ -31,6 +31,10 @@ struct World {
 
   // Last territory partition (updated each tick after run_territory).
   TerritoryState last_territory{};
+  // The finished claims last_territory was computed from. Territory depends only on these and
+  // the static map, so run_territory skips the partition while they are unchanged. Derived
+  // state: not hashed.
+  std::vector<ClaimAnchor> territory_claims{};
 
   // ---- Factory helpers --------------------------------------------------
 

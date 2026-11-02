@@ -78,6 +78,7 @@ For LSP support: `ln -s build/compile_commands.json compile_commands.json`
 | `entity.hpp` | `UnitType`, `StructureType`, `OrderType` enums; core structs. |
 | `world.hpp/.cpp` | Authoritative game state. `std::map` for units/structures (never unordered). |
 | `vision.hpp/.cpp` | `sees_tile()` (the one sight rule: Manhattan, nebula tiles only within `NEBULA_SIGHT`) and `NebulaSight` (who can target into which nebula; combat and MoveAttack). |
+| `occupancy.hpp/.cpp` | `Occupancy`: flat per-tile grids of who stands where, rebuilt each movement step and in combat (again after the first-strike purge: it holds pointers). Range queries (targeting, MoveAttack halts, splash, claim guns) visit only the tiles in range, nearest ring first, ties to the lower id: exactly what an id-ordered scan gives, which they fall back to if a hand-built world stacks units. |
 | `snapshot.hpp/.cpp` | Fog-masked snapshot builder, via `sees_tile()`. Own units and structures always included; enemy units and structures only on visible tiles. |
 | `command.hpp/.cpp` | `ValidatedCommands` and `validate_commands()`. |
 | `movement.hpp/.cpp` | Stepped simultaneous movement. Chains advance (a unit may enter a tile vacated on the same step); swaps and other closed loops are blocked whole. |

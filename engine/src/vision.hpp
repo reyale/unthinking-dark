@@ -5,7 +5,7 @@
 #include "world.hpp"
 #include <array>
 #include <cstdint>
-#include <vector>
+#include <set>
 
 namespace game {
 
@@ -26,7 +26,9 @@ public:
 
 private:
   const Map* map_;
-  std::array<std::vector<uint8_t>, MAX_FACTIONS> seen_;
+  // Only nebula tiles: everywhere else is seen anyway, and few tiles are both nebula and near a
+  // faction's units, so this stays small where a full grid would be cleared every step.
+  std::array<std::set<Vec2>, MAX_FACTIONS> seen_;
 };
 
 } // namespace game

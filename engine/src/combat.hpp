@@ -8,6 +8,7 @@
 namespace game {
 
 class NebulaSight;
+class Occupancy;
 
 struct World;
 struct Unit;
@@ -66,7 +67,8 @@ void run_combat(World& world, const ValidatedCommands& cmds_a, const ValidatedCo
 // structure within its range that its faction can see (nebulae hide). Movement uses this to
 // halt MoveAttack units, so a unit stops at full range whether it is closing on a ship or a
 // building.
-bool target_in_range(const World& world, const Unit& unit, const NebulaSight& sight);
-bool target_in_range(const World& world, const Unit& unit); // builds the NebulaSight itself
+bool target_in_range(const World& world, const Unit& unit, const NebulaSight& sight,
+                     const Occupancy& occ);
+bool target_in_range(const World& world, const Unit& unit); // builds the other two itself
 
 } // namespace game

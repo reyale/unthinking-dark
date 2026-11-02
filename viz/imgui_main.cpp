@@ -393,10 +393,11 @@ static void try_load(const char* path) {
   g.error.clear();
   try {
     auto log = game::read_replay_file(path);
-    if (game::replay(log) != log.expected_hash)
-      fprintf(stderr, "warning: hash mismatch — replay may not reproduce original match\n");
+    uint64_t fingerprint = 0;
     g.map    = map_from_log(log);
-    g.frames = game::replay_frames(log);
+    g.frames = game::replay_frames(log, &fingerprint);
+    if (fingerprint != log.expected_hash)
+      fprintf(stderr, "warning: hash mismatch — replay may not reproduce original match\n");
     compute_unit_facings();
     compute_first_seen();
     g.fx     = FxState{};
