@@ -57,7 +57,7 @@ how to verify each piece**. Section refs like §5 point into `DESIGN.md`.
   binary at load. No procedural generation in v1.
 
 **Hard caps (v1, engine-enforced — bound worst-case sizing)**
-- Map ≤ **128×128**. Units ≤ **256 per side**. Ticks ≤ **4096 per match**.
+- Map ≤ **128×128**. Units ≤ **4% of map area per side** (655 on 128×128). Ticks ≤ **4096 per match**.
 
 **Determinism hash**
 - Per-tick **rolling xxh3** digest over canonical serialized state → one final match

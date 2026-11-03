@@ -27,20 +27,27 @@ A valid bot module must export:
 | `memory`        | memory   | Linear memory; must be large enough (see below)  |
 | `SNAPSHOT_ADDR` | global i32 | Byte offset where the engine writes the snapshot |
 | `COMMAND_ADDR`  | global i32 | Byte offset where the bot writes commands        |
-| `init`          | func (i32) → () | Called once before tick 0 with `faction_id` |
+| `init`          | func (i32) → () | Called once before tick 0 with `faction_id`; the snapshot buffer then holds the whole map |
 | `on_tick`       | func () → i32   | Called every tick; returns command count    |
 
 The engine writes a flat snapshot buffer into `[SNAPSHOT_ADDR, SNAPSHOT_ADDR + N)`
 and reads commands from `[COMMAND_ADDR, COMMAND_ADDR + count * 24)` after `on_tick`
 returns. The bot must reserve enough linear memory to cover both regions for
-worst-case v1 caps (`UNIT_HARD_CAP` units, `STRUCTURE_HARD_CAP` structures, 2× units of
-visible enemies, `STRUCTURE_HARD_CAP` visible enemy structures, the whole largest map of
-tiles: ≈ 278 KiB snapshot + 6 KiB commands; 6 WASM
-pages suffices). Array counts are clamped to those caps when the snapshot is copied in, so the
+worst-case v1 caps (`UNIT_HARD_CAP` units, the cap on the largest map; `STRUCTURE_HARD_CAP`
+structures, 2× units of visible enemies, `STRUCTURE_HARD_CAP` visible enemy structures, the
+whole largest map of tiles: ≈ 318 KiB snapshot + 15 KiB commands; 6 WASM pages suffices). Array counts are clamped to those caps when the snapshot is copied in, so the
 copy can never run past the buffer the bot was validated to have.
 
 The snapshot holds, in order: header, my units, my structures (all of them, fog or not),
 visible enemy units, visible enemy structures, visible tiles. Use the header offsets rather than assuming the order.
+
+Before `init` the same buffer holds the map, since terrain is public: a snapshot with only
+tiles, one `TileView` per tile in row order (terrain, resource amount), and `map_w`, `map_h`,
+`my_faction_id` in the header. `sdk/cpp/include/ud/bot_host.hpp` turns it back into a `Map`.
+
+Copy-on-write memory initialization is off (`memory_init_cow`): it maps a module's data
+segments straight into Wasmtime's own memory, which the capped memory creator replaces, and
+the two together panic on any module with sizeable data (one linking libc, say).
 
 See `engine/src/abi.hpp` for the exact struct layouts.
 

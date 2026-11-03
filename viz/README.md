@@ -39,6 +39,11 @@ file) and presents it frame by frame in the terminal.
 
 Faction 0 units/structures are rendered in **cyan**, faction 1 in **red**.
 
+In a faction's view, tiles out of its sight still show their terrain, dimmed (terrain is
+public: every bot gets the whole map at init); units and structures there are hidden. Sight
+is the engine's (`sees_tile()`), from units and from structures alike. The ImGui and browser
+viewers draw it the same way.
+
 ## Library
 
 `viz_lib` (static) exposes the rendering API for use in unit tests and other

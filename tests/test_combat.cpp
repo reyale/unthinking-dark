@@ -25,6 +25,12 @@ static game::ValidatedCommands attack_cmd(game::UnitId attacker) {
   return vc;
 }
 
+// Nothing fires at what its side can't see: an own Drone (sight 3, no gun) standing by `at`
+// lets a longer-ranged ship fire there.
+static void spot(game::World& w, game::FactionId f, game::Vec2 at) {
+  w.spawn_unit(f, game::UnitType::Drone, at);
+}
+
 // ---- First-strike --------------------------------------------------------
 
 TEST(Combat, FrigateFirstStrikeKillsBeforeSimultaneous) {
@@ -39,16 +45,31 @@ TEST(Combat, FrigateFirstStrikeKillsBeforeSimultaneous) {
 
   game::run_combat(w, cmds_a, cmds_b);
 
-  // The Frigate's first strike breaks the Interceptor's shield and dents its hull without
-  // killing it, so it fires back in the simultaneous phase, into the Frigate's shield.
+  // The Frigate's first strike lands on the Interceptor's shield, which feels a third of it, so
+  // it fires back in the simultaneous phase, into the Frigate's shield.
   using namespace game::cfg;
-  static_assert(FRIGATE_DMG > INTERCEPTOR_SHIELD &&
-                FRIGATE_DMG < INTERCEPTOR_SHIELD + INTERCEPTOR_HP);
+  constexpr int32_t felt = FRIGATE_DMG * FRIGATE_SHIELD_DMG_PCT / FULL_SHIELD_DMG_PCT;
+  static_assert(felt < INTERCEPTOR_SHIELD);
   static_assert(INTERCEPTOR_DMG < FRIGATE_SHIELD);
-  EXPECT_EQ(inter.shield, 0);
-  EXPECT_EQ(inter.hp, INTERCEPTOR_HP + INTERCEPTOR_SHIELD - FRIGATE_DMG);
+  EXPECT_EQ(inter.shield, INTERCEPTOR_SHIELD - felt);
+  EXPECT_EQ(inter.hp, INTERCEPTOR_HP);
   EXPECT_EQ(frigate.shield, FRIGATE_SHIELD - INTERCEPTOR_DMG);
   EXPECT_EQ(frigate.hp, FRIGATE_HP);
+}
+
+// Once a Frigate's hit breaks a shield, the part the shield didn't stop lands on the hull in full.
+TEST(Combat, FrigateHitThroughAShieldReachesTheHullInFull) {
+  auto w = make_combat_world();
+  auto& frigate = w.spawn_unit({0}, game::UnitType::Frigate, {5, 5});
+  auto& inter = w.spawn_unit({1}, game::UnitType::Interceptor, {6, 5});
+  inter.shield = 2;
+  game::run_combat(w, attack_cmd(frigate.id), {});
+
+  using namespace game::cfg;
+  // 2 shield stops 2 / 33% = 6.06, so 7 of the hit (rounded up), and the other 5 reach the hull.
+  static_assert(FRIGATE_DMG == 12 && FRIGATE_SHIELD_DMG_PCT == 33);
+  EXPECT_EQ(inter.shield, 0);
+  EXPECT_EQ(inter.hp, INTERCEPTOR_HP - 5);
 }
 
 TEST(Combat, FrigateKillsWeakTargetBeforeSimultaneous) {
@@ -246,6 +267,7 @@ TEST(Combat, SplashDamagesStructureInRadius) {
   auto& arty   = w.spawn_unit({0}, game::UnitType::Artillery, {5, 5});
   w.spawn_unit({1}, game::UnitType::Interceptor, {8, 5}); // primary target
   auto& fac    = w.spawn_structure({1}, game::StructureType::Factory, {8, 6}); // in splash
+  spot(w, {0}, {8, 8}); // beyond the splash
 
   auto cmds_a = attack_cmd(arty.id);
   game::ValidatedCommands empty_b;
@@ -260,6 +282,7 @@ TEST(Combat, ArtilleryTargetsStructureWithSplash) {
   auto w = make_combat_world();
   auto& arty = w.spawn_unit({0}, game::UnitType::Artillery, {5, 5}); // range=3
   auto& fac  = w.spawn_structure({1}, game::StructureType::Factory, {8, 5}); // dist=3
+  spot(w, {0}, {8, 8});
 
   auto cmds_a = attack_cmd(arty.id);
   game::ValidatedCommands empty_b;
@@ -302,6 +325,7 @@ TEST(CombatLog, FirstStrikeKillStopsReturnFire) {
   game::UnitId frigate_id = w.spawn_unit({0}, game::UnitType::Frigate, {5, 5}).id;
   game::UnitId inter_id = w.spawn_unit({1}, game::UnitType::Interceptor, {6, 5}).id;
   w.find_unit(inter_id)->hp = 1;
+  w.find_unit(inter_id)->shield = 0;
 
   game::CombatLog log;
   game::run_combat(w, attack_cmd(frigate_id), attack_cmd(inter_id), &log);
@@ -321,6 +345,7 @@ TEST(CombatLog, SplashKillsIncludeFriendlyFire) {
   game::UnitId enemy_id = w.spawn_unit({1}, game::UnitType::Interceptor, {7, 5}).id;
   game::UnitId friend_id = w.spawn_unit({0}, game::UnitType::Drone, {7, 6}).id;
   w.find_unit(enemy_id)->hp = 1;
+  w.find_unit(enemy_id)->shield = 0;
   w.find_unit(friend_id)->hp = 1;
 
   game::CombatLog log;
@@ -464,6 +489,7 @@ TEST(Shields, ShieldTakesTheHitAndOnlyTheOverflowReachesTheHull) {
   auto w = make_combat_world();
   auto& art = w.spawn_unit({0}, game::UnitType::Artillery, {1, 5});
   auto& fr = w.spawn_unit({1}, game::UnitType::Frigate, {5, 5});
+  spot(w, {0}, {5, 8});
   auto cmds = attack_cmd(art.id);
   game::ValidatedCommands empty;
   game::run_combat(w, cmds, empty);
@@ -519,7 +545,7 @@ TEST(Shields, FriendlySplashCountsAsAHit) {
   auto cmds = attack_cmd(art.id);
   game::ValidatedCommands empty;
   game::run_combat(w, cmds, empty);
-  EXPECT_EQ(mate.shield, BATTLESHIP_SHIELD - ARTILLERY_DMG);
+  EXPECT_EQ(mate.shield + mate.hp, BATTLESHIP_SHIELD + BATTLESHIP_HP - ARTILLERY_DMG);
   EXPECT_EQ(mate.shield_wait, SHIELD_REGEN_DELAY - 1);
 }
 
@@ -536,4 +562,65 @@ TEST(Shields, SnapshotShowsOwnShieldAndWaitAndEnemyShield) {
   EXPECT_EQ(snap.my_units[0].shield_wait, 3);
   ASSERT_EQ(snap.visible_enemies.size(), 1u);
   EXPECT_EQ(snap.visible_enemies[0].shield, 2);
+}
+
+// ---- First strike is simultaneous among first strikers --------------------
+
+// Two Frigates that each kill the other with one shot both die, whichever has the lower id:
+// first strike beats every other ship, not the other Frigate.
+TEST(Combat, FrigatesThatKillEachOtherBothFire) {
+  for (bool faction0_first : {true, false}) {
+    auto w = make_combat_world();
+    game::Unit* f0 = nullptr;
+    game::Unit* f1 = nullptr;
+    if (faction0_first) {
+      f0 = &w.spawn_unit({0}, game::UnitType::Frigate, {4, 5});
+      f1 = &w.spawn_unit({1}, game::UnitType::Frigate, {6, 5});
+    } else {
+      f1 = &w.spawn_unit({1}, game::UnitType::Frigate, {6, 5});
+      f0 = &w.spawn_unit({0}, game::UnitType::Frigate, {4, 5});
+    }
+    for (game::Unit* f : {f0, f1}) {
+      f->hp = 1;
+      f->shield = 0;
+    }
+    const game::UnitId id0 = f0->id, id1 = f1->id;
+    game::run_combat(w, attack_cmd(id0), attack_cmd(id1));
+    EXPECT_EQ(w.find_unit(id0), nullptr) << "faction 0 spawned first: " << faction0_first;
+    EXPECT_EQ(w.find_unit(id1), nullptr) << "faction 0 spawned first: " << faction0_first;
+  }
+}
+
+// ---- Nothing fires blind --------------------------------------------------
+
+// Artillery outranges its own sight: alone it can't fire at a ship 4 tiles off; with a spotter
+// beside the target it can.
+TEST(Combat, NothingFiresAtWhatItsSideCantSee) {
+  static_assert(game::cfg::ARTILLERY_SIGHT < 4 && game::cfg::ARTILLERY_RANGE >= 4);
+  for (bool spotted : {false, true}) {
+    auto w = make_combat_world();
+    auto& art = w.spawn_unit({0}, game::UnitType::Artillery, {1, 5});
+    auto& target = w.spawn_unit({1}, game::UnitType::Battleship, {5, 5});
+    if (spotted)
+      spot(w, {0}, {5, 8});
+    game::ValidatedCommands empty;
+    game::run_combat(w, attack_cmd(art.id), empty);
+    if (spotted)
+      EXPECT_LT(target.shield, game::cfg::BATTLESHIP_SHIELD);
+    else
+      EXPECT_EQ(target.shield, game::cfg::BATTLESHIP_SHIELD);
+  }
+}
+
+// Sight is checked again after the first strike: a spotter a Frigate kills there no longer spots
+// for the guns firing in the simultaneous sub-phase.
+TEST(Combat, ASpotterKilledByTheFirstStrikeSpotsNoMore) {
+  static_assert(game::cfg::FRIGATE_DMG >= game::cfg::DRONE_HP);
+  auto w = make_combat_world();
+  auto& art = w.spawn_unit({0}, game::UnitType::Artillery, {1, 5});
+  spot(w, {0}, {5, 7});
+  auto& fr = w.spawn_unit({1}, game::UnitType::Frigate, {5, 5}); // shoots the spotter
+  game::run_combat(w, attack_cmd(art.id), attack_cmd(fr.id));
+  EXPECT_EQ(fr.shield, game::cfg::FRIGATE_SHIELD);
+  EXPECT_EQ(fr.hp, game::cfg::FRIGATE_HP);
 }

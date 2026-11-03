@@ -1,5 +1,6 @@
 #include "render.hpp"
 #include "entity.hpp"
+#include "config.hpp"
 #include "vision.hpp"
 #include <cstdlib>
 
@@ -85,11 +86,21 @@ RenderFrame build_render_frame(const game::FrameState& frame, const game::Map& m
         }
       }
     }
-    // Own structures are always visible in their faction's view.
+    // Own structures are always visible in their faction's view, and see around them.
     for (const auto& sf : frame.structures) {
       if (view >= 0 && static_cast<int>(sf.faction.value) != view)
         continue;
       rf.cells[static_cast<size_t>(sf.pos.y * W + sf.pos.x)].visible = true;
+      if (sf.hp <= 0)
+        continue;
+      const int32_t sight = game::cfg::STRUCTURE_SIGHT;
+      for (int32_t dy = -sight; dy <= sight; ++dy)
+        for (int32_t dx = -sight; dx <= sight; ++dx) {
+          const int32_t nx = sf.pos.x + dx, ny = sf.pos.y + dy;
+          if (nx >= 0 && nx < W && ny >= 0 && ny < H &&
+              game::sees_tile(map, sf.pos, sight, {nx, ny}))
+            rf.cells[static_cast<size_t>(ny * W + nx)].visible = true;
+        }
     }
   }
 

@@ -93,13 +93,16 @@ These are non-negotiable; each one silently breaks replay if violated.
     combat and the viewer. Units inside see out normally. A unit hidden in a nebula can't be
     targeted (explicitly or automatically) by a side that doesn't see it; splash still hits
     it. Ambush zones; the map generator scatters symmetric patches over open ground.
+- **No blind fire:** a unit can target (explicitly or automatically) only what its side sees,
+  by the fog-of-war rule below: any of its living units or structures. A gun that outranges
+  its own sight (Artillery) fires at full range only with a spotter. Sight is checked against
+  who is alive when the shot is picked: a spotter killed in the first-strike sub-phase spots
+  nothing for the simultaneous one. MoveAttack halts only on a target its side sees.
 - **Fog of war:** **active-only for what moves.** A faction sees a tile only if currently
   within a friendly unit's sight radius or `STRUCTURE_SIGHT` of a friendly structure (a
-  nebula tile: only within `NEBULA_SIGHT`). **Terrain, once seen,
-  stays known**: it never changes, so there is nothing to hide again. The snapshot carries
-  only the tiles in sight this tick; a bot keeps what it has seen (its memory persists
-  across ticks), and the viewer draws explored-but-out-of-sight terrain dimmed, with
-  nothing on it. Engine computes visibility and masks the snapshot —
+  nebula tile: only within `NEBULA_SIGHT`). **Terrain is public**: every bot gets the whole
+  map (terrain and resource nodes) before tick 0 (§4.1), as in most RTS games; fog hides only
+  what stands on it. The per-tick snapshot carries only the tiles in sight this tick. Engine computes visibility and masks the snapshot —
   cheating is structurally impossible because hidden state is never serialized to the bot.
   A faction always knows its **own** units and structures (position, hp, Factory queue)
   regardless of fog. Enemy units and enemy structures appear only while on a tile within
@@ -115,7 +118,7 @@ These are non-negotiable; each one silently breaks replay if violated.
 ### 4.1 Shape
 ```
 // Author implements:
-fn on_init(map_info) -> ()          // one-time, fat startup budget, allocate/precompute
+fn on_init(map) -> ()               // one-time, fat startup budget, allocate/precompute
 fn on_tick(world: WorldView) -> Vec<Command>   // per tick, lean fuel budget
 ```
 
@@ -131,7 +134,11 @@ Contains only what fog permits:
 - `my_resources`: `{energy, alloy}`
 - `territory_pct`: current Voronoi territory share for this faction
 - `win_threshold`: current threshold value this tick (see §7)
-- map bounds / static map info
+- map bounds (`map_w`, `map_h`)
+
+`on_init` gets the whole map: before `init` the runner fills the snapshot buffer with a
+snapshot holding only tiles, one `TileView` per tile of the map (terrain and resource
+amount), and the header's `map_w`/`map_h`/`my_faction_id`.
 
 Bot must track its own memory of things that leave vision (active-only fog: no
 engine-provided last-seen positions in v1).
@@ -196,17 +203,22 @@ for step in 1..=N:
 ### Phase 3 — Combat (against final positions)
 - **Targeting rule (deterministic, part of contract):** command's target if valid and in
   range; else nearest enemy in range; else no attack.
-- **First-strike sub-phase:** first-strike units (Frigate) compute & apply damage first.
-  Iterate attackers in **ascending unit-id order**, drawing from the single seeded PRNG
-  in that order. Targets reduced to ≤0 hp are destroyed **before** the simultaneous
-  sub-phase (this is the whole point of first-strike).
+- **First-strike sub-phase:** first-strike units (Frigate) compute & apply damage first,
+  **simultaneously among themselves**: every first striker picks its target against the same
+  state and the damage lands together, so Frigates that kill each other both fire (first
+  strike beats other ships, not other Frigates, and the side with the lower ids gains
+  nothing). PRNG draws in **ascending unit-id order**. Targets reduced to ≤0 hp are destroyed
+  **before** the simultaneous sub-phase (this is the whole point of first-strike).
 - **Simultaneous sub-phase:** all non-first-strike damage (Interceptor, Artillery)
   computed against survivors, then applied together. Mutual kills both die. Splash
   (Artillery) resolves here: damage to every unit in radius, **friendly fire included**,
   all simultaneous. Finished **Claim Nodes** fire in this sub-phase too (§6): nearest
   visible enemy unit within `CLAIM_ATTACK_RANGE`, ties → lower id; never structures.
 - **Shields:** every hit, in either sub-phase, goes into the target's shield first; only
-  the overflow reaches its hp (the hull), and a unit dies when its hull reaches 0.
+  the overflow reaches its hp (the hull), and a unit dies when its hull reaches 0. A shield
+  feels only the weapon's `_SHIELD_DMG_PCT` of a hit (Frigates: 33%, everything else 100%);
+  once it breaks, the part of the hit it didn't stop lands on the hull in full. A unit's hits
+  in a sub-phase apply in the order they were fired.
 - Apply deaths at end of phase.
 - **Shield regen, last:** a unit that has gone `SHIELD_REGEN_DELAY` (v1: 5) ticks without
   being hit regains its type's `_SHIELD_REGEN` per tick, up to full. Any hit restarts the
@@ -270,10 +282,10 @@ All stats integer. Numbers are starting guesses for the simulator to tune.
 | Unit | hull | shield (regen/tick) | dmg | range | sight | speed | special | counters |
 |------|------|--------|-----|------|------|------|---------|----------|
 | **Drone** (fabricator) | 8 | — | — | — | 3 | 1 | harvests, builds structures, deploys claims | n/a (soft economy unit) |
-| **Interceptor** (brawler) | 7 | 8 (2) | 5 | 2 | 3 | 2 | simultaneous dmg; **high collision priority**; cheap; mostly shield, so it recovers between hit-and-run passes | strong vs Frigate, weak vs Artillery |
-| **Frigate** (ranged) | 45 | 20 (2) | 12 | 3 | 3 | 1 | **first-strike** | strong vs Artillery, weak vs Interceptor |
-| **Artillery** (siege) | 20 | 5 (1) | 22 | 6 | 2 | 1 | **radius-1 splash, friendly fire ON**; simultaneous dmg; expensive; cracks claims; its range is its armour | strong vs Interceptor (clumps), weak vs Frigate |
-| **Battleship** (capital) | 110 | 40 (4) | 35 | 4 | 5 | 1 | very expensive; anchors a push, and tops up its shield between them | — (calibrate) |
+| **Interceptor** (brawler) | 7 | 24 (2) | 5 | 2 | 3 | 2 | simultaneous dmg; **high collision priority**; cheap; mostly shield, which Frigate guns barely dent, and it recovers between hit-and-run passes | strong vs Frigate, weak vs Artillery |
+| **Frigate** (ranged) | 45 | 10 (2) | 12 | 3 | 3 | 1 | **first-strike**; its guns do a third of their damage to shields | strong vs Artillery, weak vs Interceptor |
+| **Artillery** (siege) | 20 | 2 (1) | 22 | 6 | 2 | 1 | **radius-1 splash, friendly fire ON**; simultaneous dmg; expensive; cracks claims; its range is its armour | strong vs Interceptor (clumps), weak vs Frigate |
+| **Battleship** (capital) | 110 | 20 (4) | 35 | 4 | 5 | 1 | very expensive; anchors a push, and tops up its shield between them | — (calibrate) |
 
 Values are `config.hpp`'s at the time of writing; that file is the source of truth. Ships
 have shields (§5 Phase 3); Drones and structures don't. Shield tops a unit up after a fight
@@ -308,8 +320,11 @@ cost; losing a claim never kills Drones, it only blocks producing more until bac
 (v1: 1)), rounded down: one Factory with 0–3 claims, two with 4–5, and so on. Build at the cap
 is refused at no cost; losing claims never destroys Factories, it only blocks building more.
 
-**Unit cap:** economy-gated soft cap + a hard ceiling (`UNIT_HARD_CAP`, v1 256 per side) purely
-to bound fuel/memory worst-case and keep rendering legible. A ship counts from the moment it is
+**Unit cap:** economy-gated soft cap + a hard ceiling per side that scales with the map:
+`unit_cap(w, h)` = `UNIT_CAP_PCT` (v1 4%) of the map's area, at least `UNIT_CAP_MIN` (v1 16), so
+256 on 80×80 and 655 (`UNIT_HARD_CAP`) on the largest map. A bigger map holds a bigger army. The
+fuel and memory budgets and the snapshot buffer are sized for `UNIT_HARD_CAP` on the largest map
+and are the same on every map: they exist to give both bots the same compute, not to be scarce. A ship counts from the moment it is
 bought (queued in its producer); Produce at the cap is refused at no cost.
 
 **Structure cap:** `STRUCTURE_HARD_CAP` (v1 128 per side, all types) bounds the snapshot the
@@ -469,8 +484,8 @@ and a late climax; draws rare (they are allowed, §7); turtles lose.
   tiles, jump lanes, sensor/interference zones.
 - Scratch memory region zeroed each tick.
 - 3rd resource type, additional unit types (Scout, etc.), claim tiers.
-- Weapons that treat shields differently from hull (e.g. splash weak vs shields): another
-  counter axis on top of the triangle, once plain shields have been watched in fights.
+- More weapons that treat shields differently from hull (e.g. splash weak vs shields), beyond
+  the Frigate's.
 - Shields on structures (a Command Core shield would make chip damage pointless and push
   games toward the tick cap).
 - Procedural map generation.

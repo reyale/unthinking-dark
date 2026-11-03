@@ -89,14 +89,15 @@ World early_game() {
   return w;
 }
 
-// Same scene at every size: the bot's army in a block 10 wide, with 20 enemy
-// Battleships in two rows right below it. Every enemy is within 3 tiles of a friendly
-// unit (the shortest sight radius), so all 20 are in view at every army size.
+// Same scene at every size, on the largest map (the only one whose cap fits the biggest army):
+// the bot's army in a block 10 wide, with 20 enemy Battleships in two rows right below it.
+// Every enemy is within 3 tiles of a friendly unit (the shortest sight radius), so all 20 are
+// in view at every army size.
 World army(uint32_t n) {
   constexpr int32_t kCols = 10;
-  World w = blank(64, 64);
+  World w = blank(game::cfg::MAP_MAX_W, game::cfg::MAP_MAX_H);
   w.spawn_structure(kBot, StructureType::CommandCore, {2, 2});
-  fortified_enemy_core(w, {58, 58});
+  fortified_enemy_core(w, {game::cfg::MAP_MAX_W - 9, game::cfg::MAP_MAX_H - 9});
   place_block(w, kBot, {8, 8}, kCols, n);
   const int32_t rows = static_cast<int32_t>((n + kCols - 1) / kCols);
   for (int32_t i = 0; i < 20; ++i)
@@ -116,9 +117,13 @@ World dense_battle() {
   return w;
 }
 
-// Battleships (longest sight) on a lattice so the bot sees most of the largest map.
+// Battleships (longest sight) on a lattice so the bot sees most of the largest map: the widest
+// spacing that still has room for the full unit cap.
 void sight_lattice(World& w, Vec2 enemy_core) {
-  const int32_t step = game::cfg::MAP_MAX_W / 16;
+  int32_t step = game::cfg::MAP_MAX_W;
+  while (step > 1 && ((w.map.width + step - 1) / step) * ((w.map.height + step - 1) / step) <
+                         game::cfg::UNIT_HARD_CAP)
+    --step;
   for (int32_t y = step / 2; y < w.map.height; y += step)
     for (int32_t x = step / 2; x < w.map.width; x += step) {
       Vec2 p{x, y};

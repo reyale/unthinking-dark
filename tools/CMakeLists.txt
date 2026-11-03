@@ -15,3 +15,10 @@ target_include_directories(ud_run PRIVATE
     ${CMAKE_SOURCE_DIR}/maps
     ${CMAKE_SOURCE_DIR}/runner
 )
+
+add_library(arena_lib STATIC arena.cpp)
+target_link_libraries(arena_lib PUBLIC engine)
+target_include_directories(arena_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_SOURCE_DIR}/fixtures)
+
+add_executable(ud_arena ud_arena.cpp)
+target_link_libraries(ud_arena PRIVATE arena_lib)

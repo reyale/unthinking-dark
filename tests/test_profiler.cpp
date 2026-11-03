@@ -112,10 +112,11 @@ TEST(Profiler, QuadraticBotSpikesWithArmySize) {
   REQUIRE_BOT(rush, "rush_bot.wasm");
   auto fuel_ratio = [&](const std::vector<uint8_t>& bot) {
     const auto small = profiler::run_scenario(bot, scenario("army_scaling/50"));
-    const auto big   = profiler::run_scenario(bot, scenario("army_scaling/256"));
+    const auto big = profiler::run_scenario(
+        bot, scenario("army_scaling/" + std::to_string(game::cfg::UNIT_HARD_CAP)));
     return static_cast<double>(big.mean_fuel()) / static_cast<double>(small.mean_fuel());
   };
-  const double size_ratio = 256.0 / 50.0;
+  const double size_ratio = game::cfg::UNIT_HARD_CAP / 50.0;
   EXPECT_GT(fuel_ratio(quad), size_ratio * size_ratio * 0.75) << "≈quadratic growth expected";
   EXPECT_LT(fuel_ratio(rush), size_ratio) << "rush bot's cost is map-bound, not army-bound";
 }

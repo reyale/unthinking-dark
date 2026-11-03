@@ -4,6 +4,7 @@
 // If any value changes, ABI_VERSION is bumped and this file must be updated too.
 #include <abi.hpp>
 #include <config.hpp>
+#include <ud/abi_exports.hpp>
 
 namespace game {
 
@@ -33,24 +34,3 @@ enum class Terrain : uint16_t {
 };
 
 } // namespace game
-
-namespace ud {
-
-// Worst-case flat snapshot buffer size.  Must match MAX_SNAPSHOT_BYTES in
-// runner/wasm_bot.cpp — the engine validates this at bot load time.
-inline constexpr unsigned SNAPSHOT_BUFFER_SIZE =
-    sizeof(game::SnapshotHeader)
-    + (unsigned)game::cfg::UNIT_HARD_CAP * sizeof(game::UnitView)
-    + (unsigned)game::cfg::STRUCTURE_HARD_CAP * sizeof(game::StructureView)
-    + (unsigned)game::cfg::UNIT_HARD_CAP * 2u * sizeof(game::EnemyView)
-    + (unsigned)game::cfg::STRUCTURE_HARD_CAP * sizeof(game::EnemyStructureView)
-    + (unsigned)game::cfg::MAP_MAX_W * (unsigned)game::cfg::MAP_MAX_H
-      * sizeof(game::TileView);
-
-} // namespace ud
-
-// Every bot binary must export this symbol. The engine rejects bots whose
-// version doesn't match its own ABI_VERSION at load time.
-extern "C" __attribute__((used)) inline int32_t abi_version() {
-  return static_cast<int32_t>(game::cfg::ABI_VERSION);
-}

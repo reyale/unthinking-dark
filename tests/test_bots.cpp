@@ -4,6 +4,8 @@
 #include "match.hpp"
 #include "tick.hpp"
 #include "world.hpp"
+#include "stats.hpp"
+#include "config.hpp"
 #include "grid.hpp"
 #include "../../fixtures/rush_bot.hpp"
 #include "../../fixtures/econ_bot.hpp"
@@ -125,37 +127,52 @@ TEST(RushBot, ReplayFrameShotsAccountForDamage) {
     total_shots += cur.shots.size();
     total_kills += cur.kills.size();
     bool any_splash = false;
-    std::map<game::UnitId, int32_t> unit_dmg;
+    // A unit's hits in firing order, each as (damage, the weapon's shield_dmg_pct).
+    std::map<game::UnitId, std::vector<std::pair<int32_t, int32_t>>> unit_hits;
     std::map<game::StructureId, int32_t> struct_dmg;
     for (const auto& s : cur.shots) {
       any_splash |= s.splash;
-      if (!s.target_unit.is_null()) unit_dmg[s.target_unit] += s.damage;
+      const int32_t pct = s.attacker.is_null() ? game::cfg::FULL_SHIELD_DMG_PCT
+                                               : game::stats_for(s.attacker_type).shield_dmg_pct;
+      if (!s.target_unit.is_null()) unit_hits[s.target_unit].push_back({s.damage, pct});
       else struct_dmg[s.target_struct] += s.damage;
     }
     if (any_splash) continue; // splash damage isn't attributed per victim
 
-    // Hull + shield. A unit hit this tick doesn't regenerate, so its loss is exactly the
-    // damage; an unhit one can only gain shield.
-    std::map<game::UnitId, int32_t> prev_hp;
-    for (const auto& u : prev.units) prev_hp[u.id] = u.hp + u.shield;
-    std::map<game::UnitId, int32_t> cur_hp;
-    for (const auto& u : cur.units) cur_hp[u.id] = u.hp + u.shield;
-    for (const auto& [id, hp] : prev_hp) {
-      auto it = cur_hp.find(id);
+    // A unit hit this tick doesn't regenerate, so its hull and shield are exactly what its hits
+    // leave (worked through here independently of the engine); an unhit one can only gain shield.
+    std::map<game::UnitId, std::pair<int32_t, int32_t>> cur_hp; // hull, shield
+    for (const auto& u : cur.units) cur_hp[u.id] = {u.hp, u.shield};
+    for (const auto& u : prev.units) {
+      int32_t hull = u.hp, shield = u.shield;
+      for (const auto& [dmg, pct] : unit_hits[u.id]) {
+        const int32_t felt = dmg * pct / game::cfg::FULL_SHIELD_DMG_PCT;
+        if (felt <= shield) {
+          shield -= felt;
+          continue;
+        }
+        hull -= dmg - (shield * game::cfg::FULL_SHIELD_DMG_PCT + pct - 1) / pct;
+        shield = 0;
+      }
+      auto it = cur_hp.find(u.id);
       if (it != cur_hp.end()) {
-        if (unit_dmg[id] > 0)
-          EXPECT_EQ(hp - it->second, unit_dmg[id]) << "unit " << id.value << " frame " << f;
-        else
-          EXPECT_GE(it->second, hp) << "unit " << id.value << " frame " << f;
+        if (!unit_hits[u.id].empty()) {
+          EXPECT_EQ(it->second.first, hull) << "unit " << u.id.value << " frame " << f;
+          EXPECT_EQ(it->second.second, shield) << "unit " << u.id.value << " frame " << f;
+        } else {
+          EXPECT_GE(it->second.first + it->second.second, u.hp + u.shield)
+              << "unit " << u.id.value << " frame " << f;
+        }
       } else {
         bool logged = false;
-        for (const auto& k : cur.kills) logged |= (k.unit == id);
-        EXPECT_TRUE(logged) << "unit " << id.value << " vanished without a kill event";
-        EXPECT_GE(unit_dmg[id], hp);
+        for (const auto& k : cur.kills) logged |= (k.unit == u.id);
+        EXPECT_TRUE(logged) << "unit " << u.id.value << " vanished without a kill event";
+        EXPECT_LE(hull, 0) << "unit " << u.id.value << " frame " << f;
       }
     }
     for (const auto& ps : prev.structures) {
       if (ps.type == game::StructureType::ClaimNode) continue; // territory caps claim hp
+      if (ps.build_ticks_left > 0) continue;                    // hp rises while it is built
       for (const auto& cs : cur.structures) {
         if (cs.id == ps.id) {
           EXPECT_EQ(ps.hp - cs.hp, struct_dmg[ps.id]) << "structure " << ps.id.value;
@@ -169,15 +186,20 @@ TEST(RushBot, ReplayFrameShotsAccountForDamage) {
 
 // ---- EconBot ----------------------------------------------------------------
 
-TEST(EconBot, RunsFullMatch) {
+// EconBot never attacks: against a side that doesn't play it wins on territory alone, and the
+// enemy Core ends the match untouched.
+TEST(EconBot, WinsOnTerritoryWithoutAttacking) {
   auto w = make_bot_world();
-  game::EconBot a, b;
+  game::EconBot a;
+  game::IdleBot b;
   auto rec = game::run_match(w, a, 0, b, 1, 200);
-  EXPECT_TRUE(a.healthy());
-  EXPECT_TRUE(b.healthy());
-  // EconBot only moves drones; combat units hold position and never advance on
-  // the enemy CommandCore.  Match ends at tick cap.
-  EXPECT_EQ(rec.outcome.reason, game::WinReason::Draw);
+  EXPECT_EQ(rec.outcome.winner, game::FactionId{0});
+  EXPECT_EQ(rec.outcome.reason, game::WinReason::TerritoryThreshold);
+  for (const auto& [id, s] : w.structures) {
+    if (s.faction == game::FactionId{1} && s.type == game::StructureType::CommandCore) {
+      EXPECT_EQ(s.hp, game::cfg::CMD_CORE_HP);
+    }
+  }
 }
 
 TEST(EconBot, Deterministic) {

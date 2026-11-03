@@ -13,8 +13,18 @@ inline constexpr int32_t MAP_DEFAULT_H = 80; // v1 placeholder
 
 // ---- Match -------------------------------------------------------------
 inline constexpr int32_t TICK_CAP = 3000;     // v1 placeholder
-inline constexpr int32_t UNIT_HARD_CAP = 256; // per side; bounds fuel/memory worst-case
-// Per side, all structure types. Bounds the snapshot like UNIT_HARD_CAP; Build and
+// Per side, the unit cap is UNIT_CAP_PCT percent of the map's area (queued ships count), never
+// below UNIT_CAP_MIN: a bigger map holds a bigger army.
+inline constexpr int32_t UNIT_CAP_PCT = 4;  // 256 on the default map (v1 placeholder)
+inline constexpr int32_t UNIT_CAP_MIN = 16; // v1 placeholder
+constexpr int32_t unit_cap(int32_t w, int32_t h) {
+  const int32_t pct = w * h * UNIT_CAP_PCT / 100;
+  return pct > UNIT_CAP_MIN ? pct : UNIT_CAP_MIN;
+}
+// The cap on the largest map. The snapshot buffer and the fuel and memory budgets are sized for
+// it and apply unchanged on every map, so no bot gets a different budget from the map it is on.
+inline constexpr int32_t UNIT_HARD_CAP = unit_cap(MAP_MAX_W, MAP_MAX_H);
+// Per side, all structure types, on every map. Bounds the snapshot like UNIT_HARD_CAP; Build and
 // DeployClaim are refused at the cap.
 inline constexpr int32_t STRUCTURE_HARD_CAP = 128; // v1 placeholder
 // Every structure sees this far (Manhattan), so a base isn't blind without units nearby.
@@ -52,7 +62,11 @@ inline constexpr int32_t CLAIM_ATTACK_RANGE = 2;
 // hull. Hull never recovers. Shields regenerate _SHIELD_REGEN per tick, up to full, once the
 // ship has gone SHIELD_REGEN_DELAY ticks without being hit (any hit counts: fully absorbed,
 // splash, friendly fire). Drones and structures have no shield.
+// A weapon's _SHIELD_DMG_PCT is how much of its damage a shield feels: Frigate guns are made for
+// hulls, so a mostly-shield Interceptor survives their first strike. Once the shield is down the
+// rest of the hit lands on the hull in full.
 inline constexpr int32_t SHIELD_REGEN_DELAY = 5;
+inline constexpr int32_t FULL_SHIELD_DMG_PCT = 100;
 
 inline constexpr int32_t DRONE_HP = 8;
 inline constexpr int32_t DRONE_DMG = 0;   // Drones are economy units; they do not attack
@@ -61,24 +75,27 @@ inline constexpr int32_t DRONE_SIGHT = 3;
 inline constexpr int32_t DRONE_SPEED = 1;
 
 inline constexpr int32_t INTERCEPTOR_HP = 7;
-inline constexpr int32_t INTERCEPTOR_SHIELD = 8;
+inline constexpr int32_t INTERCEPTOR_SHIELD = 24;
 inline constexpr int32_t INTERCEPTOR_SHIELD_REGEN = 2;
+inline constexpr int32_t INTERCEPTOR_SHIELD_DMG_PCT = FULL_SHIELD_DMG_PCT;
 inline constexpr int32_t INTERCEPTOR_DMG = 5;
 inline constexpr int32_t INTERCEPTOR_RANGE = 2;
 inline constexpr int32_t INTERCEPTOR_SIGHT = 3;
 inline constexpr int32_t INTERCEPTOR_SPEED = 2;
 
 inline constexpr int32_t FRIGATE_HP = 45;
-inline constexpr int32_t FRIGATE_SHIELD = 20;
+inline constexpr int32_t FRIGATE_SHIELD = 10;
 inline constexpr int32_t FRIGATE_SHIELD_REGEN = 2;
+inline constexpr int32_t FRIGATE_SHIELD_DMG_PCT = 33;
 inline constexpr int32_t FRIGATE_DMG = 12;
 inline constexpr int32_t FRIGATE_RANGE = 3;
 inline constexpr int32_t FRIGATE_SIGHT = 3;
 inline constexpr int32_t FRIGATE_SPEED = 1;
 
 inline constexpr int32_t ARTILLERY_HP = 20;
-inline constexpr int32_t ARTILLERY_SHIELD = 5;
+inline constexpr int32_t ARTILLERY_SHIELD = 2;
 inline constexpr int32_t ARTILLERY_SHIELD_REGEN = 1;
+inline constexpr int32_t ARTILLERY_SHIELD_DMG_PCT = FULL_SHIELD_DMG_PCT;
 inline constexpr int32_t ARTILLERY_DMG = 22;
 inline constexpr int32_t ARTILLERY_RANGE = 6;
 inline constexpr int32_t ARTILLERY_SIGHT = 2;
@@ -86,8 +103,9 @@ inline constexpr int32_t ARTILLERY_SPEED = 1;
 inline constexpr int32_t ARTILLERY_SPLASH_RADIUS = 1;
 
 inline constexpr int32_t BATTLESHIP_HP = 110;
-inline constexpr int32_t BATTLESHIP_SHIELD = 40;
+inline constexpr int32_t BATTLESHIP_SHIELD = 20;
 inline constexpr int32_t BATTLESHIP_SHIELD_REGEN = 4;
+inline constexpr int32_t BATTLESHIP_SHIELD_DMG_PCT = FULL_SHIELD_DMG_PCT;
 inline constexpr int32_t BATTLESHIP_DMG = 35;
 inline constexpr int32_t BATTLESHIP_RANGE = 4;
 inline constexpr int32_t BATTLESHIP_SIGHT = 5;
@@ -133,8 +151,11 @@ inline constexpr int32_t BUILD_RANGE = 1;
 inline constexpr int32_t PRODUCTION_TICKS = 3; // Factory build time, every ship type (v1 placeholder)
 
 // ---- WASM budgets (v1 placeholders — tune in sim) ----------------------
+// Sized for the largest map at UNIT_HARD_CAP and used on every map: the budgets are there to give
+// both bots the same compute, not to be scarce. FUEL_PER_TICK is ~1.7x the worst fixture tick
+// in the profiler's max_legal scenario (43M).
 inline constexpr uint64_t FUEL_STARTUP = 1'000'000'000ULL;
-inline constexpr uint64_t FUEL_PER_TICK = 10'000'000ULL;
+inline constexpr uint64_t FUEL_PER_TICK = 75'000'000ULL;
 inline constexpr uint32_t MEMORY_CAP_MB = 64;
 
 // ---- Player names ------------------------------------------------------
@@ -146,6 +167,6 @@ inline constexpr int32_t DRAW_TERRITORY_MARGIN = 5; // percentage points (v1 pla
 
 // ---- ABI ---------------------------------------------------------------
 // TODO - have it generated by wireformat - see notes in abi.hpp
-inline constexpr uint32_t ABI_VERSION = 14;
+inline constexpr uint32_t ABI_VERSION = 15;
 
 } // namespace game::cfg

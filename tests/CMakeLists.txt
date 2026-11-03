@@ -89,7 +89,8 @@ else()
   message(WARNING "clang++-18 not found — SDK wasm bots will not be compiled; WasmBot.Sdk* tests will skip")
 endif()
 
-add_executable(map_tests test_map_io.cpp test_match_setup.cpp test_turtle.cpp test_adaptive.cpp)
+add_executable(map_tests test_map_io.cpp test_match_setup.cpp test_turtle.cpp test_adaptive.cpp
+                         test_rush_econ.cpp)
 target_include_directories(map_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/engine/src
     ${CMAKE_SOURCE_DIR}/maps
@@ -100,8 +101,27 @@ target_compile_definitions(map_tests PRIVATE
     MAPS_DATA_DIR="${CMAKE_SOURCE_DIR}/maps/data"
 )
 
+add_executable(arena_tests test_arena.cpp)
+target_link_libraries(arena_tests PRIVATE arena_lib GTest::gtest_main)
+
+if(UD_WASM_FIXTURES)
+  add_executable(fixture_wasm_tests test_fixture_wasm.cpp)
+  target_include_directories(fixture_wasm_tests PRIVATE
+      ${CMAKE_SOURCE_DIR}/engine/src
+      ${CMAKE_SOURCE_DIR}/maps
+      ${CMAKE_SOURCE_DIR}/fixtures
+  )
+  target_link_libraries(fixture_wasm_tests PRIVATE runner_lib maps_lib GTest::gtest_main)
+  target_compile_definitions(fixture_wasm_tests PRIVATE FIXTURE_WASM_DIR="${FIXTURE_WASM_DIR}")
+  add_dependencies(fixture_wasm_tests fixture_bots_wasm)
+endif()
+
 include(GoogleTest)
 gtest_discover_tests(engine_tests)
 gtest_discover_tests(runner_tests)
 gtest_discover_tests(map_tests)
+gtest_discover_tests(arena_tests)
 gtest_discover_tests(profiler_tests)
+if(UD_WASM_FIXTURES)
+  gtest_discover_tests(fixture_wasm_tests)
+endif()

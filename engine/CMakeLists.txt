@@ -5,7 +5,6 @@ add_library(engine STATIC
     src/grid.cpp
     src/world.cpp
     src/snapshot.cpp
-    src/vision.cpp
     src/occupancy.cpp
     src/command.cpp
     src/movement.cpp

@@ -20,7 +20,7 @@ enum class CellColor : uint8_t {
 struct RenderCell {
   char glyph{'.'};
   CellColor color{CellColor::Neutral};
-  bool visible{true}; // false = inside fog; glyph/color are irrelevant
+  bool visible{true}; // false = out of sight: glyph is the (public) terrain, nothing on it
 };
 
 struct RenderFrame {

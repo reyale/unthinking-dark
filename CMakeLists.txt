@@ -76,12 +76,28 @@ set_target_properties(wasmtime_lib PROPERTIES
 # libwasmtime.a requires these system libs on Linux
 target_link_libraries(wasmtime_lib INTERFACE dl m pthread)
 
+# ---------------------------------------------------------------------------
+# wasi-sdk: clang with a C++ standard library for wasm32, so the fixture bots (which use std::map
+# and friends) also build as .wasm; see fixtures/CMakeLists.txt. Pinned to 24 (LLVM 18): from
+# LLVM 19 clang emits bulk-memory instructions by default, which the runner rejects.
+# ---------------------------------------------------------------------------
+option(UD_WASM_FIXTURES "Also build the fixture bots as .wasm (downloads wasi-sdk)" ON)
+if(UD_WASM_FIXTURES)
+  FetchContent_Declare(
+      wasi_sdk
+      URL      https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-24/wasi-sdk-24.0-x86_64-linux.tar.gz
+      URL_HASH SHA256=c6c38aab56e5de88adf6c1ebc9c3ae8da72f88ec2b656fb024eda8d4167a0bc5
+  )
+  FetchContent_MakeAvailable(wasi_sdk)
+endif()
+
 add_subdirectory(engine)
 add_subdirectory(maps)
 add_subdirectory(viz)
 add_subdirectory(tools)
 add_subdirectory(runner)
 add_subdirectory(profiler)
+add_subdirectory(fixtures)
 
 # ---------------------------------------------------------------------------
 # Tests

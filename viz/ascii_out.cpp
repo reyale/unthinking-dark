@@ -6,6 +6,7 @@ namespace viz {
 namespace {
 
 static const char* RESET  = "\033[0m";
+static const char* DIM    = "\033[2m";
 static const char* CYAN   = "\033[36m";
 static const char* RED    = "\033[31m";
 static const char* GRAY   = "\033[90m";
@@ -56,7 +57,7 @@ void print_ascii_frame(const RenderFrame& rf) {
     for (int32_t x = 0; x < rf.width; ++x) {
       const auto& cell = rf.at(x, y);
       if (!cell.visible) {
-        putchar(' ');
+        printf("%s%c%s", DIM, cell.glyph, RESET);
       } else {
         printf("%s%c%s", ansi_color(cell.color), cell.glyph, RESET);
       }

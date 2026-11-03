@@ -10,7 +10,7 @@ Build order and acceptance criteria: `docs/IMPLEMENTATION_PLAN.md`.
 
 ## Current State
 
-**Phases 1–5 complete. 306/306 tests passing.**
+**Phases 1–5 complete. 327/327 tests passing.**
 
 | Phase | Status | Notes |
 |-------|--------|-------|
@@ -25,14 +25,19 @@ Build order and acceptance criteria: `docs/IMPLEMENTATION_PLAN.md`.
 Additional work:
 - **Draws are allowed** (`WinReason::Draw`): both Command Cores die the same tick, or the tick cap is
   reached with territory difference ≤ `cfg::DRAW_TERRITORY_MARGIN` (5%). Don't "fix" them away.
-- `ABI_VERSION` is 14 (8 added `StructureView`: all own structures; 9 added `EnemyStructureView`:
+- `ABI_VERSION` is 15 (8 added `StructureView`: all own structures; 9 added `EnemyStructureView`:
   enemy structures in sight; 10 renamed `Command::unit_id` → `entity_id`: Produce is issued by the
   Core (Drones) or a Factory (ships) itself; 11 added `UnitView::cargo_energy/cargo_alloy`; 12 added `StructureView::build_ticks_left` and
   `EnemyStructureView::building` for claim construction; 13: Factories are built the same way,
   so those fields now apply to them too; 14 added shields: `UnitView::shield/shield_wait`,
-  `EnemyView::shield`). Bumping it invalidates all existing replay files and every compiled bot.
-- Hard caps `UNIT_HARD_CAP` (256, queued ships count) and `STRUCTURE_HARD_CAP` (128) are enforced in
-  `economy.cpp`: they bound the snapshot buffer, and the runner clamps to them when copying in.
+  `EnemyView::shield`; 15: the unit cap scales with map area, which grows the snapshot buffer). Bumping it invalidates all existing replay files and every compiled bot.
+- The unit cap scales with the map: `cfg::unit_cap(w, h)` is `UNIT_CAP_PCT` (4%) of the area per
+  side (queued ships count), so 256 on 80×80. `UNIT_HARD_CAP` is that cap on the largest map
+  (655); it and `STRUCTURE_HARD_CAP` (128) bound the snapshot buffer, and the runner clamps to them
+  when copying in. Caps are enforced in `economy.cpp`.
+- **Budgets are sized once, for the largest map**, and apply on every map: fuel and memory are
+  there to give both bots the same compute, not to be scarce. `FUEL_PER_TICK` (75M) is ~1.7× the
+  worst fixture tick in the profiler's `max_legal`; re-measure if the caps or the fixtures change.
 
 ---
 
@@ -45,6 +50,9 @@ cd build && ctest --output-on-failure
 ```
 
 Requires CMake ≥ 3.20 (system cmake is 3.16; use `~/.local/bin/cmake` which is 4.x).
+
+Configuring downloads a pinned wasi-sdk (~120 MB, once) to build the fixture bots as `.wasm`;
+`-DUD_WASM_FIXTURES=OFF` skips it and the `fixture_wasm_tests`.
 
 **Linux only** for the native build: the WASM runner's capped bot memory uses `mmap`/`mprotect`, and
 `runner/CMakeLists.txt` fails configuration elsewhere. (The Emscripten viewer build doesn't include
@@ -78,12 +86,12 @@ For LSP support: `ln -s build/compile_commands.json compile_commands.json`
 | `stats.hpp/.cpp` | `UnitStats` and `stats_for(UnitType)`, built from `config.hpp`. |
 | `entity.hpp` | `UnitType`, `StructureType`, `OrderType` enums; core structs. |
 | `world.hpp/.cpp` | Authoritative game state. `std::map` for units/structures (never unordered). |
-| `vision.hpp/.cpp` | `sees_tile()` (the one sight rule: Manhattan, nebula tiles only within `NEBULA_SIGHT`) and `NebulaSight` (who can target into which nebula; combat and MoveAttack). |
+| `vision.hpp` | `sees_tile()` (the one sight rule: Manhattan, nebula tiles only within `NEBULA_SIGHT`) and `FactionSight` (what a faction sees right now, for combat targeting and MoveAttack halts: asked per tile through `Occupancy`, memoised). |
 | `occupancy.hpp/.cpp` | `Occupancy`: flat per-tile grids of who stands where, rebuilt each movement step and in combat (again after the first-strike purge: it holds pointers). Range queries (targeting, MoveAttack halts, splash, claim guns) visit only the tiles in range, nearest ring first, ties to the lower id: exactly what an id-ordered scan gives, which they fall back to if a hand-built world stacks units. |
 | `snapshot.hpp/.cpp` | Fog-masked snapshot builder, via `sees_tile()`. Own units and structures always included; enemy units and structures only on visible tiles. |
 | `command.hpp/.cpp` | `ValidatedCommands` and `validate_commands()`. |
 | `movement.hpp/.cpp` | Stepped simultaneous movement. Chains advance (a unit may enter a tile vacated on the same step); swaps and other closed loops are blocked whole. |
-| `combat.hpp/.cpp` | Sub-phase A: first-strike (Frigates). Sub-phase B: simultaneous; splash has friendly fire; finished Claim Nodes fire here too. |
+| `combat.hpp/.cpp` | Sub-phase A: first-strike (Frigates), simultaneous among themselves. Sub-phase B: simultaneous; splash has friendly fire; finished Claim Nodes fire here too. Only seen targets (`FactionSight`). |
 | `economy.hpp/.cpp` | Harvest into Drone cargo, deposit at own Core/Claim Node, spend, production. Drone cap = 1 per claim + 1 per Core; Factory cap = max(claims / 2, 1). |
 | `territory.hpp/.cpp` | `territory_owners()` (per-tile owner grid, the one definition of territory) and `territory_pct()`; Voronoi territory as a share of **passable** tiles (squared-Euclidean nearest Claim Node, cross-faction ties → neutral, `CLAIM_INFLUENCE` radius; each claim stamps only its radius), Claim Node hp fragility, `win_threshold()`. |
 | `wincheck.hpp/.cpp` | Fixed-order checks: base destruction → territory threshold → tick cap. |
@@ -96,20 +104,29 @@ For LSP support: `ln -s build/compile_commands.json compile_commands.json`
 | `match.hpp/.cpp` | `run_match()`: drives tick loop, records replay log. |
 | `file_io.cpp` | Raw + Zstd file I/O. Zstd sections are `#ifdef`'d out under `__EMSCRIPTEN__`. |
 
-`fixtures/` — native test bots: `IdleBot` (empty commands; determinism tests), `RushBot`, `EconBot`,
-`TurtleBot` (one home claim, guards its base) and `ExpanderBot` (its Core produces Drones,
-walks claimers out to a claim lattice, never attacks), and `AdaptiveBot`, the combat fixture
+`fixtures/` — native test bots: `IdleBot` (empty commands; determinism tests), `RushBot` (two
+home claims, a Factory, Interceptor waves at enemy claims then the Core; never defends),
+`EconBot` (the boom: claims fast, defends its claims with a capped Frigate/Artillery army,
+never attacks), `TurtleBot` (one home claim, guards its base) and `ExpanderBot` (its Core
+produces Drones, walks claimers out to a claim lattice, never attacks), and `AdaptiveBot`, the combat fixture
 that plays every system: Factories, counter-picked ships (Battleships when rich), an
 Interceptor scout hidden in a nebula by the enemy Core, a home ambush in a nebula, and pushes
 in waves (gather out of sight, then enemy claims, unfinished first, then the Core) when its
 army outweighs what it has seen; it fights enemy ships near its structures first. Ships fire
 only on a tick they are ordered to Attack/MoveAttack, so it orders every ship every tick, with
 focus fire via `target_id`.
+Every fixture also builds as a `.wasm` bot from the same source (`fixtures/CMakeLists.txt`,
+wasi-sdk fetched by CMake, `sdk/cpp/include/ud/bot_host.hpp`) into `build/fixtures_wasm/`;
+`FixtureWasm.*` (`fixture_wasm_tests`) requires each to play exactly as natively, with no
+forfeits. Fixtures must therefore use only what `game::Bot` receives, and fit the fuel budget.
 `Turtle.*` in `map_tests` proves the turtle loses to the descending threshold on every map;
-`Adaptive.*` proves the adaptive bot destroys both and that two of them fight.
-`bot_util.hpp` has a BFS `Router`: the engine never re-routes a blocked unit, so bots route
+`Adaptive.*` proves the adaptive bot destroys both and that two of them fight; `Rush.*` that the
+rush kills both bases, `Econ.*` that the boom out-expands them and holds off the rush.
+`bot_util.hpp` has a `Router`: the engine never re-routes a blocked unit, so bots route
 themselves (own units block only the first step, lower id has right of way; enemy structures
-are remembered once seen). `waypoint()` lets a fast unit cover its full speed along a route;
+are remembered once seen). Units sharing a goal share one distance field (`Router::GoalKey`);
+`route()` keeps its fields across ticks and caps flooding per tick (`kFloodBudget`), which is
+what keeps AdaptiveBot near 2–3M fuel per tick on an 80×80 map. `waypoint()` lets a fast unit cover its full speed along a route;
 `harvest_step()` runs a Drone's carry loop: node, then drop-off; `builders()` keeps a Drone
 by each unfinished structure; `ClaimLattice` hands out claim sites.
 
@@ -126,6 +143,9 @@ requests); the refused grow returns -1 and the memory never exceeds the cap. The
 `BotMetrics::fault` (`TickFault::{None,OutOfFuel,OutOfMemory,Trap}`), stored per tick per bot in
 `TickEntry::fault_a/b`, carried into `FrameState::forfeits`, shown in the viewer as "STALLED", and
 summarised by `ud_run`. `TickFault` values are written to replay files: append only.
+
+The runner turns Wasmtime's copy-on-write memory init off: with the capped memory creator it
+panics on modules with sizeable data segments (any bot linking libc).
 
 **Bulk memory is disabled** (`memory.copy`/`memory.fill` cost 1 fuel regardless of length, so
 they would unbound CPU per tick). Such modules fail to load. The SDK builds with
@@ -146,6 +166,7 @@ Change the layout → bump the magic and refuse the old one with a clear message
 Standard match setup (Command Core + starting units on free tiles near each spawn) lives in
 `maps/match_setup.hpp` as `maps::world_from_map()`, shared by `ud_run` and the map tests.
 | `gen_example_replay` | Generate a fixture replay for tests |
+| `ud_arena` | Balance arena: equal-value armies (pure and every mix by budget share) fight on an open field; prints margins and rankings, `--replay` writes one fight. Logic in `arena.hpp/.cpp` (`arena_lib`), tested by `Arena.*` in `arena_tests` (mirror fights must stay exactly even). See `tools/README.md` |
 
 ### viz/ — replay renderers
 
@@ -153,7 +174,7 @@ Standard match setup (Command Core + starting units on free tiles near each spaw
 |---------------|-------------|
 | `ud_viz` | Terminal renderer (raw ANSI) |
 | `ud_viz_nc` | ncurses renderer (optional, requires libncurses) |
-| `ud_viz_imgui` | Dear ImGui, isometric 2:1 projection (optional, requires libglfw3-dev). Z toggles claim zones, drawn with the engine's `territory_owners()`. Resource nodes are amber crystal clusters, nebulae drifting violet gas (thin veil drawn over units inside); a Drone's cargo is a matching amber bar on its lower-left edge (HP is lower-right, with a cyan shield bar just inside it) |
+| `ud_viz_imgui` | Dear ImGui, isometric 2:1 projection (optional, requires libglfw3-dev). Z toggles claim zones, drawn with the engine's `territory_owners()`. Out-of-sight terrain is dimmed, never hidden (terrain is public). Resource nodes are amber crystal clusters, nebulae drifting violet gas (thin veil drawn over units inside); a Drone's cargo is a matching amber bar on its lower-left edge (HP is lower-right, with a cyan shield bar just inside it) |
 | `ud_shape_editor` | ImGui editor for unit/structure render shapes; reads/writes `.udshapes` files (`shape_model.hpp`) |
 | `Makefile.em` | Emscripten browser build → `viz/web/index.html`; drag-and-drop `.ud` files |
 
@@ -170,12 +191,15 @@ is a real match through `game::run_match` with a `runner::WasmBot`, so reported 
 match meter exactly (`Profiler.FuelAndMemoryMatchARealMatchExactly` guards this — never fork the
 metering path). The opponent is passive and its Command Core sits in an asteroid ring beyond
 every weapon's range, so scenarios always run their full length. Suite: `early_game`,
-`army_scaling/{10,50,200,256}`, `dense_battle`, `wide_visibility`, `max_legal`, `long_running`
+`army_scaling/{10,50,200,655}` (all on the largest map), `dense_battle`, `wide_visibility`, `max_legal`, `long_running`
 (memory curve for leaks). Exit status 2 on any forfeit.
 
 ### sdk/cpp/ — C++ bot template
 
-ABI headers in `sdk/cpp/include/`. Bot template in `sdk/cpp/bot_template.cpp`. Examples:
+ABI headers in `sdk/cpp/include/`. Bot template in `sdk/cpp/bot_template.cpp` (raw ABI,
+`-nostdlib`). A bot written against `game::Bot` with the C++ standard library instead uses
+`ud/bot_host.hpp` (`UD_WASM_BOT(Class)`) and `sdk/cpp/wasi_stubs.cpp`, built with wasi-sdk as
+`fixtures/CMakeLists.txt` does. Examples:
 `idle_bot`, `rush_bot`, plus profiler demonstrations `quadratic_bot` (deliberately O(n²)) and
 `leaky_bot` (deliberately leaks memory), and `copy_bot` (exercises `runtime.cpp`). Build with the
 `sdk/cpp/Makefile` (requires `wasm32` clang toolchain). Exports `abi_version` symbol for runner
@@ -224,8 +248,14 @@ Compile flags enforcing these: `-ffp-contract=off -fno-fast-math` (in `cmake/Com
 ## Decided Design Questions
 
 - **Line-of-sight:** Manhattan distance ≤ sight_radius, no rays. Nebulae hide what is inside:
-  a nebula tile (and its occupant) is seen only from within `NEBULA_SIGHT` (1), and can't be
-  targeted by a side that doesn't see it. Asteroids don't block sight.
+  a nebula tile (and its occupant) is seen only from within `NEBULA_SIGHT` (1). Asteroids
+  don't block sight.
+- **No blind fire:** a unit can only target what its side sees (any living own unit or
+  structure, the snapshot's fog rule), so Artillery (range 6, sight 2) needs a spotter. Sight
+  is re-checked after the first-strike purge: a spotter killed there spots no more.
+- **First strike is simultaneous among Frigates:** they all pick targets against the same
+  state and their damage lands together, before every other ship fires. (It used to resolve
+  one by one in id order, which handed Frigate-vs-Frigate fights to the side with lower ids.)
 - **Construction:** every Drone-placed structure (Factory, Claim Node) needs `BUILD_TICKS`
   ticks with an own Drone within its placement range (`placement_range()`: 1 for a Factory,
   2 for a claim); it waits, attackable, otherwise. Unfinished claim: no territory, no
@@ -239,10 +269,14 @@ Compile flags enforcing these: `-ffp-contract=off -fno-fast-math` (in `cmake/Com
   to hull; hull never recovers. A ship unhit for `SHIELD_REGEN_DELAY` ticks regains its type's
   `_SHIELD_REGEN` per tick (end of combat). Any hit restarts the wait, even one the shield
   absorbs whole, splash and friendly fire included; firing doesn't. Drones and structures
-  have none (a Core shield would stall games). Weapon-vs-shield modifiers: deferred.
+  have none (a Core shield would stall games). A shield feels only the weapon's
+  `_SHIELD_DMG_PCT` of a hit: Frigates 33% (so a mostly-shield Interceptor survives their first
+  strike: this is what makes Interceptor > Frigate hold in `ud_arena`), the rest 100%. Once the
+  shield breaks, what it didn't stop hits the hull in full.
 - **No upkeep** for now; revisit only if calibration shows hoarding or spam.
-- **Terrain memory:** terrain once seen stays known (it is static). Units and structures need
-  current sight. The snapshot still sends only in-sight tiles; bots remember the rest themselves.
+- **Terrain is public:** before `init` the runner writes the whole map into the snapshot buffer
+  (a tiles-only snapshot, one `TileView` per tile); native bots get it as `on_init`'s `Map`.
+  Fog hides units and structures only; the per-tick snapshot sends in-sight tiles.
 - **Economy:** Drones carry what they harvest and bank it at their own Core or a Claim Node.
   Drone cap is 1 per Claim Node + 1 per Core. Factory cap is max(finished claims / 2, 1).
   Factories cost 50 Energy + 100 Alloy. Nodes never deplete (decided, not an omission).

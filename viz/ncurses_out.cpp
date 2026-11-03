@@ -7,7 +7,7 @@ namespace viz {
 
 // Color pair indices
 static constexpr int CP_NEUTRAL  = 1; // dim white — terrain
-static constexpr int CP_FOG      = 2; // very dim — fogged cells
+static constexpr int CP_FOG      = 2; // out-of-sight terrain
 static constexpr int CP_A        = 3; // cyan — faction 0
 static constexpr int CP_B        = 4; // red  — faction 1
 static constexpr int CP_HUD      = 5; // white bold — headers / borders
@@ -24,7 +24,7 @@ void init_ncurses() {
     start_color();
     use_default_colors();
     init_pair(CP_NEUTRAL, COLOR_WHITE,   -1);
-    init_pair(CP_FOG,     COLOR_BLACK,   -1);
+    init_pair(CP_FOG,     COLOR_WHITE,   -1);
     init_pair(CP_A,       COLOR_CYAN,    -1);
     init_pair(CP_B,       COLOR_RED,     -1);
     init_pair(CP_HUD,     COLOR_WHITE,   -1);
@@ -111,9 +111,9 @@ void draw_ncurses_frame(const RenderFrame& rf) {
     for (int x = 0; x < draw_w; ++x) {
       const auto& cell = rf.at(x, y);
       if (!cell.visible) {
-        attron(COLOR_PAIR(CP_FOG));
-        addch(' ');
-        attroff(COLOR_PAIR(CP_FOG));
+        attron(COLOR_PAIR(CP_FOG) | A_DIM);
+        addch(static_cast<chtype>(cell.glyph));
+        attroff(COLOR_PAIR(CP_FOG) | A_DIM);
       } else {
         int attr = color_attr(cell.color);
         attron(attr);

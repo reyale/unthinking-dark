@@ -8,8 +8,14 @@
 #include <algorithm>
 #include <map>
 #include <limits>
+#include <vector>
 
 namespace game {
+
+struct Hit {
+  int32_t dmg;
+  int32_t shield_pct; // the weapon's shield_dmg_pct
+};
 
 // A combat target is either an enemy unit or an enemy structure.
 struct CombatTarget {
@@ -18,7 +24,7 @@ struct CombatTarget {
   bool is_null() const { return unit_id.is_null() && struct_id.is_null(); }
 };
 
-bool target_in_range(const World&, const Unit& unit, const NebulaSight& sight,
+bool target_in_range(const World&, const Unit& unit, const FactionSight& sight,
                      const Occupancy& occ) {
   const int32_t range = unit.stats().range;
   if (range == 0)
@@ -29,17 +35,18 @@ bool target_in_range(const World&, const Unit& unit, const NebulaSight& sight,
 }
 
 bool target_in_range(const World& world, const Unit& unit) {
-  return target_in_range(world, unit, NebulaSight(world), Occupancy(world));
+  const Occupancy occ(world);
+  return target_in_range(world, unit, FactionSight(world, occ), occ);
 }
 
-// Pick the best target for `attacker`, among enemies in range that its faction can see (only
-// a nebula hides anything; see NebulaSight). Priority order:
+// Pick the best target for `attacker`, among enemies in range that its faction can see (see
+// FactionSight). Priority order:
 //   1. Explicit unit target from command (if valid and in range)
 //   2. Explicit structure target from command (if valid and in range)
 //   3. Nearest enemy unit in range (ties: ascending unit-id)
 //   4. Nearest enemy structure in range (ties: ascending structure-id)
 static CombatTarget pick_target(const World& world, const Unit& attacker, const Command* cmd,
-                                const NebulaSight& sight, const Occupancy& occ) {
+                                const FactionSight& sight, const Occupancy& occ) {
   const int32_t range = attacker.stats().range;
   if (range == 0)
     return {};
@@ -73,10 +80,11 @@ static CombatTarget pick_target(const World& world, const Unit& attacker, const 
 
 // Splash damage centered on `center`, radius 1.  Hits all living units and
 // structures (friendly fire applies to both).
-static void apply_splash(const Occupancy& occ, Vec2 center, int32_t dmg,
-                         std::map<UnitId, int32_t>&      pending_units,
-                         std::map<StructureId, int32_t>& pending_structs) {
-  occ.each_unit_within(center, 1, [&](UnitId id) { pending_units[id] += dmg; });
+static void apply_splash(const Occupancy& occ, Vec2 center, Hit hit,
+                         std::map<UnitId, std::vector<Hit>>& pending_units,
+                         std::map<StructureId, int32_t>&     pending_structs) {
+  const int32_t dmg = hit.dmg;
+  occ.each_unit_within(center, 1, [&](UnitId id) { pending_units[id].push_back(hit); });
   occ.each_structure_within(center, 1, [&](StructureId id) { pending_structs[id] += dmg; });
 }
 
@@ -89,12 +97,19 @@ static void log_shot(CombatLog* log, const Unit& attacker, const CombatTarget& t
                         tgt.unit_id, tgt.struct_id, to, st.dmg, first_strike, st.splash});
 }
 
-// The shield takes the hit first and the hull the overflow. Any hit, even one the shield
-// absorbs whole, restarts the wait before it regenerates.
-static void take_damage(Unit& u, int32_t dmg) {
-  const int32_t absorbed = std::min(u.shield, dmg);
-  u.shield -= absorbed;
-  u.hp -= dmg - absorbed;
+// The shield takes the hit first, feeling shield_pct of it, and the hull the rest in full. Any
+// hit, even one the shield absorbs whole, restarts the wait before it regenerates.
+static void take_damage(Unit& u, Hit h) {
+  const int32_t on_shield = h.dmg * h.shield_pct / cfg::FULL_SHIELD_DMG_PCT;
+  if (on_shield <= u.shield) {
+    u.shield -= on_shield;
+  } else {
+    // The part of the hit the shield used up, rounded up so a shield always costs something.
+    const int32_t spent =
+        (u.shield * cfg::FULL_SHIELD_DMG_PCT + h.shield_pct - 1) / h.shield_pct;
+    u.shield = 0;
+    u.hp -= h.dmg - spent;
+  }
   u.shield_wait = cfg::SHIELD_REGEN_DELAY;
 }
 
@@ -119,26 +134,22 @@ static void log_kill(CombatLog* log, const Structure& s) {
     log->kills.push_back({{}, s.id, s.faction, UnitType::Drone, s.type, s.pos});
 }
 
-void run_combat(World& world, const ValidatedCommands& cmds_a, const ValidatedCommands& cmds_b,
-                CombatLog* log) {
-  // A unit belongs to one faction, so at most one side holds its command.
-  auto get_cmd = [&](UnitId uid) -> const Command* {
-    if (auto it = cmds_a.find(uid); it != cmds_a.end())
-      return &it->second;
-    auto it = cmds_b.find(uid);
-    return it != cmds_b.end() ? &it->second : nullptr;
-  };
+// A unit's hits are kept apart, in the order they were fired, because how much of each reaches
+// the hull depends on how much shield the ones before it left.
+struct Pending {
+  std::map<UnitId, std::vector<Hit>> units;
+  std::map<StructureId, int32_t> structs;
+};
 
-  // Who sees into which nebula, and who stands where, are fixed at the start of combat, from
-  // post-movement positions; entities killed meanwhile drop out through their hp. The index's
-  // storage is reused across calls; every rebuild refills it.
-  const NebulaSight sight(world);
-  thread_local Occupancy occ;
-  occ.rebuild(world);
-
-  // --- Sub-phase A: first-strike (Frigates only) ---------------------------
+// Every living attacker of one sub-phase, in ascending id (the RNG draw order), picks its
+// target against the same state and adds its damage to `hits`; none of it lands until land(),
+// so a sub-phase's shots are simultaneous among themselves: attackers that kill each other
+// both fire.
+template <class GetCmd>
+static void volley(World& world, bool first_strike, GetCmd& get_cmd, const FactionSight& sight,
+                   const Occupancy& occ, Pending& hits, CombatLog* log) {
   for (auto& [uid, unit] : world.units) {
-    if (!unit.alive() || !unit.stats().first_strike)
+    if (!unit.alive() || unit.stats().first_strike != first_strike)
       continue;
     const Command* cmd = get_cmd(uid);
     auto kind = cmd ? static_cast<CommandKind>(cmd->kind) : CommandKind::Move;
@@ -150,67 +161,70 @@ void run_combat(World& world, const ValidatedCommands& cmds_a, const ValidatedCo
       continue;
 
     world.rng.next(); // maintain consistent draw count
-    if (!tgt.struct_id.is_null()) {
-      Structure* s = world.find_structure(tgt.struct_id);
-      if (s) {
-        log_shot(log, unit, tgt, s->pos, true);
-        s->hp -= unit.stats().dmg;
-        if (!s->alive())
-          log_kill(log, *s);
-      }
-    } else {
-      Unit* t = world.find_unit(tgt.unit_id);
-      if (t) {
-        log_shot(log, unit, tgt, t->pos, true);
-        take_damage(*t, unit.stats().dmg);
-        if (!t->alive()) {
-          t->hp = 0;
-          log_kill(log, *t);
-        }
-      }
-    }
+    const Vec2 at = tgt.struct_id.is_null() ? world.find_unit(tgt.unit_id)->pos
+                                            : world.find_structure(tgt.struct_id)->pos;
+    log_shot(log, unit, tgt, at, first_strike);
+    const Hit hit{unit.stats().dmg, unit.stats().shield_dmg_pct};
+    if (unit.stats().splash)
+      apply_splash(occ, at, hit, hits.units, hits.structs);
+    else if (tgt.struct_id.is_null())
+      hits.units[tgt.unit_id].push_back(hit);
+    else
+      hits.structs[tgt.struct_id] += unit.stats().dmg;
+  }
+}
+
+static void land(World& world, const Pending& hits, CombatLog* log) {
+  for (const auto& [uid, unit_hits] : hits.units) {
+    Unit* u = world.find_unit(uid);
+    if (!u)
+      continue;
+    const bool was_alive = u->alive();
+    for (const Hit& h : unit_hits)
+      take_damage(*u, h);
+    if (was_alive && !u->alive())
+      log_kill(log, *u);
+  }
+  for (const auto& [sid, dmg] : hits.structs) {
+    Structure* s = world.find_structure(sid);
+    if (!s)
+      continue;
+    const bool was_alive = s->alive();
+    s->hp -= dmg;
+    if (was_alive && !s->alive())
+      log_kill(log, *s);
+  }
+}
+
+void run_combat(World& world, const ValidatedCommands& cmds_a, const ValidatedCommands& cmds_b,
+                CombatLog* log) {
+  // A unit belongs to one faction, so at most one side holds its command.
+  auto get_cmd = [&](UnitId uid) -> const Command* {
+    if (auto it = cmds_a.find(uid); it != cmds_a.end())
+      return &it->second;
+    auto it = cmds_b.find(uid);
+    return it != cmds_b.end() ? &it->second : nullptr;
+  };
+
+  // Who stands where, and so who sees what, from post-movement positions. The index's storage is
+  // reused across calls; every rebuild refills it.
+  thread_local Occupancy occ;
+  occ.rebuild(world);
+
+  // --- Sub-phase A: first strike (Frigates), simultaneous among themselves --------------------
+  {
+    const FactionSight sight(world, occ);
+    Pending hits;
+    volley(world, true, get_cmd, sight, occ, hits, log);
+    land(world, hits, log);
   }
   world.purge_dead();
   occ.rebuild(world); // the purge freed what it pointed at
 
-  // --- Sub-phase B: simultaneous -------------------------------------------
-  std::map<UnitId, int32_t>      pending_units;
-  std::map<StructureId, int32_t> pending_structs;
-
-  for (auto& [uid, unit] : world.units) {
-    if (!unit.alive() || unit.stats().first_strike)
-      continue;
-    const Command* cmd = get_cmd(uid);
-    auto kind = cmd ? static_cast<CommandKind>(cmd->kind) : CommandKind::Move;
-    if (kind != CommandKind::Attack && kind != CommandKind::MoveAttack)
-      continue;
-
-    CombatTarget tgt = pick_target(world, unit, cmd, sight, occ);
-    if (tgt.is_null())
-      continue;
-
-    world.rng.next();
-
-    if (!tgt.struct_id.is_null()) {
-      Structure* s = world.find_structure(tgt.struct_id);
-      if (!s)
-        continue;
-      log_shot(log, unit, tgt, s->pos, false);
-      if (unit.stats().splash)
-        apply_splash(occ, s->pos, unit.stats().dmg, pending_units, pending_structs);
-      else
-        pending_structs[tgt.struct_id] += unit.stats().dmg;
-    } else {
-      Unit* t = world.find_unit(tgt.unit_id);
-      if (!t)
-        continue;
-      log_shot(log, unit, tgt, t->pos, false);
-      if (unit.stats().splash)
-        apply_splash(occ, t->pos, unit.stats().dmg, pending_units, pending_structs);
-      else
-        pending_units[tgt.unit_id] += unit.stats().dmg;
-    }
-  }
+  // --- Sub-phase B: simultaneous, against the survivors (a spotter killed in A spots no more) --
+  const FactionSight sight(world, occ);
+  Pending hits;
+  volley(world, false, get_cmd, sight, occ, hits, log);
 
   // Finished Claim Nodes fire last; their shots are simultaneous with the units' all the same.
   for (const auto& [sid, s] : world.structures) {
@@ -221,30 +235,13 @@ void run_combat(World& world, const ValidatedCommands& cmds_a, const ValidatedCo
     });
     if (best.is_null())
       continue;
-    pending_units[best] += cfg::CLAIM_ATTACK_DMG;
+    hits.units[best].push_back({cfg::CLAIM_ATTACK_DMG, cfg::FULL_SHIELD_DMG_PCT});
     if (log)
       log->shots.push_back({{}, s.faction, UnitType::Drone, s.pos, best, {},
                             world.find_unit(best)->pos, cfg::CLAIM_ATTACK_DMG, false, false, sid});
   }
 
-  for (auto& [uid, dmg] : pending_units) {
-    Unit* u = world.find_unit(uid);
-    if (!u)
-      continue;
-    const bool was_alive = u->alive();
-    take_damage(*u, dmg);
-    if (was_alive && !u->alive())
-      log_kill(log, *u);
-  }
-  for (auto& [sid, dmg] : pending_structs) {
-    Structure* s = world.find_structure(sid);
-    if (!s)
-      continue;
-    const bool was_alive = s->alive();
-    s->hp -= dmg;
-    if (was_alive && !s->alive())
-      log_kill(log, *s);
-  }
+  land(world, hits, log);
   world.purge_dead();
   regenerate_shields(world);
 }

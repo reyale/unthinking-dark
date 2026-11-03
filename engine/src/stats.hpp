@@ -12,6 +12,7 @@ struct UnitStats {
   int32_t shield;
   int32_t shield_regen; // per tick, once SHIELD_REGEN_DELAY ticks pass unhit
   int32_t dmg;
+  int32_t shield_dmg_pct; // of dmg, while it hits a shield
   int32_t range;
   int32_t sight;
   int32_t speed;

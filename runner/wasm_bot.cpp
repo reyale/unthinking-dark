@@ -1,6 +1,8 @@
 #include "wasm_bot.hpp"
 #include "abi.hpp"
 #include "config.hpp"
+#include "grid.hpp"
+#include "snapshot.hpp"
 #include <wasmtime.h>
 #include <algorithm>
 #include <cstring>
@@ -53,6 +55,56 @@ static constexpr size_t MAX_SNAPSHOT_BYTES =
 
 static constexpr size_t MAX_COMMAND_BYTES =
     game::cfg::UNIT_HARD_CAP * sizeof(game::Command);
+
+// Serialize a snapshot into the bot's snapshot buffer. The engine enforces the caps these counts
+// are clamped to; the clamp is what guarantees the copy stays inside the bot's validated buffer.
+static void write_snapshot(uint8_t* dest, const game::Snapshot& snap) {
+  auto clamp = [](size_t n, size_t cap) { return static_cast<uint32_t>(std::min(n, cap)); };
+  game::SnapshotHeader hdr = snap.header;
+  hdr.my_unit_count       = clamp(snap.my_units.size(), game::cfg::UNIT_HARD_CAP);
+  hdr.my_structure_count  = clamp(snap.my_structures.size(), game::cfg::STRUCTURE_HARD_CAP);
+  hdr.visible_enemy_count = clamp(snap.visible_enemies.size(), game::cfg::UNIT_HARD_CAP * 2);
+  hdr.visible_enemy_structure_count =
+      clamp(snap.visible_enemy_structures.size(), game::cfg::STRUCTURE_HARD_CAP);
+  hdr.visible_tile_count  =
+      clamp(snap.visible_tiles.size(), game::cfg::MAP_MAX_W * game::cfg::MAP_MAX_H);
+  hdr.my_units_off      = static_cast<uint32_t>(sizeof(game::SnapshotHeader));
+  hdr.my_structures_off = hdr.my_units_off + hdr.my_unit_count * sizeof(game::UnitView);
+  hdr.enemies_off = hdr.my_structures_off + hdr.my_structure_count * sizeof(game::StructureView);
+  hdr.enemy_structures_off =
+      hdr.enemies_off + hdr.visible_enemy_count * sizeof(game::EnemyView);
+  hdr.tiles_off = hdr.enemy_structures_off +
+                  hdr.visible_enemy_structure_count * sizeof(game::EnemyStructureView);
+
+  std::memcpy(dest, &hdr, sizeof(hdr));
+  auto copy = [&](uint32_t off, const auto& v, uint32_t n) {
+    if (n) std::memcpy(dest + off, v.data(), n * sizeof(v[0]));
+  };
+  copy(hdr.my_units_off, snap.my_units, hdr.my_unit_count);
+  copy(hdr.my_structures_off, snap.my_structures, hdr.my_structure_count);
+  copy(hdr.enemies_off, snap.visible_enemies, hdr.visible_enemy_count);
+  copy(hdr.enemy_structures_off, snap.visible_enemy_structures, hdr.visible_enemy_structure_count);
+  copy(hdr.tiles_off, snap.visible_tiles, hdr.visible_tile_count);
+}
+
+// Terrain is public: before init the buffer holds the whole map as a snapshot of tiles only,
+// one per tile in row order, with nothing else in it.
+static game::Snapshot map_snapshot(const game::Map& map, uint32_t faction_id) {
+  game::Snapshot s;
+  s.header.my_faction_id = faction_id;
+  s.header.map_w = static_cast<uint32_t>(map.width);
+  s.header.map_h = static_cast<uint32_t>(map.height);
+  for (int32_t y = 0; y < map.height; ++y)
+    for (int32_t x = 0; x < map.width; ++x) {
+      game::TileView tv{};
+      tv.x = x;
+      tv.y = y;
+      tv.terrain = static_cast<uint16_t>(map.tile_at({x, y}).terrain);
+      tv.resource_amount = map.tile_at({x, y}).resource_amount;
+      s.visible_tiles.push_back(tv);
+    }
+  return s;
+}
 
 // ---- Free functions ---------------------------------------------------------
 
@@ -189,6 +241,10 @@ WasmBot::WasmBot(const std::vector<uint8_t>& wasm)
   // unbounded CPU inside its budget. Without them the compiler emits ordinary metered loops.
   wasmtime_config_wasm_bulk_memory_set(cfg, false);
   wasmtime_config_cranelift_nan_canonicalization_set(cfg, true);
+  // Copy-on-write data initialization maps a module's data segments straight into Wasmtime's
+  // own mmap'd memory, which a host memory creator replaces; with both, Wasmtime panics on any
+  // module with sizeable data (a bot linking libc, say). Segments are then copied in instead.
+  wasmtime_config_memory_init_cow_set(cfg, false);
   wasmtime_memory_creator_t creator{&impl_->memory_gate, capped_new, nullptr};
   wasmtime_config_host_memory_creator_set(cfg, &creator); // copied into the config
   impl_->engine = wasm_engine_new_with_config(cfg); // config ownership transferred
@@ -287,10 +343,12 @@ WasmBot::WasmBot(const std::vector<uint8_t>& wasm)
 
 WasmBot::~WasmBot() = default;
 
-void WasmBot::on_init(const game::Map& /*map*/, uint32_t faction_id) {
+void WasmBot::on_init(const game::Map& map, uint32_t faction_id) {
   if (!healthy_) return;
 
   auto* ctx = impl_->ctx();
+  write_snapshot(wasmtime_memory_data(ctx, &impl_->memory) + impl_->snapshot_addr,
+                 map_snapshot(map, faction_id));
   wasmtime_context_set_fuel(ctx, game::cfg::FUEL_STARTUP);
   impl_->memory_gate.over_cap = false;
 
@@ -323,36 +381,7 @@ std::vector<game::Command> WasmBot::on_tick(const game::Snapshot& snap) {
 
   auto* ctx = impl_->ctx();
   uint8_t* mem = wasmtime_memory_data(ctx, &impl_->memory);
-
-  // Serialize snapshot into WASM linear memory. The engine enforces the caps these counts are
-  // clamped to; the clamp is what guarantees the copy stays inside the bot's validated buffer.
-  auto clamp = [](size_t n, size_t cap) { return static_cast<uint32_t>(std::min(n, cap)); };
-  game::SnapshotHeader hdr = snap.header;
-  hdr.my_unit_count       = clamp(snap.my_units.size(), game::cfg::UNIT_HARD_CAP);
-  hdr.my_structure_count  = clamp(snap.my_structures.size(), game::cfg::STRUCTURE_HARD_CAP);
-  hdr.visible_enemy_count = clamp(snap.visible_enemies.size(), game::cfg::UNIT_HARD_CAP * 2);
-  hdr.visible_enemy_structure_count =
-      clamp(snap.visible_enemy_structures.size(), game::cfg::STRUCTURE_HARD_CAP);
-  hdr.visible_tile_count  =
-      clamp(snap.visible_tiles.size(), game::cfg::MAP_MAX_W * game::cfg::MAP_MAX_H);
-  hdr.my_units_off      = static_cast<uint32_t>(sizeof(game::SnapshotHeader));
-  hdr.my_structures_off = hdr.my_units_off + hdr.my_unit_count * sizeof(game::UnitView);
-  hdr.enemies_off = hdr.my_structures_off + hdr.my_structure_count * sizeof(game::StructureView);
-  hdr.enemy_structures_off =
-      hdr.enemies_off + hdr.visible_enemy_count * sizeof(game::EnemyView);
-  hdr.tiles_off = hdr.enemy_structures_off +
-                  hdr.visible_enemy_structure_count * sizeof(game::EnemyStructureView);
-
-  uint8_t* dest = mem + impl_->snapshot_addr;
-  std::memcpy(dest, &hdr, sizeof(hdr));
-  auto copy = [&](uint32_t off, const auto& v, uint32_t n) {
-    if (n) std::memcpy(dest + off, v.data(), n * sizeof(v[0]));
-  };
-  copy(hdr.my_units_off, snap.my_units, hdr.my_unit_count);
-  copy(hdr.my_structures_off, snap.my_structures, hdr.my_structure_count);
-  copy(hdr.enemies_off, snap.visible_enemies, hdr.visible_enemy_count);
-  copy(hdr.enemy_structures_off, snap.visible_enemy_structures, hdr.visible_enemy_structure_count);
-  copy(hdr.tiles_off, snap.visible_tiles, hdr.visible_tile_count);
+  write_snapshot(mem + impl_->snapshot_addr, snap);
 
   // Refuel and call on_tick.
   wasmtime_context_set_fuel(ctx, game::cfg::FUEL_PER_TICK);

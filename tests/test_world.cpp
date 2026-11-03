@@ -653,10 +653,12 @@ TEST(Movement, MoveAttackHaltsWhenEnemyInRange) {
   EXPECT_EQ(unit.pos.x, 1); // halted — enemy in range
 }
 
-// MoveAttack halts at full range whatever the target is. Marches along a row toward
-// an enemy and returns the distance at which the unit stopped.
+// MoveAttack halts as soon as the unit has a target: in range and seen by its side. Marches along
+// a row toward an enemy and returns the distance at which the unit stopped. With `spotter`, an own
+// Drone stands by the target, so it is seen from the start.
 static int32_t halt_distance(game::UnitType shooter, bool target_is_structure,
-                             game::StructureType stype = game::StructureType::CommandCore) {
+                             game::StructureType stype = game::StructureType::CommandCore,
+                             bool spotter = true) {
   game::World w;
   w.map = game::Map::make(20, 5);
   w.rng = game::Rng{0};
@@ -665,6 +667,8 @@ static int32_t halt_distance(game::UnitType shooter, bool target_is_structure,
     w.spawn_structure({1}, stype, enemy_at);
   else
     w.spawn_unit({1}, game::UnitType::Drone, enemy_at);
+  if (spotter)
+    w.spawn_unit({0}, game::UnitType::Drone, {enemy_at.x, enemy_at.y + 2});
   game::UnitId id = w.spawn_unit({0}, shooter, {0, 2}).id;
   game::ValidatedCommands empty;
   for (int t = 0; t < 30; ++t)
@@ -686,6 +690,18 @@ TEST(Movement, MoveAttackHaltsAtFullRangeFromStructures) {
                    game::UnitType::Artillery, game::UnitType::Battleship})
       EXPECT_EQ(halt_distance(t, true, st), game::stats_for(t).range)
           << game::unit_type_name(t) << " vs " << game::structure_type_name(st);
+}
+
+// Alone, a unit closes until it sees the target itself: a gun that outranges its own sight
+// (Artillery) needs a spotter to fire at full range.
+TEST(Movement, MoveAttackWithoutASpotterClosesToItsOwnSight) {
+  for (auto t : {game::UnitType::Interceptor, game::UnitType::Frigate,
+                 game::UnitType::Artillery, game::UnitType::Battleship}) {
+    const auto& st = game::stats_for(t);
+    EXPECT_EQ(halt_distance(t, false, game::StructureType::CommandCore, false),
+              std::min(st.range, st.sight))
+        << game::unit_type_name(t);
+  }
 }
 
 TEST(Movement, MoveAttackIgnoresFriendlyStructures) {
@@ -957,7 +973,7 @@ static game::ValidatedCommands produce(game::StructureId fac) {
 
 TEST(Economy, UnitCapRefusesProduce) {
   auto w = make_big_world();
-  for (int32_t i = 0; i < game::cfg::UNIT_HARD_CAP; ++i)
+  for (int32_t i = 0; i < game::cfg::unit_cap(40, 40); ++i)
     w.spawn_unit({0}, game::UnitType::Drone, {i % 40, i / 40});
   auto& fac = w.spawn_structure({0}, game::StructureType::Factory, {20, 30});
   w.res({0}).energy = 1000;
@@ -968,9 +984,27 @@ TEST(Economy, UnitCapRefusesProduce) {
   EXPECT_EQ(w.res({0}).energy, 1000);
 }
 
+// The same army that fills a 40x40 map's cap leaves room on an 80x80 map.
+TEST(Economy, UnitCapGrowsWithMapArea) {
+  ASSERT_GT(game::cfg::unit_cap(80, 80), game::cfg::unit_cap(40, 40));
+  ASSERT_EQ(game::cfg::unit_cap(game::cfg::MAP_MAX_W, game::cfg::MAP_MAX_H),
+            game::cfg::UNIT_HARD_CAP);
+  game::World w;
+  w.map = game::Map::make(80, 80);
+  w.rng = game::Rng{0};
+  for (int32_t i = 0; i < game::cfg::unit_cap(40, 40); ++i)
+    w.spawn_unit({0}, game::UnitType::Drone, {i % 40, i / 40});
+  auto& fac = w.spawn_structure({0}, game::StructureType::Factory, {20, 30});
+  w.res({0}).energy = 1000;
+  w.res({0}).alloy  = 1000;
+  game::ValidatedCommands empty;
+  game::run_economy(w, produce(fac.id), empty);
+  EXPECT_TRUE(fac.production_queue.has_value());
+}
+
 TEST(Economy, QueuedShipsCountTowardTheUnitCap) {
   auto w = make_big_world();
-  for (int32_t i = 0; i < game::cfg::UNIT_HARD_CAP - 1; ++i)
+  for (int32_t i = 0; i < game::cfg::unit_cap(40, 40) - 1; ++i)
     w.spawn_unit({0}, game::UnitType::Drone, {i % 40, i / 40});
   auto& f1 = w.spawn_structure({0}, game::StructureType::Factory, {20, 30});
   auto& f2 = w.spawn_structure({0}, game::StructureType::Factory, {30, 30});

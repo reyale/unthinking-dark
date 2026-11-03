@@ -84,7 +84,7 @@ static int32_t drone_count(const World& world, FactionId f) {
 }
 
 // Live units plus ships already paid for and queued: a queued ship spawns whatever happens next,
-// so it counts against UNIT_HARD_CAP from the moment it is bought.
+// so it counts against the unit cap from the moment it is bought.
 static int32_t unit_count(const World& world, FactionId f) {
   int32_t n = 0;
   for (const auto& [uid, u] : world.units)
@@ -121,7 +121,7 @@ static void spend(World& world, const ValidatedCommands& cmds_a, const Validated
       Structure* fac = world.find_structure(uid.structure());
       if (!fac || !fac->alive() || !fac->complete() || fac->production_queue.has_value())
         continue;
-      if (unit_count(world, fac->faction) >= cfg::UNIT_HARD_CAP)
+      if (unit_count(world, fac->faction) >= cfg::unit_cap(world.map.width, world.map.height))
         continue;
 
       auto utype = static_cast<UnitType>(cmd.aux);

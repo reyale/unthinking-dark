@@ -40,7 +40,7 @@ static game::Map map_from_log(const game::ReplayLog& log) {
 
 // ---- Color palette --------------------------------------------------------
 
-static constexpr ImVec4 kFogBg    = {0.06f, 0.06f, 0.08f, 1.0f};
+static constexpr float kOutOfSightDim = 0.45f;
 static constexpr ImVec4 kOpenBg   = {0.14f, 0.14f, 0.18f, 1.0f};
 static constexpr ImVec4 kAsteroid = {0.35f, 0.30f, 0.22f, 1.0f};
 static constexpr ImVec4 kNebula   = {0.22f, 0.15f, 0.35f, 1.0f};
@@ -80,12 +80,11 @@ static CellData make_cell(const game::Map& map, const game::FrameState& fr,
     if (!vis) {
       for (const auto& s : fr.structures) {
         if (view >= 0 && static_cast<int>(s.faction.value) != view) continue;
-        if (s.pos.x == x && s.pos.y == y) { vis = true; break; }
+        if (s.hp > 0 && game::sees_tile(map, s.pos, game::cfg::STRUCTURE_SIGHT, {x, y}))
+          { vis = true; break; }
       }
     }
   }
-  if (!vis) return {kFogBg};
-
   ImVec4 bg;
   switch (map.tile_at({x, y}).terrain) {
     case game::Terrain::Asteroid:     bg = kAsteroid; break;
@@ -93,6 +92,8 @@ static CellData make_cell(const game::Map& map, const game::FrameState& fr,
     case game::Terrain::ResourceNode: bg = kResource; break;
     default:                          bg = kOpenBg;   break;
   }
+  // Terrain is public, so out of sight it is only dimmed; what stands on it is hidden.
+  if (!vis) return {{bg.x * kOutOfSightDim, bg.y * kOutOfSightDim, bg.z * kOutOfSightDim, bg.w}};
 
   for (const auto& s : fr.structures) {
     if (s.pos.x != x || s.pos.y != y) continue;

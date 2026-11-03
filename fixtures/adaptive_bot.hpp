@@ -60,6 +60,9 @@ public:
   static constexpr int32_t kScoutWatch = 3; // preferred hiding distance from the enemy Core
   static constexpr int32_t kScoutRange = 12;
   static constexpr int32_t kCounterWeight = 2;
+  static constexpr int32_t kFoeDrift = 2; // a chased foe strays this far before a new field
+  static constexpr int32_t kApproach = std::min({cfg::INTERCEPTOR_RANGE, cfg::FRIGATE_RANGE,
+                                                 cfg::ARTILLERY_RANGE, cfg::BATTLESHIP_RANGE});
   static constexpr int32_t kBattleshipSpareE = 120;
   static constexpr size_t kBattleshipMinArmy = 6;
 
@@ -118,6 +121,7 @@ private:
 
   std::vector<Vec2> ambush_tiles_; // the home nebula patch, or empty
   Vec2 ambush_{};
+  int32_t ambush_reach_{0}; // the furthest ambush tile from ambush_
 
   uint32_t scout_{0};
   uint32_t scout_ready_{0};
@@ -139,26 +143,9 @@ private:
   std::vector<const UnitView*> drones_, army_;
   std::vector<const EnemyView*> home_threats_, threats_;
   std::map<uint32_t, uint32_t> focus_; // own ship → what it shoots
+  std::map<uint32_t, Vec2> foe_anchor_; // chased foe → where its field is centred (chase())
 
-  static int32_t value(UnitType t) {
-    switch (t) {
-    case UnitType::Interceptor: return cfg::INTERCEPTOR_COST_E + cfg::INTERCEPTOR_COST_A;
-    case UnitType::Frigate: return cfg::FRIGATE_COST_E + cfg::FRIGATE_COST_A;
-    case UnitType::Artillery: return cfg::ARTILLERY_COST_E + cfg::ARTILLERY_COST_A;
-    case UnitType::Battleship: return cfg::BATTLESHIP_COST_E + cfg::BATTLESHIP_COST_A;
-    default: return 0;
-    }
-  }
-
-  static std::array<int32_t, 2> cost(UnitType t) {
-    switch (t) {
-    case UnitType::Interceptor: return {cfg::INTERCEPTOR_COST_E, cfg::INTERCEPTOR_COST_A};
-    case UnitType::Frigate: return {cfg::FRIGATE_COST_E, cfg::FRIGATE_COST_A};
-    case UnitType::Artillery: return {cfg::ARTILLERY_COST_E, cfg::ARTILLERY_COST_A};
-    case UnitType::Battleship: return {cfg::BATTLESHIP_COST_E, cfg::BATTLESHIP_COST_A};
-    default: return {cfg::DRONE_COST_E, cfg::DRONE_COST_A};
-    }
-  }
+  static int32_t value(UnitType t) { return unit_value(t); }
 
   size_t idx(Vec2 p) const {
     return static_cast<size_t>(p.y) * static_cast<size_t>(map_.width) + static_cast<size_t>(p.x);
@@ -179,9 +166,48 @@ private:
     issue(c);
   }
 
-  template <class Goal> void go(const UnitView& u, Goal goal, CommandKind kind) {
+  // Ships share goals (a stage point, a target, a foe), so they route on shared distance
+  // fields (Router::GoalKey): a search per ship would cost a flood of the map per ship.
+  static constexpr int32_t kGoalNear = 0;   // within `radius` of `at`
+  static constexpr int32_t kGoalAmbush = 1; // a free ambush tile
+
+  template <class Goal>
+  void go(const UnitView& u, const Router::GoalKey& key, Goal goal, CommandKind kind) {
     const Vec2 pos{u.x, u.y};
-    const Vec2 to = waypoint(router_, pos, goal, stats_for(static_cast<UnitType>(u.type)).speed);
+    const Vec2 to =
+        waypoint(router_, key, pos, goal, stats_for(static_cast<UnitType>(u.type)).speed);
+    if (to != pos) issue(move_cmd(u.id, kind, to));
+    else if (kind != CommandKind::Move) attack(u.id, 0);
+  }
+
+  // Into range of `at`. Ships of every range head for the one field to within kApproach of it
+  // (the shortest range there is), and each stops once `at` is in its own: a field per range
+  // would cost a flood each.
+  void approach(const UnitView& u, Vec2 at, int32_t range, Vec2 field_at, int32_t field_r) {
+    if (manhattan({u.x, u.y}, at) <= range) {
+      attack(u.id, 0);
+      return;
+    }
+    go_near(u, field_at, field_r, CommandKind::MoveAttack);
+  }
+
+  // A foe moves every tick, and a field to where it stands now would be redone every tick. So
+  // its field is centred on an anchor moved only once the foe strays kFoeDrift from it, and
+  // reaches kFoeDrift nearer than kApproach: within that of the anchor is within range of the
+  // foe.
+  void chase(const UnitView& u, const EnemyView& foe, int32_t range) {
+    const Vec2 at{foe.x, foe.y};
+    auto [it, fresh] = foe_anchor_.try_emplace(foe.id, at);
+    if (manhattan(it->second, at) > kFoeDrift) it->second = at;
+    approach(u, at, range, it->second, std::max(kApproach - kFoeDrift, 0));
+  }
+
+  // Being near a point depends on the map alone, so these fields are kept across ticks.
+  void go_near(const UnitView& u, Vec2 at, int32_t radius, CommandKind kind) {
+    const Vec2 pos{u.x, u.y};
+    const Vec2 to = route_waypoint(router_, {kGoalNear, at, radius}, pos,
+                                   [&](Vec2 p) { return manhattan(p, at) <= radius; },
+                                   stats_for(static_cast<UnitType>(u.type)).speed);
     if (to != pos) issue(move_cmd(u.id, kind, to));
     else if (kind != CommandKind::Move) attack(u.id, 0);
   }
@@ -191,7 +217,7 @@ private:
   void init(const Snapshot& snap) {
     have_home_ = true;
     home_ = core_pos(snap);
-    enemy_core_ = {map_.width - 1 - home_.x, map_.height - 1 - home_.y};
+    enemy_core_ = mirrored(map_, home_);
     lattice_.init(map_, home_, kSpacing);
     choose_ambush();
   }
@@ -217,6 +243,7 @@ private:
           if (map_.in_bounds(n) && nebula(n) && seen.insert(n).second) q.push_back(n);
         }
       ambush_tiles_ = q;
+      for (Vec2 t : q) ambush_reach_ = std::max(ambush_reach_, manhattan(t, ambush_));
       return;
     }
     best = INT32_MAX;
@@ -245,6 +272,7 @@ private:
                         (doomed_.contains(it->first) || tick_ - it->second.tick > kForgetTicks);
       it = gone ? enemy_units_.erase(it) : std::next(it);
     }
+    std::erase_if(foe_anchor_, [&](const auto& kv) { return !enemy_units_.contains(kv.first); });
     doomed_.clear();
 
     std::set<uint32_t> here;
@@ -331,29 +359,6 @@ private:
     return kinds[best];
   }
 
-  // A free open tile 2–4 from the Core, clear of resource nodes and with all four sides
-  // passable, so the Factory blocks no harvest and always has room to launch ships.
-  Vec2 factory_site(const std::set<Vec2>& taken) const {
-    Vec2 best{-1, -1};
-    int32_t best_d = INT32_MAX;
-    for (int32_t y = home_.y - 4; y <= home_.y + 4; ++y)
-      for (int32_t x = home_.x - 4; x <= home_.x + 4; ++x) {
-        const Vec2 p{x, y};
-        const int32_t d = manhattan(p, home_);
-        if (d < 2 || d > 4 || !map_.passable(p) || taken.contains(p)) continue;
-        if (map_.tile_at(p).terrain != Terrain::Open || near_resource(map_, p)) continue;
-        bool open = true;
-        for (const Vec2& dir : DIRS) open = open && map_.passable(p + dir);
-        if (!open) continue;
-        const int32_t score = d * 1000 + manhattan(p, enemy_core_);
-        if (score < best_d) {
-          best_d = score;
-          best = p;
-        }
-      }
-    return best;
-  }
-
   void plan_economy(const Snapshot& snap) {
     int32_t energy = snap.header.energy;
     int32_t alloy = snap.header.alloy;
@@ -404,7 +409,7 @@ private:
           s.producing != PRODUCING_NONE)
         continue;
       const UnitType t = choose_ship(energy, army_.size());
-      const auto [ce, ca] = cost(t);
+      const auto [ce, ca] = unit_cost(t);
       if (energy - reserve_e < ce || alloy - reserve_a < ca) break;
       Command c = move_cmd(s.id, CommandKind::Produce, {0, 0});
       c.aux = static_cast<uint16_t>(t);
@@ -464,7 +469,7 @@ private:
         continue;
       }
       if (d->id == factory_builder_) {
-        const Vec2 site = factory_site(taken);
+        const Vec2 site = factory_site(map_, home_, enemy_core_, taken);
         if (site.x < 0) continue;
         if (manhattan(pos, site) <= cfg::BUILD_RANGE) {
           Command c = move_cmd(d->id, CommandKind::Build, site);
@@ -472,8 +477,7 @@ private:
           issue(c);
           continue;
         }
-        const Vec2 step = router_.next_step(
-            pos, [&](Vec2 p) { return manhattan(p, site) <= cfg::BUILD_RANGE; });
+        const Vec2 step = site_step(router_, pos, site, cfg::BUILD_RANGE);
         if (step != pos) issue(move_cmd(d->id, CommandKind::Move, step));
         continue;
       }
@@ -523,7 +527,7 @@ private:
     }
     const Vec2 to = scout_hidden_ ? scout_hide_ : enemy_core_;
     const int32_t near = scout_hidden_ ? 0 : 2;
-    go(*s, [&](Vec2 p) { return manhattan(p, to) <= near; }, CommandKind::Move);
+    go_near(*s, to, near, CommandKind::Move);
     if (!busy_.contains(s->id)) attack(s->id, 0);
   }
 
@@ -590,45 +594,13 @@ private:
     set_mode(Mode::Stage);
   }
 
-  // Assigns each ship with an enemy in range its focus-fire target (see the class comment);
-  // enemy structures only when no unit is in range, the push target first.
+  // Ships with an enemy in range get a focus-fire target (focus_fire()), the push target
+  // first among structures.
   void plan_focus(const Snapshot& snap) {
-    focus_.clear();
-    std::map<uint32_t, int32_t> left;
-    for (const auto& e : snap.visible_enemies) left[e.id] = e.hp + e.shield;
     std::vector<const UnitView*> shooters = army_;
     for (const auto& u : snap.my_units)
       if (u.id == scout_) shooters.push_back(&u);
-    std::sort(shooters.begin(), shooters.end(),
-              [](const UnitView* a, const UnitView* b) { return a->id < b->id; });
-    for (const UnitView* u : shooters) {
-      const UnitStats& st = stats_for(static_cast<UnitType>(u->type));
-      const EnemyView* best = nullptr;
-      for (const auto& e : snap.visible_enemies) {
-        if (manhattan({u->x, u->y}, {e.x, e.y}) > st.range) continue;
-        const bool e_drone = static_cast<UnitType>(e.type) == UnitType::Drone;
-        const auto key = std::tuple{left[e.id] <= 0, e_drone, left[e.id], e.id};
-        if (!best || key < std::tuple{left[best->id] <= 0,
-                                      static_cast<UnitType>(best->type) == UnitType::Drone,
-                                      left[best->id], best->id})
-          best = &e;
-      }
-      if (best) {
-        focus_[u->id] = best->id;
-        left[best->id] -= st.dmg;
-        if (left[best->id] <= 0) doomed_.insert(best->id);
-        continue;
-      }
-      const EnemyStructureView* sbest = nullptr;
-      for (const auto& s : snap.visible_enemy_structures) {
-        if (manhattan({u->x, u->y}, {s.x, s.y}) > st.range) continue;
-        const auto key = std::tuple{s.id != target_id_, s.building == 0, s.hp, s.id};
-        if (!sbest ||
-            key < std::tuple{sbest->id != target_id_, sbest->building == 0, sbest->hp, sbest->id})
-          sbest = &s;
-      }
-      if (sbest) focus_[u->id] = sbest->id;
-    }
+    focus_ = focus_fire(snap, std::move(shooters), target_id_, &doomed_);
   }
 
   void plan_army(const Snapshot& snap) {
@@ -697,7 +669,7 @@ private:
       if (busy_.contains(u->id)) continue;
       const Mode mode = squad_.contains(u->id) ? mode_ : Mode::Hold;
       if (mode == Mode::Retreat) {
-        go(*u, [&](Vec2 p) { return manhattan(p, ambush_) <= kGatherRadius; }, CommandKind::Move);
+        go_near(*u, ambush_, kGatherRadius, CommandKind::Move);
         continue;
       }
       if (auto f = focus_.find(u->id); f != focus_.end()) {
@@ -724,27 +696,24 @@ private:
               manhattan(pos, {e.x, e.y}) <= kEngageRadius)
             consider(&e);
       if (foe) {
-        const Vec2 at{foe->x, foe->y};
-        go(*u, [&](Vec2 p) { return manhattan(p, at) <= range; }, CommandKind::MoveAttack);
+        chase(*u, *foe, range);
         continue;
       }
       if (mode == Mode::Stage) {
-        go(*u, [&](Vec2 p) { return manhattan(p, stage_) <= kGatherRadius; },
-           CommandKind::MoveAttack);
+        go_near(*u, stage_, kGatherRadius, CommandKind::MoveAttack);
       } else if (mode == Mode::Strike) {
-        go(*u, [&](Vec2 p) { return manhattan(p, target_) <= range; }, CommandKind::MoveAttack);
+        approach(*u, target_, range, target_, kApproach);
       } else if (!ambush_tiles_.empty() && !in_ambush(pos)) {
         const bool room = std::any_of(ambush_tiles_.begin(), ambush_tiles_.end(),
                                       [&](Vec2 t) { return !occupied.contains(t); });
-        go(*u,
-           [&](Vec2 p) {
-             return room ? in_ambush(p) && !occupied.contains(p)
-                         : manhattan(p, ambush_) <= kGatherRadius;
-           },
-           CommandKind::MoveAttack);
+        if (room)
+          go(*u, {kGoalAmbush, ambush_, ambush_reach_},
+             [&](Vec2 p) { return in_ambush(p) && !occupied.contains(p); },
+             CommandKind::MoveAttack);
+        else
+          go_near(*u, ambush_, kGatherRadius, CommandKind::MoveAttack);
       } else if (ambush_tiles_.empty()) {
-        go(*u, [&](Vec2 p) { return manhattan(p, ambush_) <= kGatherRadius; },
-           CommandKind::MoveAttack);
+        go_near(*u, ambush_, kGatherRadius, CommandKind::MoveAttack);
       } else {
         attack(u->id, 0);
       }
