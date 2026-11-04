@@ -7,24 +7,25 @@ namespace game {
 
 static const UnitStats UNIT_STATS[] = {
   // Drone
-  {cfg::DRONE_HP, 0, 0, cfg::DRONE_DMG, cfg::FULL_SHIELD_DMG_PCT, cfg::DRONE_RANGE,
-   cfg::DRONE_SIGHT, cfg::DRONE_SPEED, false, false, 0, /*priority*/ 1},
+  {cfg::DRONE_HP, 0, 0, cfg::FULL_SHIELD_DMG_PCT, cfg::DRONE_DMG, cfg::DRONE_RANGE,
+   cfg::DRONE_SIGHT, cfg::DRONE_SPEED, false, false, false, 0, /*priority*/ 1},
   // Interceptor
   {cfg::INTERCEPTOR_HP, cfg::INTERCEPTOR_SHIELD, cfg::INTERCEPTOR_SHIELD_REGEN,
-   cfg::INTERCEPTOR_DMG, cfg::INTERCEPTOR_SHIELD_DMG_PCT, cfg::INTERCEPTOR_RANGE,
-   cfg::INTERCEPTOR_SIGHT, cfg::INTERCEPTOR_SPEED, false, false, 0, /*priority*/ 3},
+   cfg::INTERCEPTOR_SHIELD_DMG_PCT, cfg::INTERCEPTOR_DMG, cfg::INTERCEPTOR_RANGE,
+   cfg::INTERCEPTOR_SIGHT, cfg::INTERCEPTOR_SPEED, false, false, false, 0, /*priority*/ 3},
   // Frigate
-  {cfg::FRIGATE_HP, cfg::FRIGATE_SHIELD, cfg::FRIGATE_SHIELD_REGEN, cfg::FRIGATE_DMG,
-   cfg::FRIGATE_SHIELD_DMG_PCT, cfg::FRIGATE_RANGE, cfg::FRIGATE_SIGHT, cfg::FRIGATE_SPEED,
-   /*first_strike*/ true, false, 0, /*priority*/ 1},
+  {cfg::FRIGATE_HP, cfg::FRIGATE_SHIELD, cfg::FRIGATE_SHIELD_REGEN, cfg::FRIGATE_SHIELD_DMG_PCT,
+   cfg::FRIGATE_DMG, cfg::FRIGATE_RANGE, cfg::FRIGATE_SIGHT, cfg::FRIGATE_SPEED,
+   /*first_strike*/ true, false, false, 0, /*priority*/ 1},
   // Artillery
-  {cfg::ARTILLERY_HP, cfg::ARTILLERY_SHIELD, cfg::ARTILLERY_SHIELD_REGEN, cfg::ARTILLERY_DMG,
-   cfg::ARTILLERY_SHIELD_DMG_PCT, cfg::ARTILLERY_RANGE, cfg::ARTILLERY_SIGHT,
-   cfg::ARTILLERY_SPEED, false, /*splash*/ true, cfg::ARTILLERY_SPLASH_RADIUS, /*priority*/ 1},
+  {cfg::ARTILLERY_HP, cfg::ARTILLERY_SHIELD, cfg::ARTILLERY_SHIELD_REGEN,
+   cfg::ARTILLERY_SHIELD_DMG_PCT, cfg::ARTILLERY_DMG, cfg::ARTILLERY_RANGE, cfg::ARTILLERY_SIGHT,
+   cfg::ARTILLERY_SPEED, false, /*splash*/ true, /*pierces_shields*/ true,
+   cfg::ARTILLERY_SPLASH_RADIUS, /*priority*/ 1},
   // Battleship
-  {cfg::BATTLESHIP_HP, cfg::BATTLESHIP_SHIELD, cfg::BATTLESHIP_SHIELD_REGEN, cfg::BATTLESHIP_DMG,
-   cfg::BATTLESHIP_SHIELD_DMG_PCT, cfg::BATTLESHIP_RANGE, cfg::BATTLESHIP_SIGHT,
-   cfg::BATTLESHIP_SPEED, false, false, 0, /*priority*/ 2},
+  {cfg::BATTLESHIP_HP, cfg::BATTLESHIP_SHIELD, cfg::BATTLESHIP_SHIELD_REGEN,
+   cfg::BATTLESHIP_SHIELD_DMG_PCT, cfg::BATTLESHIP_DMG, cfg::BATTLESHIP_RANGE,
+   cfg::BATTLESHIP_SIGHT, cfg::BATTLESHIP_SPEED, false, false, false, 0, /*priority*/ 2},
 };
 static_assert(std::size(UNIT_STATS) == static_cast<std::size_t>(UnitType::Battleship) + 1,
               "UNIT_STATS out of sync with UnitType enum — add a row for the new type");

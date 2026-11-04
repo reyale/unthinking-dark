@@ -19,12 +19,15 @@ inline bool sees_tile(const Map& map, Vec2 from, int32_t sight, Vec2 p) {
 }
 
 inline int32_t sight_radius(const Unit& u) { return u.stats().sight; }
-inline int32_t sight_radius(const Structure&) { return cfg::STRUCTURE_SIGHT; }
+inline constexpr int32_t structure_sight(StructureType t) {
+  return t == StructureType::CommandCore ? cfg::CORE_SIGHT : cfg::STRUCTURE_SIGHT;
+}
+inline int32_t sight_radius(const Structure& s) { return structure_sight(s.type); }
 
 // The farthest anything sees: how far around a tile to look for whoever sees it.
 inline constexpr int32_t MAX_SIGHT =
     std::max({cfg::DRONE_SIGHT, cfg::INTERCEPTOR_SIGHT, cfg::FRIGATE_SIGHT, cfg::ARTILLERY_SIGHT,
-              cfg::BATTLESHIP_SIGHT, cfg::STRUCTURE_SIGHT});
+              cfg::BATTLESHIP_SIGHT, cfg::STRUCTURE_SIGHT, cfg::CORE_SIGHT});
 
 // What each faction sees right now, for combat targeting and MoveAttack halts: a unit can only
 // fire at what its side sees (any of its living units or structures, by sees_tile), so a

@@ -7,6 +7,7 @@
 #include <climits>
 #include <map>
 #include <set>
+#include <utility>
 #include <vector>
 
 namespace game {
@@ -23,7 +24,8 @@ namespace game {
 // once alloy runs past kAlloySpare, up to kBaseArmy ships plus one per finished claim: more
 // would only crowd the map (and the unit cap) the Drones need.
 //
-// Ships go to whichever structure has an enemy within kDefendRadius, nearest first. Otherwise
+// Ships go to whichever structure has an enemy within kDefendRadius, or is losing hp to one it
+// can't see (a Frigate outranges a structure's sight), nearest first. Otherwise
 // they spread out over the finished claims beyond kClearRadius of home, ship k (by id) beside
 // claim k mod n (by id): parked round the Core they would wall in the Drones and the
 // Factories' launch tiles. With no such claim yet they wait kClearRadius out toward the enemy.
@@ -34,8 +36,8 @@ public:
   static constexpr size_t kDronesPerClaimer = 4;
   static constexpr int32_t kClaimsBeforeFactory = 2;
   static constexpr int32_t kMaxFactories = 3;
-  static constexpr int32_t kAlloySpare = cfg::CLAIM_COST_A + cfg::ARTILLERY_COST_A;
-  static constexpr int32_t kBaseArmy = 6;
+  static constexpr int32_t kAlloySpare = cfg::ARTILLERY_COST_A;
+  static constexpr int32_t kBaseArmy = 12;
   static constexpr int32_t kDefendRadius = 8;
   static constexpr int32_t kGuardRadius = 2;
   static constexpr int32_t kClearRadius = 8;
@@ -69,6 +71,7 @@ private:
   Vec2 enemy_spawn_{};
   Vec2 post_{};
   uint32_t factory_builder_{0};
+  std::map<uint32_t, int32_t> last_hp_; // own Core and Factories, by id, as of last tick
 
   std::vector<Command> out_;
   std::set<uint32_t> busy_;
@@ -216,12 +219,13 @@ private:
                     : move_cmd(u.id, CommandKind::Attack, {0, 0}));
   }
 
-  // The own structure nearest `from` with an enemy unit within kDefendRadius, or {-1, -1}.
-  static Vec2 threatened(const Snapshot& snap, Vec2 from) {
+  // The own structure nearest `from` with an enemy unit within kDefendRadius, or that lost hp
+  // since last tick (`hit`), or {-1, -1}.
+  static Vec2 threatened(const Snapshot& snap, Vec2 from, const std::set<uint32_t>& hit) {
     Vec2 best{-1, -1};
     int32_t best_d = INT32_MAX;
     for (const auto& s : snap.my_structures) {
-      bool threat = false;
+      bool threat = hit.contains(s.id);
       for (const auto& e : snap.visible_enemies)
         threat = threat || manhattan({e.x, e.y}, {s.x, s.y}) <= kDefendRadius;
       if (threat && manhattan(from, {s.x, s.y}) < best_d) {
@@ -241,6 +245,16 @@ private:
       if (static_cast<StructureType>(s.type) == StructureType::ClaimNode &&
           s.build_ticks_left == 0 && manhattan({s.x, s.y}, home_) > kClearRadius)
         posts.push_back({s.x, s.y});
+    // Claims are left out: territory moves their hp cap, so a drop needn't be an attack.
+    std::set<uint32_t> hit;
+    std::map<uint32_t, int32_t> hp_now;
+    for (const auto& s : snap.my_structures) {
+      if (static_cast<StructureType>(s.type) == StructureType::ClaimNode) continue;
+      hp_now[s.id] = s.hp;
+      if (auto it = last_hp_.find(s.id); it != last_hp_.end() && s.hp < it->second)
+        hit.insert(s.id);
+    }
+    last_hp_ = std::move(hp_now);
     const auto focus = focus_fire(snap, ships);
     size_t k = 0;
     for (const UnitView* u : ships) {
@@ -251,7 +265,7 @@ private:
         issue(c);
         continue;
       }
-      const Vec2 guard = threatened(snap, {u->x, u->y});
+      const Vec2 guard = threatened(snap, {u->x, u->y}, hit);
       if (guard.x >= 0) go_near(*u, guard, kGuardRadius);
       else if (posts.empty()) go_near(*u, post_, kPostRadius);
       else go_near(*u, posts[mine % posts.size()], kGuardRadius);

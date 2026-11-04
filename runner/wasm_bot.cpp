@@ -132,8 +132,8 @@ std::vector<uint8_t> load_wasm_file(const std::string& path) {
 // The bot's linear memory is supplied by the runner through Wasmtime's host memory
 // creator. That is the only C API hook that sees grow requests: a grow past
 // cfg::MEMORY_CAP_MB is refused (memory.grow returns -1 to the bot, as at any limit)
-// and the attempt is noted, so on_tick can forfeit that tick. The bot's memory never
-// actually exceeds the cap, so its next tick plays normally.
+// and the attempt is noted, so the bot forfeits even if it copes with the refusal. The
+// memory never actually exceeds the cap.
 //
 // The full reservation Wasmtime asks for is mapped up front (PROT_NONE) and pages are
 // made accessible as the memory grows, so the memory never moves and Wasmtime's
@@ -399,9 +399,10 @@ std::vector<game::Command> WasmBot::on_tick(const game::Snapshot& snap) {
   last_metrics_.fault         = classify_fault(err, trap, impl_->memory_gate.over_cap);
 
   if (last_metrics_.fault != game::TickFault::None) {
-    // Tick forfeit: commands are discarded, even if the call completed after a refused
-    // grow. The bot stays healthy and is called again next tick.
+    // The bot forfeits the match: commands are discarded, even if the call completed after a
+    // refused grow.
     last_error_ = (err || trap) ? drain_error(err, trap) : "memory cap exceeded";
+    healthy_ = false;
     return {};
   }
 

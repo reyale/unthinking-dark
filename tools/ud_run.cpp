@@ -17,11 +17,11 @@
 #include "world.hpp"
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <map>
 #include <stdexcept>
 #include <string>
 
@@ -139,7 +139,22 @@ int main(int argc, char** argv) {
 
   // Print result
   const auto& out = rec.outcome;
-  if (out.reason == game::WinReason::Draw) {
+  std::array<game::TickFault, 2> faults{};
+  if (!rec.replay.ticks.empty())
+    faults = {rec.replay.ticks.back().fault_a, rec.replay.ticks.back().fault_b};
+  const std::string why = game::result_reason(out, faults, {"A", "B"});
+  if (faults[0] != game::TickFault::None || faults[1] != game::TickFault::None) {
+    if (out.reason == game::WinReason::Draw)
+      printf("Result: Draw — %s, at tick %u\n", why.c_str(), rec.ticks_played);
+    else
+      printf("Result: %s wins — %s, at tick %u\n", out.winner.value == 0 ? "A" : "B",
+             why.c_str(), rec.ticks_played);
+    // The runner's own message (a trap's backtrace, say), for the author to debug from.
+    for (size_t f = 0; f < faults.size(); ++f)
+      if (faults[f] != game::TickFault::None)
+        printf("%s's error:\n%s\n", f == 0 ? "A" : "B",
+               (f == 0 ? bot_a : bot_b).last_error().c_str());
+  } else if (out.reason == game::WinReason::Draw) {
     printf("Result: Draw (tick cap, territory within %d%%)\n",
            game::cfg::DRAW_TERRITORY_MARGIN);
   } else {
@@ -168,27 +183,6 @@ int main(int argc, char** argv) {
     printf("  Memory peak:   A=%-10llu B=%llu bytes\n",
         (unsigned long long)peak_ma, (unsigned long long)peak_mb);
 
-    // Forfeited ticks: that side's commands were discarded and its units stood still.
-    auto forfeits = [&](game::TickFault game::TickEntry::*fault, const char* side) {
-      std::map<game::TickFault, uint32_t> by_cause;
-      uint32_t first = 0, total = 0;
-      for (const auto& t : log.ticks) {
-        if (t.*fault == game::TickFault::None) continue;
-        if (total++ == 0) first = t.tick;
-        ++by_cause[t.*fault];
-      }
-      printf("  Forfeits:      %s=", side);
-      if (total == 0) { printf("none\n"); return; }
-      printf("%u ticks (", total);
-      const char* sep = "";
-      for (const auto& [cause, n] : by_cause) {
-        printf("%s%u %s", sep, n, game::tick_fault_name(cause));
-        sep = ", ";
-      }
-      printf("), first at tick %u\n", first);
-    };
-    forfeits(&game::TickEntry::fault_a, "A");
-    forfeits(&game::TickEntry::fault_b, "B");
   }
 
   // Write replay

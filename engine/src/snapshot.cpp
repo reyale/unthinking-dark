@@ -15,7 +15,7 @@ Snapshot build_snapshot(const World& world, uint32_t faction_id, uint32_t tick_c
 
   // --- Compute visibility mask -----------------------------------------
   // A tile is visible if it is within sight (Manhattan) of any friendly unit or structure:
-  // a unit's own sight radius, STRUCTURE_SIGHT for every structure. Only nebulae obscure
+  // a unit's own sight radius, structure_sight() for a structure. Only nebulae obscure
   // (sees_tile).
   const int32_t W = world.map.width;
   const int32_t H = world.map.height;
@@ -35,7 +35,7 @@ Snapshot build_snapshot(const World& world, uint32_t faction_id, uint32_t tick_c
       see_around(unit.pos, unit.stats().sight);
   for (const auto& [id, s] : world.structures)
     if (s.faction == my_faction && s.alive())
-      see_around(s.pos, cfg::STRUCTURE_SIGHT);
+      see_around(s.pos, sight_radius(s));
 
   // --- Build visible-tile occupancy map --------------------------------
   // Maps tile position → occupant faction (0=none, 1=me, 2=enemy).

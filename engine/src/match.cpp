@@ -66,11 +66,12 @@ MatchRecord run_match(World& world, Bot& bot_a, uint32_t faction_a, Bot& bot_b, 
     Snapshot snap_a = build_snapshot(world, faction_a, tick_cap);
     Snapshot snap_b = build_snapshot(world, faction_b, tick_cap);
 
-    // Metrics only from bots actually called this tick; an unhealthy bot isn't called
-    // and would otherwise report its previous call's numbers.
+    // A bot that is unhealthy (it failed to load or init) isn't called: it faults at tick 0.
     auto call = [](Bot& bot, const Snapshot& snap, BotMetrics& m) {
       if (!bot.healthy()) {
         m = {};
+        m.fault = bot.last_metrics().fault != TickFault::None ? bot.last_metrics().fault
+                                                              : TickFault::Trap;
         return std::vector<Command>{};
       }
       auto cmds = bot.on_tick(snap);
@@ -95,7 +96,9 @@ MatchRecord run_match(World& world, Bot& bot_a, uint32_t faction_a, Bot& bot_b, 
     if (writer)
       writer->write_tick(entry);
 
-    result = run_tick_phases(world, raw_a, faction_a, raw_b, faction_b, tick_cap, rec.hash);
+    result = fault_result(faction_a, ma.fault, faction_b, mb.fault);
+    if (!result)
+      result = run_tick_phases(world, raw_a, faction_a, raw_b, faction_b, tick_cap, rec.hash);
   }
 
   rec.outcome               = *result;

@@ -1338,6 +1338,20 @@ TEST(Snapshot, StructuresSeeAroundThemselves) {
   EXPECT_EQ(snap.visible_enemy_structures[0].id, enemy_fac.id.value);
 }
 
+// The Command Core sees as far as any ship sees or fires: nothing can shoot it unseen.
+TEST(Snapshot, CoreSeesAsFarAsAnyShipFires) {
+  using namespace game::cfg;
+  static_assert(CORE_SIGHT >= ARTILLERY_RANGE && CORE_SIGHT >= FRIGATE_RANGE &&
+                CORE_SIGHT >= BATTLESHIP_SIGHT && CORE_SIGHT > STRUCTURE_SIGHT);
+  auto w = make_big_world();
+  w.spawn_structure({0}, game::StructureType::CommandCore, {20, 20});
+  auto& in = w.spawn_unit({1}, game::UnitType::Artillery, {20 + CORE_SIGHT, 20});
+  w.spawn_unit({1}, game::UnitType::Artillery, {20 + CORE_SIGHT, 21}); // one tile beyond
+  auto snap = game::build_snapshot(w, 0, TICK_CAP);
+  ASSERT_EQ(snap.visible_enemies.size(), 1u);
+  EXPECT_EQ(snap.visible_enemies[0].id, in.id.value);
+}
+
 // ---- Claim construction -------------------------------------------------------
 
 static game::Structure& deploy_claim(game::World& w, game::Unit& drone, game::Vec2 at) {

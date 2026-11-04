@@ -14,7 +14,7 @@ namespace game {
 
 struct Hit {
   int32_t dmg;
-  int32_t shield_pct; // the weapon's shield_dmg_pct
+  int32_t shield_pct; // how much of it the target's shield feels
 };
 
 // A combat target is either an enemy unit or an enemy structure.
@@ -78,13 +78,21 @@ static CombatTarget pick_target(const World& world, const Unit& attacker, const 
   return {{}, structure};
 }
 
+static Hit hit_on(const UnitStats& weapon, const Unit& target) {
+  return {weapon.dmg,
+          weapon.pierces_shields ? cfg::FULL_SHIELD_DMG_PCT : target.stats().shield_dmg_pct};
+}
+
 // Splash damage centered on `center`, radius 1.  Hits all living units and
 // structures (friendly fire applies to both).
-static void apply_splash(const Occupancy& occ, Vec2 center, Hit hit,
+static void apply_splash(const World& world, const Occupancy& occ, Vec2 center,
+                         const UnitStats& weapon,
                          std::map<UnitId, std::vector<Hit>>& pending_units,
                          std::map<StructureId, int32_t>&     pending_structs) {
-  const int32_t dmg = hit.dmg;
-  occ.each_unit_within(center, 1, [&](UnitId id) { pending_units[id].push_back(hit); });
+  const int32_t dmg = weapon.dmg;
+  occ.each_unit_within(center, 1, [&](UnitId id) {
+    pending_units[id].push_back(hit_on(weapon, *world.find_unit(id)));
+  });
   occ.each_structure_within(center, 1, [&](StructureId id) { pending_structs[id] += dmg; });
 }
 
@@ -100,7 +108,9 @@ static void log_shot(CombatLog* log, const Unit& attacker, const CombatTarget& t
 // The shield takes the hit first, feeling shield_pct of it, and the hull the rest in full. Any
 // hit, even one the shield absorbs whole, restarts the wait before it regenerates.
 static void take_damage(Unit& u, Hit h) {
-  const int32_t on_shield = h.dmg * h.shield_pct / cfg::FULL_SHIELD_DMG_PCT;
+  // Rounded up, so even a claim's 1-damage shot wears a hardened shield down.
+  const int32_t on_shield =
+      (h.dmg * h.shield_pct + cfg::FULL_SHIELD_DMG_PCT - 1) / cfg::FULL_SHIELD_DMG_PCT;
   if (on_shield <= u.shield) {
     u.shield -= on_shield;
   } else {
@@ -164,11 +174,10 @@ static void volley(World& world, bool first_strike, GetCmd& get_cmd, const Facti
     const Vec2 at = tgt.struct_id.is_null() ? world.find_unit(tgt.unit_id)->pos
                                             : world.find_structure(tgt.struct_id)->pos;
     log_shot(log, unit, tgt, at, first_strike);
-    const Hit hit{unit.stats().dmg, unit.stats().shield_dmg_pct};
     if (unit.stats().splash)
-      apply_splash(occ, at, hit, hits.units, hits.structs);
+      apply_splash(world, occ, at, unit.stats(), hits.units, hits.structs);
     else if (tgt.struct_id.is_null())
-      hits.units[tgt.unit_id].push_back(hit);
+      hits.units[tgt.unit_id].push_back(hit_on(unit.stats(), *world.find_unit(tgt.unit_id)));
     else
       hits.structs[tgt.struct_id] += unit.stats().dmg;
   }
@@ -235,7 +244,8 @@ void run_combat(World& world, const ValidatedCommands& cmds_a, const ValidatedCo
     });
     if (best.is_null())
       continue;
-    hits.units[best].push_back({cfg::CLAIM_ATTACK_DMG, cfg::FULL_SHIELD_DMG_PCT});
+    hits.units[best].push_back(
+        {cfg::CLAIM_ATTACK_DMG, world.find_unit(best)->stats().shield_dmg_pct});
     if (log)
       log->shots.push_back({{}, s.faction, UnitType::Drone, s.pos, best, {},
                             world.find_unit(best)->pos, cfg::CLAIM_ATTACK_DMG, false, false, sid});

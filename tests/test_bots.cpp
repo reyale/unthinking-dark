@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <map>
+#include <optional>
 #include "frame.hpp"
 #include "match.hpp"
 #include "tick.hpp"
@@ -127,14 +128,15 @@ TEST(RushBot, ReplayFrameShotsAccountForDamage) {
     total_shots += cur.shots.size();
     total_kills += cur.kills.size();
     bool any_splash = false;
-    // A unit's hits in firing order, each as (damage, the weapon's shield_dmg_pct).
-    std::map<game::UnitId, std::vector<std::pair<int32_t, int32_t>>> unit_hits;
+    // A unit's hits in firing order, each as (damage, attacker type or none for a claim).
+    std::map<game::UnitId, std::vector<std::pair<int32_t, std::optional<game::UnitType>>>>
+        unit_hits;
     std::map<game::StructureId, int32_t> struct_dmg;
     for (const auto& s : cur.shots) {
       any_splash |= s.splash;
-      const int32_t pct = s.attacker.is_null() ? game::cfg::FULL_SHIELD_DMG_PCT
-                                               : game::stats_for(s.attacker_type).shield_dmg_pct;
-      if (!s.target_unit.is_null()) unit_hits[s.target_unit].push_back({s.damage, pct});
+      std::optional<game::UnitType> by;
+      if (!s.attacker.is_null()) by = s.attacker_type;
+      if (!s.target_unit.is_null()) unit_hits[s.target_unit].push_back({s.damage, by});
       else struct_dmg[s.target_struct] += s.damage;
     }
     if (any_splash) continue; // splash damage isn't attributed per victim
@@ -145,8 +147,12 @@ TEST(RushBot, ReplayFrameShotsAccountForDamage) {
     for (const auto& u : cur.units) cur_hp[u.id] = {u.hp, u.shield};
     for (const auto& u : prev.units) {
       int32_t hull = u.hp, shield = u.shield;
-      for (const auto& [dmg, pct] : unit_hits[u.id]) {
-        const int32_t felt = dmg * pct / game::cfg::FULL_SHIELD_DMG_PCT;
+      for (const auto& [dmg, by] : unit_hits[u.id]) {
+        const int32_t pct = by && game::stats_for(*by).pierces_shields
+                                ? game::cfg::FULL_SHIELD_DMG_PCT
+                                : game::stats_for(u.type).shield_dmg_pct;
+        const int32_t felt =
+            (dmg * pct + game::cfg::FULL_SHIELD_DMG_PCT - 1) / game::cfg::FULL_SHIELD_DMG_PCT;
         if (felt <= shield) {
           shield -= felt;
           continue;

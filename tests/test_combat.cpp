@@ -45,10 +45,11 @@ TEST(Combat, FrigateFirstStrikeKillsBeforeSimultaneous) {
 
   game::run_combat(w, cmds_a, cmds_b);
 
-  // The Frigate's first strike lands on the Interceptor's shield, which feels a third of it, so
-  // it fires back in the simultaneous phase, into the Frigate's shield.
+  // The Frigate's first strike lands on the Interceptor's hardened shield, which feels a third
+  // of it, so it fires back in the simultaneous phase, into the Frigate's shield.
   using namespace game::cfg;
-  constexpr int32_t felt = FRIGATE_DMG * FRIGATE_SHIELD_DMG_PCT / FULL_SHIELD_DMG_PCT;
+  constexpr int32_t felt =
+      (FRIGATE_DMG * INTERCEPTOR_SHIELD_DMG_PCT + FULL_SHIELD_DMG_PCT - 1) / FULL_SHIELD_DMG_PCT;
   static_assert(felt < INTERCEPTOR_SHIELD);
   static_assert(INTERCEPTOR_DMG < FRIGATE_SHIELD);
   EXPECT_EQ(inter.shield, INTERCEPTOR_SHIELD - felt);
@@ -57,8 +58,8 @@ TEST(Combat, FrigateFirstStrikeKillsBeforeSimultaneous) {
   EXPECT_EQ(frigate.hp, FRIGATE_HP);
 }
 
-// Once a Frigate's hit breaks a shield, the part the shield didn't stop lands on the hull in full.
-TEST(Combat, FrigateHitThroughAShieldReachesTheHullInFull) {
+// Once a hit breaks a hardened shield, the part the shield didn't stop lands on the hull in full.
+TEST(Combat, HitThroughAHardenedShieldReachesTheHullInFull) {
   auto w = make_combat_world();
   auto& frigate = w.spawn_unit({0}, game::UnitType::Frigate, {5, 5});
   auto& inter = w.spawn_unit({1}, game::UnitType::Interceptor, {6, 5});
@@ -66,10 +67,23 @@ TEST(Combat, FrigateHitThroughAShieldReachesTheHullInFull) {
   game::run_combat(w, attack_cmd(frigate.id), {});
 
   using namespace game::cfg;
-  // 2 shield stops 2 / 33% = 6.06, so 7 of the hit (rounded up), and the other 5 reach the hull.
-  static_assert(FRIGATE_DMG == 12 && FRIGATE_SHIELD_DMG_PCT == 33);
+  // 2 shield stops 2 / 25% = 8 of the hit, and the other 4 reach the hull.
+  static_assert(FRIGATE_DMG == 12 && INTERCEPTOR_SHIELD_DMG_PCT == 25);
   EXPECT_EQ(inter.shield, 0);
-  EXPECT_EQ(inter.hp, INTERCEPTOR_HP - 5);
+  EXPECT_EQ(inter.hp, INTERCEPTOR_HP - 4);
+}
+
+// Artillery shells pierce the Interceptor's hardened shield: it feels them in full.
+TEST(Combat, ArtilleryPiercesAHardenedShield) {
+  using namespace game::cfg;
+  auto w = make_combat_world();
+  auto& art = w.spawn_unit({0}, game::UnitType::Artillery, {5, 5});
+  auto& inter = w.spawn_unit({1}, game::UnitType::Interceptor, {7, 5});
+  game::run_combat(w, attack_cmd(art.id), {});
+  static_assert(INTERCEPTOR_SHIELD_DMG_PCT < FULL_SHIELD_DMG_PCT);
+  static_assert(ARTILLERY_DMG < INTERCEPTOR_SHIELD);
+  EXPECT_EQ(inter.shield, INTERCEPTOR_SHIELD - ARTILLERY_DMG);
+  EXPECT_EQ(inter.hp, INTERCEPTOR_HP);
 }
 
 TEST(Combat, FrigateKillsWeakTargetBeforeSimultaneous) {

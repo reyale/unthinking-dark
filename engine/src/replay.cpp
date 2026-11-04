@@ -35,6 +35,8 @@ uint64_t replay(const ReplayLog& log) {
 
   StateHash hash;
   for (const auto& entry : log.ticks) {
+    if (fault_result(log.faction_a, entry.fault_a, log.faction_b, entry.fault_b))
+      break;
     run_tick_phases(world, entry.raw_a, log.faction_a, entry.raw_b, log.faction_b, log.tick_cap,
                     hash);
   }

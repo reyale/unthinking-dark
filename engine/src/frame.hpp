@@ -47,8 +47,8 @@ struct FrameState {
   // Combat during the tick that produced this frame (empty on the initial frame).
   std::vector<ShotEvent> shots;
   std::vector<KillEvent> kills;
-  // Per faction: non-None if that side forfeited the tick that produced this frame
-  // (its units stood still: commands discarded for fuel, memory or a trap).
+  // Per faction: non-None if that side faulted (fuel, memory or a trap) and so forfeited the
+  // match: only on the last frame, which then shows the board unchanged.
   std::array<TickFault, MAX_FACTIONS> forfeits{};
 };
 

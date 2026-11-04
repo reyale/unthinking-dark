@@ -1,5 +1,6 @@
 #include "ascii_out.hpp"
 #include <cstdio>
+#include <string>
 
 namespace viz {
 
@@ -22,15 +23,8 @@ static const char* ansi_color(CellColor c) {
   return RESET;
 }
 
-static const char* win_reason_str(game::WinReason r) {
-  switch (r) {
-    case game::WinReason::BaseDestroyed:      return "base destroyed";
-    case game::WinReason::TerritoryThreshold: return "territory";
-    case game::WinReason::TickCap:            return "tick cap";
-    case game::WinReason::TieBreakLadder:     return "tie-break";
-    case game::WinReason::Draw:               return "draw";
-  }
-  return "?";
+static std::string win_reason_str(const RenderFrame& rf) {
+  return game::result_reason(*rf.result, rf.forfeits, {"faction 0", "faction 1"});
 }
 
 } // namespace
@@ -71,10 +65,10 @@ void print_ascii_frame(const RenderFrame& rf) {
 
   if (rf.result) {
     if (rf.result->reason == game::WinReason::Draw)
-      printf("%sGame over: Draw (%s)%s\n", YELLOW, win_reason_str(rf.result->reason), RESET);
+      printf("%sGame over: Draw (%s)%s\n", YELLOW, win_reason_str(rf).c_str(), RESET);
     else
       printf("%sGame over: Faction %u wins (%s)%s\n", YELLOW,
-             rf.result->winner.value, win_reason_str(rf.result->reason), RESET);
+             rf.result->winner.value, win_reason_str(rf).c_str(), RESET);
   } else {
     printf("\n");
   }

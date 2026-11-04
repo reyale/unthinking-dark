@@ -10,7 +10,7 @@ Build order and acceptance criteria: `docs/IMPLEMENTATION_PLAN.md`.
 
 ## Current State
 
-**Phases 1–5 complete. 327/327 tests passing.**
+**Phases 1–5 complete. 330/330 tests passing.**
 
 | Phase | Status | Notes |
 |-------|--------|-------|
@@ -23,8 +23,9 @@ Build order and acceptance criteria: `docs/IMPLEMENTATION_PLAN.md`.
 | 7 — Calibration | 🔲 Not started | |
 
 Additional work:
-- **Draws are allowed** (`WinReason::Draw`): both Command Cores die the same tick, or the tick cap is
-  reached with territory difference ≤ `cfg::DRAW_TERRITORY_MARGIN` (5%). Don't "fix" them away.
+- **Draws are allowed** (`WinReason::Draw`): both Command Cores die the same tick, both bots
+  fault the same tick, or the tick cap is reached with territory difference ≤
+  `cfg::DRAW_TERRITORY_MARGIN` (5%). Don't "fix" them away.
 - `ABI_VERSION` is 15 (8 added `StructureView`: all own structures; 9 added `EnemyStructureView`:
   enemy structures in sight; 10 renamed `Command::unit_id` → `entity_id`: Produce is issued by the
   Core (Drones) or a Factory (ships) itself; 11 added `UnitView::cargo_energy/cargo_alloy`; 12 added `StructureView::build_ticks_left` and
@@ -136,13 +137,19 @@ by each unfinished structure; `ClaimLattice` hands out claim sites.
 validates ABI version before first tick. `load_wasm_file()` reads bytes; `WasmBot::healthy()`
 must be true before use.
 
-**Forfeits:** a tick where a bot runs out of fuel, traps, or tries to grow memory past
-`cfg::MEMORY_CAP_MB` is forfeited: its commands are discarded and that side stalls for the tick.
-The cap is enforced by a host memory creator in `wasm_bot.cpp` (the only C API hook that sees grow
+**Forfeits:** a bot that runs out of fuel, traps, or tries to grow memory past
+`cfg::MEMORY_CAP_MB` (in init or any tick) **loses the match** (`WinReason::Forfeit`; both in
+one tick is a Draw). The faulting tick is recorded but not played: `fault_result()`
+(wincheck.hpp) decides it in `run_match`, `replay()` and `replay_frames()` alike. A faulted
+`WasmBot` is unhealthy and never called again (its memory may be mid-update). The cap is
+enforced by a host memory creator in `wasm_bot.cpp` (the only C API hook that sees grow
 requests); the refused grow returns -1 and the memory never exceeds the cap. The cause is
-`BotMetrics::fault` (`TickFault::{None,OutOfFuel,OutOfMemory,Trap}`), stored per tick per bot in
-`TickEntry::fault_a/b`, carried into `FrameState::forfeits`, shown in the viewer as "STALLED", and
-summarised by `ud_run`. `TickFault` values are written to replay files: append only.
+`BotMetrics::fault` (`TickFault::{None,OutOfFuel,OutOfMemory,Trap}`), stored in the last
+`TickEntry::fault_a/b` and carried into the last frame's `FrameState::forfeits`. Every viewer
+and `ud_run` say why through `result_reason()` (wincheck.hpp): "B forfeited: ran out of fuel /
+went over the memory cap / crashed"; `ud_run` adds the runner's error (a trap's backtrace). `TickFault` and `WinReason` values
+are written to replay files: append only. (Forfeiting only the tick and rolling the bot back
+was built and measured, then dropped: a full memory copy per tick, ~57 µs per MB.)
 
 The runner turns Wasmtime's copy-on-write memory init off: with the capped memory creator it
 panics on modules with sizeable data segments (any bot linking libc).
@@ -249,7 +256,11 @@ Compile flags enforcing these: `-ffp-contract=off -fno-fast-math` (in `cmake/Com
 
 - **Line-of-sight:** Manhattan distance ≤ sight_radius, no rays. Nebulae hide what is inside:
   a nebula tile (and its occupant) is seen only from within `NEBULA_SIGHT` (1). Asteroids
-  don't block sight.
+  don't block sight. Structures see `STRUCTURE_SIGHT` (2); the Command Core sees `CORE_SIGHT`,
+  the max of every ship's sight and range (6), so nothing shoots it from beyond its sight.
+  Claim Nodes and Factories seeing less than ships fire is deliberate (outlying structures can
+  be sniped unseen; defending them is the bot's job): don't raise it.
+  Use `structure_sight()` / `sight_radius()` (vision.hpp), never the constants directly.
 - **No blind fire:** a unit can only target what its side sees (any living own unit or
   structure, the snapshot's fog rule), so Artillery (range 6, sight 2) needs a spotter. Sight
   is re-checked after the first-strike purge: a spotter killed there spots no more.
@@ -269,10 +280,11 @@ Compile flags enforcing these: `-ffp-contract=off -fno-fast-math` (in `cmake/Com
   to hull; hull never recovers. A ship unhit for `SHIELD_REGEN_DELAY` ticks regains its type's
   `_SHIELD_REGEN` per tick (end of combat). Any hit restarts the wait, even one the shield
   absorbs whole, splash and friendly fire included; firing doesn't. Drones and structures
-  have none (a Core shield would stall games). A shield feels only the weapon's
-  `_SHIELD_DMG_PCT` of a hit: Frigates 33% (so a mostly-shield Interceptor survives their first
-  strike: this is what makes Interceptor > Frigate hold in `ud_arena`), the rest 100%. Once the
-  shield breaks, what it didn't stop hits the hull in full.
+  have none (a Core shield would stall games). A shield feels only its ship's
+  `_SHIELD_DMG_PCT` of a hit, rounded up: the Interceptor's is hardened (25%), so a swarm
+  survives direct fire and overwhelms Frigates and Battleships in `ud_arena`; every other ship
+  100%. Artillery shells pierce it (`UnitStats::pierces_shields`): that keeps Artillery >
+  Interceptor. Once a shield breaks, what it didn't stop hits the hull in full.
 - **No upkeep** for now; revisit only if calibration shows hoarding or spam.
 - **Terrain is public:** before `init` the runner writes the whole map into the snapshot buffer
   (a tiles-only snapshot, one `TileView` per tile); native bots get it as `on_init`'s `Map`.

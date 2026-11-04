@@ -7,9 +7,9 @@ Wasmtime host that executes untrusted `.wasm` bots inside the engine.
 `WasmBot` implements the `game::Bot` interface by loading a compiled WebAssembly
 module and running it under [Wasmtime](https://wasmtime.dev/) with:
 
-- **Fuel metering** — each tick is budgeted; exhaustion forfeits that tick
+- **Fuel metering** — each tick is budgeted; exhaustion forfeits the match
 - **Memory cap** — `MEMORY_CAP_MB` enforced via a host memory creator; a grow past it is
-  refused and forfeits that tick
+  refused and forfeits the match
 - **Determinism flags** — threads off, SIMD off, relaxed SIMD off, NaN canonicalization on
 - **Bulk memory off** — modules using `memory.copy`/`memory.fill`/`memory.init`/`data.drop`
   or the `table.*` equivalents are rejected at load (see below)

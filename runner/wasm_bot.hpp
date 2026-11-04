@@ -21,8 +21,9 @@ std::vector<uint8_t> load_wasm_file(const std::string& path);
 // Lifecycle:
 //   1. Construct with WASM bytes (check healthy() — false means load failure).
 //   2. Call on_init() once (init-budget overrun → healthy() becomes false).
-//   3. Call on_tick() each tick (fuel/trap failures → empty commands that tick,
-//      bot stays healthy and is called again next tick).
+//   3. Call on_tick() each tick. A fuel, memory or trap fault returns no commands and leaves
+//      the bot unhealthy: it loses the match (its state may be half-updated, so it is never
+//      called again).
 class WasmBot : public game::Bot {
 public:
   explicit WasmBot(const std::vector<uint8_t>& wasm);

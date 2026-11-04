@@ -27,7 +27,8 @@ inline constexpr int32_t UNIT_HARD_CAP = unit_cap(MAP_MAX_W, MAP_MAX_H);
 // Per side, all structure types, on every map. Bounds the snapshot like UNIT_HARD_CAP; Build and
 // DeployClaim are refused at the cap.
 inline constexpr int32_t STRUCTURE_HARD_CAP = 128; // v1 placeholder
-// Every structure sees this far (Manhattan), so a base isn't blind without units nearby.
+// Every structure sees this far (Manhattan), so a base isn't blind without units nearby. The
+// Command Core sees further: CORE_SIGHT, below the ship stats.
 inline constexpr int32_t STRUCTURE_SIGHT = 2; // v1 placeholder
 // A nebula tile, and anything on it, is seen only from within NEBULA_SIGHT (Manhattan), and a
 // unit there can only be targeted by a faction that sees it. Units inside see out normally.
@@ -62,9 +63,9 @@ inline constexpr int32_t CLAIM_ATTACK_RANGE = 2;
 // hull. Hull never recovers. Shields regenerate _SHIELD_REGEN per tick, up to full, once the
 // ship has gone SHIELD_REGEN_DELAY ticks without being hit (any hit counts: fully absorbed,
 // splash, friendly fire). Drones and structures have no shield.
-// A weapon's _SHIELD_DMG_PCT is how much of its damage a shield feels: Frigate guns are made for
-// hulls, so a mostly-shield Interceptor survives their first strike. Once the shield is down the
-// rest of the hit lands on the hull in full.
+// A ship's _SHIELD_DMG_PCT is how much of a hit its shield feels: the Interceptor's is hardened,
+// so a swarm survives direct fire long enough to close and overwhelm, but Artillery shells
+// pierce it (they hit it in full). Once a shield is down, the rest of the hit lands on the hull.
 inline constexpr int32_t SHIELD_REGEN_DELAY = 5;
 inline constexpr int32_t FULL_SHIELD_DMG_PCT = 100;
 
@@ -77,7 +78,7 @@ inline constexpr int32_t DRONE_SPEED = 1;
 inline constexpr int32_t INTERCEPTOR_HP = 7;
 inline constexpr int32_t INTERCEPTOR_SHIELD = 24;
 inline constexpr int32_t INTERCEPTOR_SHIELD_REGEN = 2;
-inline constexpr int32_t INTERCEPTOR_SHIELD_DMG_PCT = FULL_SHIELD_DMG_PCT;
+inline constexpr int32_t INTERCEPTOR_SHIELD_DMG_PCT = 25;
 inline constexpr int32_t INTERCEPTOR_DMG = 5;
 inline constexpr int32_t INTERCEPTOR_RANGE = 2;
 inline constexpr int32_t INTERCEPTOR_SIGHT = 3;
@@ -86,7 +87,7 @@ inline constexpr int32_t INTERCEPTOR_SPEED = 2;
 inline constexpr int32_t FRIGATE_HP = 45;
 inline constexpr int32_t FRIGATE_SHIELD = 10;
 inline constexpr int32_t FRIGATE_SHIELD_REGEN = 2;
-inline constexpr int32_t FRIGATE_SHIELD_DMG_PCT = 33;
+inline constexpr int32_t FRIGATE_SHIELD_DMG_PCT = FULL_SHIELD_DMG_PCT;
 inline constexpr int32_t FRIGATE_DMG = 12;
 inline constexpr int32_t FRIGATE_RANGE = 3;
 inline constexpr int32_t FRIGATE_SIGHT = 3;
@@ -102,14 +103,26 @@ inline constexpr int32_t ARTILLERY_SIGHT = 2;
 inline constexpr int32_t ARTILLERY_SPEED = 1;
 inline constexpr int32_t ARTILLERY_SPLASH_RADIUS = 1;
 
-inline constexpr int32_t BATTLESHIP_HP = 110;
-inline constexpr int32_t BATTLESHIP_SHIELD = 20;
+inline constexpr int32_t BATTLESHIP_HP = 130;
+inline constexpr int32_t BATTLESHIP_SHIELD = 40;
 inline constexpr int32_t BATTLESHIP_SHIELD_REGEN = 4;
 inline constexpr int32_t BATTLESHIP_SHIELD_DMG_PCT = FULL_SHIELD_DMG_PCT;
-inline constexpr int32_t BATTLESHIP_DMG = 35;
+inline constexpr int32_t BATTLESHIP_DMG = 25;
 inline constexpr int32_t BATTLESHIP_RANGE = 4;
 inline constexpr int32_t BATTLESHIP_SIGHT = 5;
 inline constexpr int32_t BATTLESHIP_SPEED = 1;
+
+// As far as any ship sees or fires, so nothing can shoot the Core from beyond its sight, and
+// the Core sees whatever sees it.
+// (Hand-rolled max: the SDK builds bots that include this file without a standard library.)
+inline constexpr int32_t max_of(int32_t a) { return a; }
+template <class... Rest> constexpr int32_t max_of(int32_t a, Rest... rest) {
+  const int32_t b = max_of(rest...);
+  return a > b ? a : b;
+}
+inline constexpr int32_t CORE_SIGHT =
+    max_of(INTERCEPTOR_SIGHT, INTERCEPTOR_RANGE, FRIGATE_SIGHT, FRIGATE_RANGE, ARTILLERY_SIGHT,
+           ARTILLERY_RANGE, BATTLESHIP_SIGHT, BATTLESHIP_RANGE);
 
 // ---- Structure stats ---------------------------------------------------
 inline constexpr int32_t CMD_CORE_HP = 600;
@@ -140,7 +153,7 @@ inline constexpr int32_t DRONE_COST_E = 5,        DRONE_COST_A = 0;
 inline constexpr int32_t INTERCEPTOR_COST_E = 10, INTERCEPTOR_COST_A = 5;
 inline constexpr int32_t FRIGATE_COST_E = 40,     FRIGATE_COST_A = 5;
 inline constexpr int32_t ARTILLERY_COST_E = 10,   ARTILLERY_COST_A = 25;
-inline constexpr int32_t BATTLESHIP_COST_E = 120, BATTLESHIP_COST_A = 15;
+inline constexpr int32_t BATTLESHIP_COST_E = 170, BATTLESHIP_COST_A = 15;
 inline constexpr int32_t FACTORY_COST_E = 50,     FACTORY_COST_A = 100;
 inline constexpr int32_t CLAIM_COST_E = 0,        CLAIM_COST_A = 20;
 // A Drone deploys a Claim Node onto a tile within this Manhattan distance of itself.

@@ -11,13 +11,14 @@ struct UnitStats {
   int32_t hp; // hull
   int32_t shield;
   int32_t shield_regen; // per tick, once SHIELD_REGEN_DELAY ticks pass unhit
+  int32_t shield_dmg_pct; // of a hit that this ship's shield feels
   int32_t dmg;
-  int32_t shield_dmg_pct; // of dmg, while it hits a shield
   int32_t range;
   int32_t sight;
   int32_t speed;
   bool first_strike;
   bool splash;
+  bool pierces_shields; // its hits ignore the target's shield_dmg_pct
   int32_t splash_radius;
   int32_t collision_priority;
 };

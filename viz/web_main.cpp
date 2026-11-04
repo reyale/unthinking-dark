@@ -80,7 +80,8 @@ static CellData make_cell(const game::Map& map, const game::FrameState& fr,
     if (!vis) {
       for (const auto& s : fr.structures) {
         if (view >= 0 && static_cast<int>(s.faction.value) != view) continue;
-        if (s.hp > 0 && game::sees_tile(map, s.pos, game::cfg::STRUCTURE_SIGHT, {x, y}))
+        if (s.hp > 0 &&
+            game::sees_tile(map, s.pos, game::structure_sight(s.type), {x, y}))
           { vis = true; break; }
       }
     }
@@ -266,15 +267,14 @@ static void main_loop() {
 
     if (fr.result.has_value()) {
       const auto& res = *fr.result;
+      const std::string why = game::result_reason(res, fr.forfeits, {"A", "B"});
       ImGui::SameLine();
       if (res.reason == game::WinReason::Draw) {
-        ImGui::TextColored({0.9f, 0.85f, 0.2f, 1.0f}, " | DRAW");
+        ImGui::TextColored({0.9f, 0.85f, 0.2f, 1.0f}, " | DRAW (%s)", why.c_str());
       } else {
-        ImVec4      wc  = res.winner.value == 0 ? kFactionA : kFactionB;
-        const char* why =
-            res.reason == game::WinReason::BaseDestroyed      ? "base" :
-            res.reason == game::WinReason::TerritoryThreshold ? "territory" : "tick cap";
-        ImGui::TextColored(wc, " | %s wins (%s)", res.winner.value == 0 ? "A" : "B", why);
+        ImVec4 wc = res.winner.value == 0 ? kFactionA : kFactionB;
+        ImGui::TextColored(wc, " | %s wins (%s)", res.winner.value == 0 ? "A" : "B",
+                           why.c_str());
       }
     }
 

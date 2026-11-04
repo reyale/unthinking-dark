@@ -56,6 +56,7 @@ RenderFrame build_render_frame(const game::FrameState& frame, const game::Map& m
   rf.total_frames = total_frames;
   rf.resources = frame.resources;
   rf.result = frame.result;
+  rf.forfeits = frame.forfeits;
   rf.cells.resize(static_cast<size_t>(W * H));
 
   // Fill terrain
@@ -93,7 +94,7 @@ RenderFrame build_render_frame(const game::FrameState& frame, const game::Map& m
       rf.cells[static_cast<size_t>(sf.pos.y * W + sf.pos.x)].visible = true;
       if (sf.hp <= 0)
         continue;
-      const int32_t sight = game::cfg::STRUCTURE_SIGHT;
+      const int32_t sight = game::structure_sight(sf.type);
       for (int32_t dy = -sight; dy <= sight; ++dy)
         for (int32_t dx = -sight; dx <= sight; ++dx) {
           const int32_t nx = sf.pos.x + dx, ny = sf.pos.y + dy;

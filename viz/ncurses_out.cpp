@@ -1,6 +1,7 @@
 #include "ncurses_out.hpp"
 #include <ncurses.h>
 #include <cstdio>
+#include <string>
 #include <cstring>
 
 namespace viz {
@@ -44,15 +45,8 @@ static int color_attr(CellColor c) {
   }
 }
 
-static const char* win_reason_str(game::WinReason r) {
-  switch (r) {
-    case game::WinReason::BaseDestroyed:      return "base destroyed";
-    case game::WinReason::TerritoryThreshold: return "territory";
-    case game::WinReason::TickCap:            return "tick cap";
-    case game::WinReason::TieBreakLadder:     return "tie-break";
-    case game::WinReason::Draw:               return "draw";
-  }
-  return "?";
+static std::string win_reason_str(const RenderFrame& rf) {
+  return game::result_reason(*rf.result, rf.forfeits, {"faction 0", "faction 1"});
 }
 
 void draw_ncurses_frame(const RenderFrame& rf) {
@@ -139,10 +133,10 @@ void draw_ncurses_frame(const RenderFrame& rf) {
   if (rf.result) {
     attron(COLOR_PAIR(CP_WIN) | A_BOLD);
     if (rf.result->reason == game::WinReason::Draw)
-      mvprintw(bot_row + 1, 0, "Game over: Draw (%s)", win_reason_str(rf.result->reason));
+      mvprintw(bot_row + 1, 0, "Game over: Draw (%s)", win_reason_str(rf).c_str());
     else
       mvprintw(bot_row + 1, 0, "Game over: Faction %u wins (%s)",
-               rf.result->winner.value, win_reason_str(rf.result->reason));
+               rf.result->winner.value, win_reason_str(rf).c_str());
     attroff(COLOR_PAIR(CP_WIN) | A_BOLD);
   }
 

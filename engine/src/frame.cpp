@@ -61,8 +61,11 @@ std::vector<FrameState> replay_frames(const ReplayLog& log, uint64_t* fingerprin
   StateHash hash;
   for (const auto& entry : log.ticks) {
     CombatLog combat;
-    auto result = run_tick_phases(world, entry.raw_a, log.faction_a, entry.raw_b, log.faction_b,
-                                  log.tick_cap, hash, &combat);
+    // A faulted tick isn't played: its frame is the board as it stood, with the result.
+    auto result = fault_result(log.faction_a, entry.fault_a, log.faction_b, entry.fault_b);
+    if (!result)
+      result = run_tick_phases(world, entry.raw_a, log.faction_a, entry.raw_b, log.faction_b,
+                               log.tick_cap, hash, &combat);
     FrameState fs = capture(world, result);
     fs.shots = std::move(combat.shots);
     fs.kills = std::move(combat.kills);

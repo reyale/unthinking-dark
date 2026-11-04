@@ -49,6 +49,9 @@ std::optional<MatchResult> run_tick(World& world, Bot& bot_a, uint32_t faction_a
 
   std::vector<Command> raw_a = bot_a.healthy() ? bot_a.on_tick(snap_a) : std::vector<Command>{};
   std::vector<Command> raw_b = bot_b.healthy() ? bot_b.on_tick(snap_b) : std::vector<Command>{};
+  if (auto r = fault_result(faction_a, bot_a.last_metrics().fault, faction_b,
+                            bot_b.last_metrics().fault))
+    return r;
 
   return run_tick_phases(world, raw_a, faction_a, raw_b, faction_b, tick_cap, hash);
 }

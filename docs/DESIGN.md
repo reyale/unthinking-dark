@@ -53,25 +53,26 @@ These are non-negotiable; each one silently breaks replay if violated.
 - **Per-tick fuel budget** (lean): bounds per-tick reasoning. (v1 placeholder — tune in sim.)
 - **One-time startup budget** (fat): a separate, generous budget for a setup/init call
   before tick 0, for precomputation and allocation. Overrunning startup = bot fails to
-  initialize = upload/validation failure (it cannot play). Distinct from a per-tick forfeit.
+  initialize = it cannot play, and loses at tick 0 (§2.4).
 - **Linear memory cap** per instance, fixed and identical for both bots, pinned in match
   config. (v1 placeholder: ~64 MB — tune.) Remember total server budget ≈ N_instances × cap.
   Enforced by the runner: a `memory.grow` past the cap is refused (returns -1 to the bot,
-  so memory never exceeds the cap) and counts as a memory violation for that call. During
-  init that is a startup overrun (cannot play); during a tick it is a forfeit (§2.4).
+  so memory never exceeds the cap) and counts as a memory violation for that call, even if
+  the bot copes with the refusal (§2.4).
 
 ### 2.4 Resource-violation handling (MUST be unified)
-- Any in-match fuel exhaustion, OOM, panic, or trap → **the bot forfeits that tick**:
-  its commands for the tick are discarded (even if the call went on to return some), so
-  that side **stalls** — its units don't move, attack or build that tick. The match
-  continues. No hard loss. Only that tick is lost; the bot is called normally next tick.
-- Loss is always **emergent** from board state (a perpetually idle fleet gets
-  out-maneuvered and loses), never a direct rules penalty for resource use.
-- **Forfeited ticks are first-class statistics.** Per forfeited tick, record:
-  `tick`, `faction_id`, `cause ∈ {fuel, memory, trap}`, `units_affected`. (Recorded per
-  tick in the replay as each bot's `TickFault`; `units_affected` is that side's unit count
-  in the frame, derived at playback rather than stored.) Aggregate per
-  bot over time. Used for author feedback, spectator drama, and balance tuning.
+- Any fuel exhaustion, OOM, panic, or trap, in init or in a tick → **the bot forfeits the
+  match** (`WinReason::Forfeit`): the other side wins on the spot. The faulting tick isn't
+  played (its commands, even any the call went on to return, are discarded); the match ends
+  on the board as it stood. Both bots faulting in the same tick is a **draw**.
+- Why a hard loss: a fault can stop a bot anywhere (inside its allocator, half through
+  updating a data structure), so letting it play on would mean either running it on
+  corrupt state or rolling its memory back every tick (a full copy of its linear memory per
+  tick, tried and measured: ~57 µs per MB). The budgets are sized for fairness, not
+  scarcity (well above what the fixtures need on the largest map), so a violation is a bug.
+- **The cause is recorded:** the faulting tick's replay entry carries each bot's
+  `TickFault` (`fuel`, `memory`, `trap`), so the loss reason survives into replays, the
+  viewer and the stats.
 - **Inspection of game state is free** (no fuel surcharge): the snapshot is bulk-copied
   into linear memory, so reading it is ordinary memory access. Fuel meters *reasoning*,
   not perception. Do NOT add allocation fuel surcharges either; loads/stores cost their
@@ -99,7 +100,8 @@ These are non-negotiable; each one silently breaks replay if violated.
   who is alive when the shot is picked: a spotter killed in the first-strike sub-phase spots
   nothing for the simultaneous one. MoveAttack halts only on a target its side sees.
 - **Fog of war:** **active-only for what moves.** A faction sees a tile only if currently
-  within a friendly unit's sight radius or `STRUCTURE_SIGHT` of a friendly structure (a
+  within a friendly unit's sight radius or a friendly structure's sight (`CORE_SIGHT` for
+  the Command Core, `STRUCTURE_SIGHT` for the rest) (a
   nebula tile: only within `NEBULA_SIGHT`). **Terrain is public**: every bot gets the whole
   map (terrain and resource nodes) before tick 0 (§4.1), as in most RTS games; fog hides only
   what stands on it. The per-tick snapshot carries only the tiles in sight this tick. Engine computes visibility and masks the snapshot —
@@ -165,7 +167,7 @@ commands are rejected deterministically. A bot proposing two commands for one un
 ### Phase 0 — Snapshot & Decide
 - Engine builds each faction's fog-masked `WorldView` from frozen start-of-tick state.
 - Both bots run `on_tick` **in parallel**, each metered by its own per-tick fuel budget.
-- Fuel exhaustion / OOM / trap → that bot's command list = empty (forfeit, logged §2.4).
+- Fuel exhaustion / OOM / trap → that bot forfeits the match; the tick isn't played (§2.4).
 - Commands collected, **not yet applied**.
 
 ### Phase 1 — Validate
@@ -216,9 +218,10 @@ for step in 1..=N:
   visible enemy unit within `CLAIM_ATTACK_RANGE`, ties → lower id; never structures.
 - **Shields:** every hit, in either sub-phase, goes into the target's shield first; only
   the overflow reaches its hp (the hull), and a unit dies when its hull reaches 0. A shield
-  feels only the weapon's `_SHIELD_DMG_PCT` of a hit (Frigates: 33%, everything else 100%);
-  once it breaks, the part of the hit it didn't stop lands on the hull in full. A unit's hits
-  in a sub-phase apply in the order they were fired.
+  feels only its ship's `_SHIELD_DMG_PCT` of a hit, rounded up (Interceptor: 25%, hardened;
+  every other ship 100%), except from Artillery, whose shells pierce: a shield feels them in
+  full. Once a shield breaks, the part of the hit it didn't stop lands on the hull in full. A
+  unit's hits in a sub-phase apply in the order they were fired.
 - Apply deaths at end of phase.
 - **Shield regen, last:** a unit that has gone `SHIELD_REGEN_DELAY` (v1: 5) ticks without
   being hit regains its type's `_SHIELD_REGEN` per tick, up to full. Any hit restarts the
@@ -282,10 +285,10 @@ All stats integer. Numbers are starting guesses for the simulator to tune.
 | Unit | hull | shield (regen/tick) | dmg | range | sight | speed | special | counters |
 |------|------|--------|-----|------|------|------|---------|----------|
 | **Drone** (fabricator) | 8 | — | — | — | 3 | 1 | harvests, builds structures, deploys claims | n/a (soft economy unit) |
-| **Interceptor** (brawler) | 7 | 24 (2) | 5 | 2 | 3 | 2 | simultaneous dmg; **high collision priority**; cheap; mostly shield, which Frigate guns barely dent, and it recovers between hit-and-run passes | strong vs Frigate, weak vs Artillery |
-| **Frigate** (ranged) | 45 | 10 (2) | 12 | 3 | 3 | 1 | **first-strike**; its guns do a third of their damage to shields | strong vs Artillery, weak vs Interceptor |
+| **Interceptor** (brawler) | 7 | 24 (2) | 5 | 2 | 3 | 2 | simultaneous dmg; **high collision priority**; cheap; mostly shield, **hardened** (feels 25% of a hit, but Artillery pierces it), and it recovers between hit-and-run passes | strong vs Frigate and Battleship (a swarm overwhelms it), weak vs Artillery |
+| **Frigate** (ranged) | 45 | 10 (2) | 12 | 3 | 3 | 1 | **first-strike** | strong vs Artillery, weak vs Interceptor |
 | **Artillery** (siege) | 20 | 2 (1) | 22 | 6 | 2 | 1 | **radius-1 splash, friendly fire ON**; simultaneous dmg; expensive; cracks claims; its range is its armour | strong vs Interceptor (clumps), weak vs Frigate |
-| **Battleship** (capital) | 110 | 20 (4) | 35 | 4 | 5 | 1 | very expensive; anchors a push, and tops up its shield between them | — (calibrate) |
+| **Battleship** (capital) | 130 | 40 (4) | 25 | 4 | 5 | 1 | very expensive; anchors a push, and tops up its shield between them | strong vs Frigate and Artillery; overwhelmed by an Interceptor swarm |
 
 Values are `config.hpp`'s at the time of writing; that file is the source of truth. Ships
 have shields (§5 Phase 3); Drones and structures don't. Shield tops a unit up after a fight
@@ -300,7 +303,11 @@ positioning beat raw numbers.
 | **Factory** | 150 | produces combat ships only (Interceptor/Frigate/Artillery/Battleship); stationary; built by a Drone within `BUILD_RANGE` (v1: 1) over `BUILD_TICKS` while it stays by (§5 Phase 4); costs `FACTORY_COST_E`/`FACTORY_COST_A` (v1: 50 Energy + 100 Alloy) |
 
 Every structure sees `STRUCTURE_SIGHT` (v1: 2, Manhattan) around itself, so a base without
-units nearby is not blind.
+units nearby is not blind. The Command Core sees `CORE_SIGHT`: the farthest any ship sees or
+fires (v1: 6, Artillery's range), computed from the ship stats, so nothing can shoot the Core
+from beyond its sight. Other structures are deliberately short-sighted: Frigates, Battleships and
+Artillery out-range them, so outlying claims and Factories can be shot from out of sight and
+need defending.
 | **Claim Node** | scales high→~1 over match | Voronoi territory anchor; **shoots, very weakly** once finished: `CLAIM_ATTACK_DMG` (v1: 1) per tick at the nearest enemy unit it can see within `CLAIM_ATTACK_RANGE` (v1: 2), enough to see off a lone scout at full claim hp but not two, and out-ranged by Frigates and Artillery; deployed by a Drone onto a tile within `CLAIM_DEPLOY_RANGE` (v1: 2) of itself, so Drones must travel to stake ground, and built over `BUILD_TICKS` while a Drone stays by it (§5 Phase 4); cracked by firepower (esp. Artillery splash) |
 
 **Resources (2 types, v1):**
@@ -371,18 +378,16 @@ threshold is above 50%). Evaluated in order until one side wins:
 2. Higher total Command Core hp remaining
 3. More enemy units destroyed
 4. More resources gathered (lifetime)
-5. Fewer forfeited ticks
-6. Lowest deterministic hash of `faction_id + seed` (theoretical coin-flip floor)
+5. Lowest deterministic hash of `faction_id + seed` (theoretical coin-flip floor)
 
 ---
 
 ## 8. Statistics & Telemetry
 
 Tracked per match, aggregated per bot over time. First-class (not afterthoughts):
-- **Forfeited ticks** with cause breakdown (§2.4) — author feedback, spectator drama,
-  balance signal (if strong bots forfeit at scale, fuel budget is too tight for the army
-  sizes the game permits).
-- Match outcome, win path (base vs territory vs tie-break), duration in ticks.
+- **Forfeits** with cause (§2.4) — author feedback and a balance signal (if strong bots
+  forfeit at scale, the fuel budget is too tight for the army sizes the game permits).
+- Match outcome, win path (base vs territory vs tie-break vs forfeit), duration in ticks.
 - Per-faction: peak units, units killed/lost, resources gathered, peak territory %,
   peak memory, peak per-tick fuel.
 
@@ -395,9 +400,9 @@ Tracked per match, aggregated per bot over time. First-class (not afterthoughts)
   (scrub, pause, switch perspective: per-faction fog view or god-view).
 - Each frame: tiles, unit positions/types/hp, structures/hp, fog overlay per perspective,
   Voronoi territory fill (two-color), and **events** (attacks, deaths, builds, claim
-  deploys/cracks, **stalls/forfeits**).
-- **Stalls/forfeits get a visible state** (greyed unit / stutter / "!"), turning a failure
-  mode into spectator information and an author debugging signal.
+  deploys/cracks, **forfeits**).
+- **A forfeit gets a visible state** on the final frame (which side faulted, and why), an
+  author debugging signal.
 - **Spectator HUD:** two-color territory gauge + a **descending threshold marker** sweeping
   toward 50%, plus Command Core hp bars. The legible stakes model: "blue tide must reach
   the falling line before time runs out, or break the red core."
@@ -484,8 +489,8 @@ and a late climax; draws rare (they are allowed, §7); turtles lose.
   tiles, jump lanes, sensor/interference zones.
 - Scratch memory region zeroed each tick.
 - 3rd resource type, additional unit types (Scout, etc.), claim tiers.
-- More weapons that treat shields differently from hull (e.g. splash weak vs shields), beyond
-  the Frigate's.
+- More shield/weapon interactions (e.g. splash weak vs shields), beyond the Interceptor's
+  hardened shield and Artillery's piercing shells.
 - Shields on structures (a Command Core shield would make chip damage pointless and push
   games toward the tick cap).
 - Procedural map generation.

@@ -255,7 +255,7 @@ phase's acceptance implicitly.
 - **Re-simulating player:** feed the input-log back through `/engine`, emit per-tick render
   state. Prove re-sim reproduces the original final hash.
 - Minimal renderer (ASCII/2D ok): scrub, pause, perspective toggle (faction-fog vs god-view),
-  visible **stall/forfeit** state.
+  visible **forfeit** state.
 
 **Acceptance**
 - Scripted match plays back start to finish from the input-log alone.
@@ -297,16 +297,16 @@ implementing `bot_iface`.
 - ABI handshake (§2.1): validate exports + buffer sizes at init; snapshot memcpy-in,
   command memcpy-out.
 - Budgets: fat one-time `init` budget vs lean `on_tick` budget; init overrun → load failure
-  (cannot play), distinct from a tick forfeit.
-- Unified failure (§2.4): fuel exhaustion / OOM / trap → empty commands this tick →
-  repeat-last/idle, logged with cause `{fuel,memory,trap}`.
+  (cannot play: it forfeits at tick 0).
+- Unified failure (§2.4): fuel exhaustion / OOM / trap → the bot forfeits the match, the
+  faulting tick unplayed, logged with cause `{fuel,memory,trap}`.
 
 **Acceptance**
 - A trivial real `wasm32` bot plays a full match through the runner.
 - **Determinism across runs (and across x86-64 machines)** with pinned config: same fuel
   counts, same final hash. (Determinism keystone extended to the WASM path.)
-- Fuel-exhaustion, OOM, trap each → logged tick-forfeit, match continues (no hard loss).
-- Init-budget overrun rejected at load, distinct from tick forfeit.
+- Fuel-exhaustion, OOM, trap each → logged match forfeit with its cause.
+- Init-budget overrun → the bot can't play and forfeits at tick 0.
 - Sandbox: a hostile bot cannot reach host state or exceed the memory cap.
 
 **Stop-and-ask**
@@ -343,7 +343,7 @@ pre-match fuel/memory reports.
 **Deliverables**
 - Batch runner (round-robin and/or ladder/ELO), parallel **across** matches (each match
   stays single-threaded-deterministic).
-- Stats: forfeited ticks w/ cause, win path (base/territory/tie-break), duration, per-faction
+- Stats: forfeits w/ cause, win path (base/territory/tie-break/forfeit), duration, per-faction
   peak units/kills/losses/resources/peak territory/peak memory/peak fuel.
 - Persist replays + match records (each embeds map, seed, bot hashes, pinned config).
 

@@ -23,7 +23,8 @@ struct TickEntry {
   uint64_t fuel_b{0};
   uint64_t mem_bytes_a{0};
   uint64_t mem_bytes_b{0};
-  // Non-None when that bot forfeited this tick (its raw commands are then empty).
+  // Non-None when that bot faulted this tick (its raw commands are then empty): the match
+  // ends here, as a Forfeit, and the tick isn't played. Only ever on the last entry.
   TickFault fault_a{TickFault::None};
   TickFault fault_b{TickFault::None};
 };

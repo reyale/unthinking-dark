@@ -35,6 +35,7 @@ struct RenderFrame {
 
   std::array<game::Resources, game::MAX_FACTIONS> resources{};
   std::optional<game::MatchResult> result;
+  std::array<game::TickFault, game::MAX_FACTIONS> forfeits{};
 
   const RenderCell& at(int32_t x, int32_t y) const {
     return cells[static_cast<size_t>(y * width + x)];

@@ -5,6 +5,25 @@
 
 namespace game {
 
+std::string result_reason(const MatchResult& r, const std::array<TickFault, 2>& faults,
+                          const std::array<const char*, 2>& names) {
+  auto forfeited = [&](size_t f) {
+    return std::string(names[f]) + " forfeited: " + tick_fault_reason(faults[f]);
+  };
+  switch (r.reason) {
+  case WinReason::BaseDestroyed:      return "base destroyed";
+  case WinReason::TerritoryThreshold: return "territory";
+  case WinReason::TickCap:            return "tick cap";
+  case WinReason::TieBreakLadder:     return "tie-break";
+  case WinReason::Forfeit:            return forfeited(r.winner.value == 0 ? 1 : 0);
+  case WinReason::Draw:
+    if (faults[0] != TickFault::None && faults[1] != TickFault::None)
+      return forfeited(0) + "; " + forfeited(1);
+    return "draw";
+  }
+  return "?";
+}
+
 // Tie-break ladder (§7.4): evaluated in order until one side wins.
 static FactionId tiebreak(const World& world, const TerritoryState& territory) {
   FactionId f0{0}, f1{1};
