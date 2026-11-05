@@ -14,7 +14,9 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "^(GNU|Clang|AppleClang)$")
             add_compile_options(-flto=thin)
             add_link_options(-flto=thin)
         else()
-            add_compile_options(-flto)
+            # Fat objects keep machine code beside the LTO bytecode, so the installed static
+            # libraries also link into projects built without -flto.
+            add_compile_options(-flto -ffat-lto-objects)
             add_link_options(-flto)
         endif()
     endif()

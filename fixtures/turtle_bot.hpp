@@ -76,7 +76,7 @@ public:
       }
       const Vec2 target = intruder(snap);
       if (target.x >= 0) {
-        out.push_back(move_cmd(u.id, CommandKind::MoveAttack, target));
+        out.push_back(move_cmd(u.id, CommandKind::Move, target));
         continue;
       }
       const Vec2 step =

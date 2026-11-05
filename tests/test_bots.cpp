@@ -67,7 +67,7 @@ TEST(RushBot, ReplayReproducesHash) {
   EXPECT_EQ(game::replay(rec.replay), rec.replay.expected_hash);
 }
 
-// Both sides rush with MoveAttack — their Frigates will clash in the middle.
+// Both sides rush with Move, which fires on the way: their Frigates will clash in the middle.
 // Verify the replay log has non-empty command buffers (bots actually issued orders).
 TEST(RushBot, VsAggroIssuesCommands) {
   auto w = make_bot_world(13);
@@ -246,7 +246,7 @@ TEST(RushVsEcon, ReplayReproducesHash) {
   EXPECT_EQ(game::replay(rec.replay), rec.replay.expected_hash);
 }
 
-// RushBot issues Move/MoveAttack commands every tick; IdleBot never does.
+// RushBot issues Move commands every tick; IdleBot never does.
 // The replay log should reflect this asymmetry.
 TEST(RushVsEcon, AggroIssuedCommandsIdleDidNot) {
   auto w = make_bot_world(77);

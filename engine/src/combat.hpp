@@ -46,7 +46,8 @@ struct CombatLog {
   std::vector<KillEvent> kills;
 };
 
-// Phase 3 — combat against final positions.
+// Phase 3 — combat against final positions. A ship fires on a tick it was ordered to Move or
+// Attack (after moving, from where it ended); unordered units hold fire.
 //
 // Sub-phase A (first strike): Frigates fire first, simultaneously among themselves (Frigates
 //   that kill each other both fire), drawing from the world RNG in ascending unit-id order.
@@ -64,13 +65,5 @@ struct CombatLog {
 //   checked again for sub-phase B, so a spotter killed in A no longer spots.
 void run_combat(World& world, const ValidatedCommands& cmds_a, const ValidatedCommands& cmds_b,
                 CombatLog* log = nullptr);
-
-// True if `unit` has anything it could attack right now: a living enemy unit or
-// structure within its range that its faction can see. Movement uses this to
-// halt MoveAttack units, so a unit stops at full range whether it is closing on a ship or a
-// building.
-bool target_in_range(const World& world, const Unit& unit, const FactionSight& sight,
-                     const Occupancy& occ);
-bool target_in_range(const World& world, const Unit& unit); // builds the other two itself
 
 } // namespace game

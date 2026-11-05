@@ -1,12 +1,14 @@
 #include "map_gen.hpp"
 #include "map_io.hpp"
 #include "rng.hpp"
+#include "version.hpp"
 #include <iostream>
 #include <string>
 #include <cstring>
 #include <cstdlib>
 
 int main(int argc, char* argv[]) {
+  if (game::print_version_if_asked(argc, argv, "ud_mapgen")) return 0;
   maps::GenParams params;
   uint64_t    seed     = 0;
   std::string out_path;
@@ -40,7 +42,7 @@ int main(int argc, char* argv[]) {
 
   if (out_path.empty()) {
     std::cerr << "usage: ud_mapgen [--width W] [--height H] [--seed N] "
-                 "[--resource-amount R] [--name NAME] --out FILE\n";
+                 "[--resource-amount R] [--name NAME] [--version] --out FILE\n";
     return 1;
   }
 

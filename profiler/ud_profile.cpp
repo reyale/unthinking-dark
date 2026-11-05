@@ -1,15 +1,19 @@
 // ud_profile — deterministic fuel/memory profile of a bot (DESIGN §10).
 //
-// Usage: ud_profile <bot.wasm> [--scenario NAME]... [--ticks] [--list]
+// Usage: ud_profile <bot.wasm> [--scenario NAME]... [--ticks] [--list] [--json]
 //
 // Runs the scenario suite through the same match code and pinned Wasmtime config
 // as ranked play, so every number is exactly what the match meter would charge.
 // Exit status: 0 = within budget, 1 = usage/load error, 2 = a forfeit (fuel, memory or trap).
+// --json prints one JSON object instead of the report, for the tournament harness (keys are
+// append-only); a load error is then an object with an "error".
 #include "config.hpp"
 #include "profiler.hpp"
 #include "wasm_bot.hpp"
+#include "version.hpp"
 #include <cstdio>
 #include <cstring>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <unistd.h>
 #include <vector>
@@ -53,21 +57,84 @@ std::string col(const std::string& s, int w, bool left = false) {
 }
 
 void usage() {
-  fprintf(stderr, "usage: ud_profile <bot.wasm> [--scenario NAME]... [--ticks] [--list]\n");
+  fprintf(stderr, "usage: ud_profile <bot.wasm> [--scenario NAME]... [--ticks] [--list] [--json] [--version]\n");
+}
+
+using Json = nlohmann::ordered_json;
+
+Json json_header() {
+  return Json{{"engine_version", game::build_version()},
+              {"abi", game::cfg::ABI_VERSION},
+              {"budgets",
+               {{"fuel_per_tick", game::cfg::FUEL_PER_TICK},
+                {"fuel_init", game::cfg::FUEL_STARTUP},
+                {"memory_bytes", kMemCap}}}};
+}
+
+int json_error(const std::string& msg) {
+  Json j = json_header();
+  j["error"] = msg;
+  printf("%s\n", j.dump().c_str());
+  return 1;
+}
+
+int json_report(const std::vector<profiler::Report>& reports) {
+  Json j = json_header();
+  const auto& init = reports.front().init;
+  j["init"] = {{"fuel", init.fuel_consumed}, {"memory_bytes", init.memory_bytes},
+               {"fault", game::tick_fault_name(init.fault)}};
+  uint64_t worst = 0, peak = 0;
+  uint32_t forfeits = 0;
+  for (const auto& r : reports) {
+    std::string first_fault = "none";
+    Json fault_tick = nullptr;
+    for (size_t t = 0; t < r.ticks.size(); ++t)
+      if (r.ticks[t].fault != game::TickFault::None) {
+        first_fault = game::tick_fault_name(r.ticks[t].fault);
+        fault_tick = t;
+        break;
+      }
+    j["scenarios"].push_back({{"name", r.name},
+                              {"ticks", r.ticks.size()},
+                              {"units", r.my_units},
+                              {"visible_enemies", r.visible_enemies},
+                              {"visible_tiles", r.visible_tiles},
+                              {"mean_fuel", r.mean_fuel()},
+                              {"worst_fuel", r.worst_fuel},
+                              {"worst_tick", r.worst_tick},
+                              {"peak_memory", r.peak_memory},
+                              {"forfeits",
+                               {{"fuel", r.fuel_forfeits},
+                                {"memory", r.memory_forfeits},
+                                {"trap", r.trap_forfeits}}},
+                              {"first_fault", first_fault},
+                              {"first_fault_tick", fault_tick}});
+    worst = std::max(worst, r.worst_fuel);
+    peak = std::max(peak, r.peak_memory);
+    forfeits += r.forfeits();
+  }
+  j["worst_fuel"] = worst;
+  j["peak_memory"] = peak;
+  j["forfeits"] = forfeits;
+  printf("%s\n", j.dump().c_str());
+  return forfeits ? 2 : 0;
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
+  if (game::print_version_if_asked(argc, argv, "ud_profile")) return 0;
   g_tty = isatty(fileno(stdout));
   std::string path;
   std::vector<const profiler::Scenario*> chosen;
-  bool per_tick = false;
+  bool per_tick = false, json = false;
   for (int i = 1; i < argc; ++i) {
     if (!strcmp(argv[i], "--list")) {
       for (const auto& s : profiler::scenarios())
         printf("%-18s %5u ticks  %s\n", s.name.c_str(), s.ticks, s.what.c_str());
       return 0;
+    } else if (!strcmp(argv[i], "--json")) {
+      json = true;
     } else if (!strcmp(argv[i], "--ticks")) {
       per_tick = true;
     } else if (!strcmp(argv[i], "--scenario") && i + 1 < argc) {
@@ -89,6 +156,7 @@ int main(int argc, char** argv) {
   try {
     wasm = runner::load_wasm_file(path);
   } catch (const std::exception& e) {
+    if (json) return json_error(e.what());
     fprintf(stderr, "error: %s\n", e.what());
     return 1;
   }
@@ -97,10 +165,12 @@ int main(int argc, char** argv) {
   for (const auto* s : chosen) {
     reports.push_back(profiler::run_scenario(wasm, *s));
     if (!reports.back().loaded) {
+      if (json) return json_error(path + ": " + reports.back().error);
       fprintf(stderr, "error: %s: %s\n", path.c_str(), reports.back().error.c_str());
       return 1;
     }
   }
+  if (json) return json_report(reports);
 
   printf("ud_profile %s\n", path.c_str());
   printf("budgets: %s fuel/tick, %s fuel at init, %s memory (pinned ranked-match config)\n",

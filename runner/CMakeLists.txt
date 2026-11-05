@@ -8,6 +8,14 @@ endif()
 
 add_library(runner_lib STATIC wasm_bot.cpp)
 
-target_include_directories(runner_lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(runner_lib PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+    $<INSTALL_INTERFACE:${UD_INSTALL_INCLUDEDIR}>
+)
 
-target_link_libraries(runner_lib PUBLIC engine wasmtime_lib)
+# Installed, libwasmtime.a goes alongside and ai_gameConfig.cmake defines ai_game::wasmtime.
+target_link_libraries(runner_lib PUBLIC engine $<BUILD_INTERFACE:wasmtime_lib>
+                                        $<INSTALL_INTERFACE:ai_game::wasmtime>)
+set_target_properties(runner_lib PROPERTIES EXPORT_NAME runner)
+ud_install_library(runner_lib ${CMAKE_CURRENT_SOURCE_DIR})
+install(FILES ${wasmtime_SOURCE_DIR}/lib/libwasmtime.a DESTINATION ${UD_INSTALL_LIBDIR})

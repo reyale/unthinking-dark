@@ -1,11 +1,9 @@
 #include "movement.hpp"
-#include "combat.hpp"
 #include "world.hpp"
 #include "entity.hpp"
 #include "config.hpp"
 #include "grid.hpp"
 #include "occupancy.hpp"
-#include "vision.hpp"
 #include <algorithm>
 #include <cstdlib>
 #include <vector>
@@ -58,7 +56,6 @@ void run_movement(World& world, const ValidatedCommands& cmds_a, const Validated
   struct Mover {
     Unit* unit;
     Vec2 target;
-    bool move_attack;
     int32_t steps_left;
     Vec2 next{};
   };
@@ -66,13 +63,12 @@ void run_movement(World& world, const ValidatedCommands& cmds_a, const Validated
   std::vector<Mover> movers;
   for (const ValidatedCommands* cmds : {&cmds_a, &cmds_b}) {
     for (const auto& [uid, cmd] : *cmds) {
-      const auto kind = static_cast<CommandKind>(cmd.kind);
-      if (kind != CommandKind::Move && kind != CommandKind::MoveAttack)
+      if (static_cast<CommandKind>(cmd.kind) != CommandKind::Move)
         continue;
       Unit* u = world.find_unit(uid.unit());
       if (!u || !u->alive())
         continue;
-      movers.push_back({u, {cmd.ax, cmd.ay}, kind == CommandKind::MoveAttack, u->stats().speed});
+      movers.push_back({u, {cmd.ax, cmd.ay}, u->stats().speed});
     }
   }
   std::sort(movers.begin(), movers.end(),
@@ -93,7 +89,6 @@ void run_movement(World& world, const ValidatedCommands& cmds_a, const Validated
   const int32_t max_speed = cfg::INTERCEPTOR_SPEED; // largest speed in roster
   for (int32_t step = 0; step < max_speed && !movers.empty(); ++step) {
     occ.rebuild(world);
-    const FactionSight sight(world, occ);
     claim.reset(tiles);
     winner.reset(tiles);
 
@@ -107,12 +102,6 @@ void run_movement(World& world, const ValidatedCommands& cmds_a, const Validated
       const Unit& u = *mv.unit;
       if (!u.alive())
         continue;
-
-      // MoveAttack: halt if enemy now in range
-      if (mv.move_attack && target_in_range(world, u, sight, occ)) {
-        mv.steps_left = 0;
-        continue;
-      }
 
       const Vec2 next = step_toward(u.pos, mv.target);
       if (next == u.pos || !world.map.passable(next) || world.structure_by_pos.count(next)) {

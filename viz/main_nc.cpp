@@ -4,6 +4,7 @@
 #include "render.hpp"
 #include "replay.hpp"
 #include "replay_io.hpp"
+#include "version.hpp"
 
 #include <ncurses.h>
 #include <cstdio>
@@ -22,8 +23,9 @@ static game::Map map_from_log(const game::ReplayLog& log) {
 }
 
 int main(int argc, char** argv) {
+  if (game::print_version_if_asked(argc, argv, "ud_viz_nc")) return 0;
   if (argc < 2) {
-    fprintf(stderr, "usage: ud_viz_nc <replay.ud>\n");
+    fprintf(stderr, "usage: ud_viz_nc <replay.ud> | --version\n");
     return 1;
   }
 

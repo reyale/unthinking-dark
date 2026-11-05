@@ -10,7 +10,7 @@ Build order and acceptance criteria: `docs/IMPLEMENTATION_PLAN.md`.
 
 ## Current State
 
-**Phases 1–5 complete. 330/330 tests passing.**
+**Phases 1–5 complete. 328/328 tests passing.**
 
 | Phase | Status | Notes |
 |-------|--------|-------|
@@ -26,12 +26,13 @@ Additional work:
 - **Draws are allowed** (`WinReason::Draw`): both Command Cores die the same tick, both bots
   fault the same tick, or the tick cap is reached with territory difference ≤
   `cfg::DRAW_TERRITORY_MARGIN` (5%). Don't "fix" them away.
-- `ABI_VERSION` is 15 (8 added `StructureView`: all own structures; 9 added `EnemyStructureView`:
+- `ABI_VERSION` is 16 (8 added `StructureView`: all own structures; 9 added `EnemyStructureView`:
   enemy structures in sight; 10 renamed `Command::unit_id` → `entity_id`: Produce is issued by the
   Core (Drones) or a Factory (ships) itself; 11 added `UnitView::cargo_energy/cargo_alloy`; 12 added `StructureView::build_ticks_left` and
   `EnemyStructureView::building` for claim construction; 13: Factories are built the same way,
   so those fields now apply to them too; 14 added shields: `UnitView::shield/shield_wait`,
-  `EnemyView::shield`; 15: the unit cap scales with map area, which grows the snapshot buffer). Bumping it invalidates all existing replay files and every compiled bot.
+  `EnemyView::shield`; 15: the unit cap scales with map area, which grows the snapshot buffer; 16 retired
+  `MoveAttack`: every Move fires, nothing halts it). Bumping it invalidates all existing replay files and every compiled bot.
 - The unit cap scales with the map: `cfg::unit_cap(w, h)` is `UNIT_CAP_PCT` (4%) of the area per
   side (queued ships count), so 256 on 80×80. `UNIT_HARD_CAP` is that cap on the largest map
   (655); it and `STRUCTURE_HARD_CAP` (128) bound the snapshot buffer, and the runner clamps to them
@@ -70,6 +71,28 @@ cmake --build build-cov --target coverage
 
 For LSP support: `ln -s build/compile_commands.json compile_commands.json`
 
+**Version:** every tool takes `--version` and prints e.g. `ud_run v0.2.0-3-g5183546-dirty (ABI 16)`:
+`git describe --tags --always --dirty`, re-read on every build (`cmake/Version.cmake`), or
+`-DUD_VERSION=<string>` to set it. It is `game::build_version()` (`version.hpp`, in the engine
+library, so installed users get it too); a new tool calls `game::print_version_if_asked()` first.
+
+**Install** (for projects outside this repo, e.g. the tournament harness in `../ai-game-tournament`):
+```bash
+~/.local/bin/cmake -B build-rel -DCMAKE_BUILD_TYPE=Release && cmake --build build-rel -j$(nproc)
+~/.local/bin/cmake --install build-rel --prefix <dir>
+```
+`find_package(ai_game 0.1.0 REQUIRED)` (with `-DCMAKE_PREFIX_PATH=<dir>`) gives `ai_game::engine`,
+`ai_game::maps`, `ai_game::runner`, and `AI_GAME_BOTS_DIR` / `AI_GAME_MAPS_DIR` (the fixture bots
+as `.wasm`, the maps). Headers install flat to `include/ai_game/`, included by bare name as here.
+Also installed: `ud_run`, `ud_mapgen`, `ud_mapcheck`, `ud_profile` and the viewers, and the
+bot SDK: `ai_game_add_bot(<name> SOURCES ...)` compiles a `game::Bot` to `.wasm` against the
+installed headers (`ud/bot_host.hpp` included), with the same command line as the fixtures
+(`cmake/WasmBot.cmake`, shared); `AI_GAME_WASI_SDK` points it at a wasi-sdk 24, else it downloads one. Rules in
+`cmake/Install.cmake`. The libraries carry what users must build and link with (determinism
+flags, a static libstdc++, the sanitizers for a Debug install); the version must match exactly,
+since ABI and replay format change between versions. Keep xxhash, zstd, json and Wasmtime out of
+public headers: the install doesn't ship their headers.
+
 ---
 
 ## What Is Built
@@ -87,8 +110,8 @@ For LSP support: `ln -s build/compile_commands.json compile_commands.json`
 | `stats.hpp/.cpp` | `UnitStats` and `stats_for(UnitType)`, built from `config.hpp`. |
 | `entity.hpp` | `UnitType`, `StructureType`, `OrderType` enums; core structs. |
 | `world.hpp/.cpp` | Authoritative game state. `std::map` for units/structures (never unordered). |
-| `vision.hpp` | `sees_tile()` (the one sight rule: Manhattan, nebula tiles only within `NEBULA_SIGHT`) and `FactionSight` (what a faction sees right now, for combat targeting and MoveAttack halts: asked per tile through `Occupancy`, memoised). |
-| `occupancy.hpp/.cpp` | `Occupancy`: flat per-tile grids of who stands where, rebuilt each movement step and in combat (again after the first-strike purge: it holds pointers). Range queries (targeting, MoveAttack halts, splash, claim guns) visit only the tiles in range, nearest ring first, ties to the lower id: exactly what an id-ordered scan gives, which they fall back to if a hand-built world stacks units. |
+| `vision.hpp` | `sees_tile()` (the one sight rule: Manhattan, nebula tiles only within `NEBULA_SIGHT`) and `FactionSight` (what a faction sees right now, for combat targeting: asked per tile through `Occupancy`, memoised). |
+| `occupancy.hpp/.cpp` | `Occupancy`: flat per-tile grids of who stands where, rebuilt each movement step and in combat (again after the first-strike purge: it holds pointers). Range queries (targeting, splash, claim guns) visit only the tiles in range, nearest ring first, ties to the lower id: exactly what an id-ordered scan gives, which they fall back to if a hand-built world stacks units. |
 | `snapshot.hpp/.cpp` | Fog-masked snapshot builder, via `sees_tile()`. Own units and structures always included; enemy units and structures only on visible tiles. |
 | `command.hpp/.cpp` | `ValidatedCommands` and `validate_commands()`. |
 | `movement.hpp/.cpp` | Stepped simultaneous movement. Chains advance (a unit may enter a tile vacated on the same step); swaps and other closed loops are blocked whole. |
@@ -114,7 +137,7 @@ that plays every system: Factories, counter-picked ships (Battleships when rich)
 Interceptor scout hidden in a nebula by the enemy Core, a home ambush in a nebula, and pushes
 in waves (gather out of sight, then enemy claims, unfinished first, then the Core) when its
 army outweighs what it has seen; it fights enemy ships near its structures first. Ships fire
-only on a tick they are ordered to Attack/MoveAttack, so it orders every ship every tick, with
+only on a tick they are ordered to Move or Attack, so it orders every ship every tick, with
 focus fire via `target_id`.
 Every fixture also builds as a `.wasm` bot from the same source (`fixtures/CMakeLists.txt`,
 wasi-sdk fetched by CMake, `sdk/cpp/include/ud/bot_host.hpp`) into `build/fixtures_wasm/`;
@@ -166,7 +189,7 @@ Change the layout → bump the magic and refuse the old one with a clear message
 
 | Binary | Purpose |
 |--------|---------|
-| `ud_run` | Run a 1v1 match: `ud_run <a.wasm> <b.wasm> [--map f] [--out f] [--seed N] [--ticks N]` |
+| `ud_run` | Run a 1v1 match: `ud_run <a.wasm> <b.wasm> [--map f] [--out f] [--seed N] [--ticks N] [--json]`. `--json` is for the tournament harness: result, per-side faults and stats (from replaying the frames, which also checks the replay reproduces the hash). Its keys are append-only: the harness stores them |
 | `ud_mapgen` | Generate a map JSON |
 | `ud_mapcheck` | Validate a map JSON |
 
@@ -199,7 +222,8 @@ match meter exactly (`Profiler.FuelAndMemoryMatchARealMatchExactly` guards this 
 metering path). The opponent is passive and its Command Core sits in an asteroid ring beyond
 every weapon's range, so scenarios always run their full length. Suite: `early_game`,
 `army_scaling/{10,50,200,655}` (all on the largest map), `dense_battle`, `wide_visibility`, `max_legal`, `long_running`
-(memory curve for leaks). Exit status 2 on any forfeit.
+(memory curve for leaks). Exit status 2 on any forfeit. `--json` prints the report as one
+object for the harness's validation (keys append-only, as for `ud_run --json`).
 
 ### sdk/cpp/ — C++ bot template
 
@@ -296,6 +320,12 @@ Compile flags enforcing these: `-ffp-contract=off -fno-fast-math` (in `cmake/Com
   together. Swaps and any closed loop of movers are blocked, with everyone queued behind them:
   that is bad bot behavior and is meant to cost the bot. A blocked unit stays put for the step.
   The engine does no path-finding; routing, choke points and group ordering are the bot's job.
+- **No attack-move halt (ABI 16):** every Move is an attack-move that goes all the way: the ship
+  steps its full speed, then fires from where it ended, at `target_id` if in range, else the
+  nearest seen enemy. A ship with no command holds fire. Where to stop is the bot's call (the
+  user: an engine halt "is putting bot control to the engine"); `MoveAttack` (kind 1) is
+  reserved and rejected. Both sides move at once, so stopping at range means predicting the
+  enemy: `ud_arena`'s commander repeats each enemy's last move, which keeps the triangle.
 
 ---
 

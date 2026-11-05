@@ -29,13 +29,13 @@ inline constexpr int32_t MAX_SIGHT =
     std::max({cfg::DRONE_SIGHT, cfg::INTERCEPTOR_SIGHT, cfg::FRIGATE_SIGHT, cfg::ARTILLERY_SIGHT,
               cfg::BATTLESHIP_SIGHT, cfg::STRUCTURE_SIGHT, cfg::CORE_SIGHT});
 
-// What each faction sees right now, for combat targeting and MoveAttack halts: a unit can only
+// What each faction sees right now, for combat targeting: a unit can only
 // fire at what its side sees (any of its living units or structures, by sees_tile), so a
 // long-range gun needs a spotter. The snapshot's fog uses the same rule.
 //
 // Asked tile by tile through the occupancy index, and remembered: a check looks only at the
 // entities within MAX_SIGHT of the tile, where a per-tile grid would cost a pass over every
-// entity's whole sight area each movement step. `occ` must hold the positions the checks are
+// entity's whole sight area each combat sub-phase. `occ` must hold the positions the checks are
 // made at, so build this after rebuilding it, and again after anything moves or dies.
 class FactionSight {
 public:

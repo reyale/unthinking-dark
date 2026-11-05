@@ -179,6 +179,25 @@ TEST(Command, GatherIsAlwaysRejected) {
   EXPECT_TRUE(game::validate_commands(w, 0, {c}).empty());
 }
 
+TEST(Command, MoveAttackIsAlwaysRejected) {
+  // Reserved: every Move fires, and the engine never halts one.
+  auto w = make_world();
+  auto& u = w.spawn_unit({0}, game::UnitType::Frigate, {1, 1});
+  game::Command c = make_cmd(u.id.value, game::CommandKind::MoveAttack);
+  c.ax = 4; c.ay = 1;
+  EXPECT_TRUE(game::validate_commands(w, 0, {c}).empty());
+}
+
+// target_id on a Move is only a preference: one that isn't a valid enemy keeps the Move.
+TEST(Command, MoveWithAnInvalidTargetIsKept) {
+  auto w = make_world();
+  auto& u = w.spawn_unit({0}, game::UnitType::Frigate, {1, 1});
+  game::Command c = make_cmd(u.id.value, game::CommandKind::Move);
+  c.ax = 4; c.ay = 1;
+  c.target_id = u.id.value;
+  EXPECT_EQ(game::validate_commands(w, 0, {c}).size(), 1u);
+}
+
 TEST(Command, BuildImpassableTargetRejected) {
   auto w = make_world();
   w.map.set_terrain({3, 3}, game::Terrain::Asteroid);
@@ -643,98 +662,15 @@ static game::ValidatedCommands move_cmd(game::UnitId uid, int32_t tx, int32_t ty
   return vc;
 }
 
-TEST(Movement, MoveAttackHaltsWhenEnemyInRange) {
+// Nothing halts a Move: where a ship stops is the bot's call, even with a target in range.
+TEST(Movement, AnEnemyInRangeDoesNotHaltAMove) {
   auto w = make_world();
-  auto& unit  = w.spawn_unit({0}, game::UnitType::Interceptor, {1, 1}); // range=1
-  w.spawn_unit({1}, game::UnitType::Drone, {2, 1}); // adjacent enemy
-  auto cmds = move_cmd(unit.id, 8, 1, game::CommandKind::MoveAttack);
+  auto& unit = w.spawn_unit({0}, game::UnitType::Interceptor, {1, 1}); // range 2, speed 2
+  w.spawn_unit({1}, game::UnitType::Drone, {2, 2});
+  w.spawn_structure({1}, game::StructureType::ClaimNode, {3, 2});
   game::ValidatedCommands empty;
-  game::run_movement(w, cmds, empty);
-  EXPECT_EQ(unit.pos.x, 1); // halted — enemy in range
-}
-
-// MoveAttack halts as soon as the unit has a target: in range and seen by its side. Marches along
-// a row toward an enemy and returns the distance at which the unit stopped. With `spotter`, an own
-// Drone stands by the target, so it is seen from the start.
-static int32_t halt_distance(game::UnitType shooter, bool target_is_structure,
-                             game::StructureType stype = game::StructureType::CommandCore,
-                             bool spotter = true) {
-  game::World w;
-  w.map = game::Map::make(20, 5);
-  w.rng = game::Rng{0};
-  game::Vec2 enemy_at{15, 2};
-  if (target_is_structure)
-    w.spawn_structure({1}, stype, enemy_at);
-  else
-    w.spawn_unit({1}, game::UnitType::Drone, enemy_at);
-  if (spotter)
-    w.spawn_unit({0}, game::UnitType::Drone, {enemy_at.x, enemy_at.y + 2});
-  game::UnitId id = w.spawn_unit({0}, shooter, {0, 2}).id;
-  game::ValidatedCommands empty;
-  for (int t = 0; t < 30; ++t)
-    game::run_movement(w, move_cmd(id, enemy_at.x, enemy_at.y, game::CommandKind::MoveAttack),
-                       empty);
-  return game::manhattan(w.find_unit(id)->pos, enemy_at);
-}
-
-TEST(Movement, MoveAttackHaltsAtFullRangeFromUnits) {
-  for (auto t : {game::UnitType::Interceptor, game::UnitType::Frigate,
-                 game::UnitType::Artillery, game::UnitType::Battleship})
-    EXPECT_EQ(halt_distance(t, false), game::stats_for(t).range) << game::unit_type_name(t);
-}
-
-TEST(Movement, MoveAttackHaltsAtFullRangeFromStructures) {
-  for (auto st : {game::StructureType::CommandCore, game::StructureType::Factory,
-                  game::StructureType::ClaimNode})
-    for (auto t : {game::UnitType::Interceptor, game::UnitType::Frigate,
-                   game::UnitType::Artillery, game::UnitType::Battleship})
-      EXPECT_EQ(halt_distance(t, true, st), game::stats_for(t).range)
-          << game::unit_type_name(t) << " vs " << game::structure_type_name(st);
-}
-
-// Alone, a unit closes until it sees the target itself: a gun that outranges its own sight
-// (Artillery) needs a spotter to fire at full range.
-TEST(Movement, MoveAttackWithoutASpotterClosesToItsOwnSight) {
-  for (auto t : {game::UnitType::Interceptor, game::UnitType::Frigate,
-                 game::UnitType::Artillery, game::UnitType::Battleship}) {
-    const auto& st = game::stats_for(t);
-    EXPECT_EQ(halt_distance(t, false, game::StructureType::CommandCore, false),
-              std::min(st.range, st.sight))
-        << game::unit_type_name(t);
-  }
-}
-
-TEST(Movement, MoveAttackIgnoresFriendlyStructures) {
-  auto w = make_world();
-  w.spawn_structure({0}, game::StructureType::Factory, {4, 3}); // beside the path
-  auto& unit = w.spawn_unit({0}, game::UnitType::Interceptor, {1, 1});
-  game::ValidatedCommands empty;
-  for (int t = 0; t < 10; ++t)
-    game::run_movement(w, move_cmd(unit.id, 8, 1, game::CommandKind::MoveAttack), empty);
-  EXPECT_EQ(unit.pos, (game::Vec2{8, 1}));
-}
-
-TEST(Movement, DroneMoveAttackNeverHalts) {
-  auto w = make_world();
-  w.spawn_structure({1}, game::StructureType::CommandCore, {5, 2});
-  auto& drone = w.spawn_unit({0}, game::UnitType::Drone, {1, 1}); // range 0
-  game::ValidatedCommands empty;
-  for (int t = 0; t < 10; ++t)
-    game::run_movement(w, move_cmd(drone.id, 8, 1, game::CommandKind::MoveAttack), empty);
-  EXPECT_EQ(drone.pos, (game::Vec2{8, 1}));
-}
-
-TEST(Combat, TargetInRangeSeesUnitsAndStructuresOfTheEnemyOnly) {
-  auto w = make_world();
-  auto& inter = w.spawn_unit({0}, game::UnitType::Interceptor, {1, 1});
-  EXPECT_FALSE(game::target_in_range(w, inter));
-  w.spawn_structure({0}, game::StructureType::Factory, {2, 1}); // friendly
-  w.spawn_unit({0}, game::UnitType::Frigate, {1, 2});           // friendly
-  EXPECT_FALSE(game::target_in_range(w, inter));
-  w.spawn_structure({1}, game::StructureType::ClaimNode, {4, 1}); // distance 3 > range 2
-  EXPECT_FALSE(game::target_in_range(w, inter));
-  w.spawn_structure({1}, game::StructureType::ClaimNode, {2, 2}); // distance 2
-  EXPECT_TRUE(game::target_in_range(w, inter));
+  game::run_movement(w, move_cmd(unit.id, 8, 1), empty);
+  EXPECT_EQ(unit.pos, (game::Vec2{3, 1}));
 }
 
 TEST(Movement, BlockedByAsteroid) {
@@ -1493,18 +1429,6 @@ TEST(Nebula, UnitsInsideSeeOut) {
   auto snap = game::build_snapshot(w, 0, game::cfg::TICK_CAP);
   ASSERT_EQ(snap.visible_enemies.size(), 1u);
   EXPECT_EQ(snap.visible_enemies[0].id, e.id.value);
-}
-
-TEST(Nebula, MoveAttackDoesNotHaltForAHiddenEnemy) {
-  auto w = make_world();
-  w.map.set_terrain({5, 1}, game::Terrain::Nebula);
-  auto& f = w.spawn_unit({0}, game::UnitType::Frigate, {0, 1}); // range 4, speed 1
-  w.spawn_unit({1}, game::UnitType::Drone, {5, 1});
-  game::ValidatedCommands empty;
-  game::run_movement(w, move_cmd(f.id, 3, 1, game::CommandKind::MoveAttack), empty);
-  EXPECT_EQ(f.pos.x, 1); // the Drone is at distance 4 from (1,1) but unseen: keeps going
-  game::run_movement(w, move_cmd(f.id, 3, 1, game::CommandKind::MoveAttack), empty);
-  EXPECT_EQ(f.pos.x, 2);
 }
 
 TEST(Construction, FactoriesAreBuiltTheSameWayWithinBuildRange) {

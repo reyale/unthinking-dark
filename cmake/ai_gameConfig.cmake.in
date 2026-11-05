@@ -1,0 +1,25 @@
+@PACKAGE_INIT@
+
+# The runner links Wasmtime's prebuilt static library, installed next to ours.
+if(NOT TARGET ai_game::wasmtime)
+  add_library(ai_game::wasmtime STATIC IMPORTED)
+  set_target_properties(ai_game::wasmtime PROPERTIES
+      IMPORTED_LOCATION "${PACKAGE_PREFIX_DIR}/@UD_INSTALL_LIBDIR@/libwasmtime.a"
+      INTERFACE_LINK_LIBRARIES "dl;m;pthread")
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/ai_gameTargets.cmake")
+
+# The fixture bots (.wasm) and the maps (.json).
+set(AI_GAME_BOTS_DIR "${PACKAGE_PREFIX_DIR}/@UD_INSTALL_DATADIR@/bots")
+set(AI_GAME_MAPS_DIR "${PACKAGE_PREFIX_DIR}/@UD_INSTALL_DATADIR@/maps")
+set(AI_GAME_BIN_DIR "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_BINDIR@")
+
+# The bot SDK: ai_game_add_bot() compiles a bot to .wasm against the installed headers.
+set(AI_GAME_INCLUDE_DIR "${PACKAGE_PREFIX_DIR}/@UD_INSTALL_INCLUDEDIR@")
+set(AI_GAME_SDK_DIR "${PACKAGE_PREFIX_DIR}/@UD_INSTALL_DATADIR@/sdk")
+set(AI_GAME_WASI_SDK_URL "@UD_WASI_SDK_URL@")
+set(AI_GAME_WASI_SDK_SHA256 "@UD_WASI_SDK_SHA256@")
+include("${CMAKE_CURRENT_LIST_DIR}/ai_gameBot.cmake")
+
+check_required_components(ai_game)

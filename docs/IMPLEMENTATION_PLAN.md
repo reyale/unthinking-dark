@@ -73,7 +73,7 @@ how to verify each piece**. Section refs like §5 point into `DESIGN.md`.
   bot toolchain is clang; same language, different target). Other LLVM languages later.
 
 **Open / stop-and-ask (do NOT improvise — `DESIGN.md` §13)**
-- Attack-move halt precision (step-into-range-then-hold vs stop-one-short).
+- (Resolved: no attack-move halt; every Move fires from where it ends, ABI 16.)
 
 ---
 
@@ -165,7 +165,7 @@ struct StructureView {       // my structures: all of them, regardless of fog (A
 struct UnitView {            // my units: full info
   uint32_t id; uint16_t type; uint16_t _pad;
   int32_t x, y; int32_t hp;
-  uint16_t current_order; uint16_t _pad2; // order enum (Move/MoveAttack/Attack/Idle/...)
+  uint16_t current_order; uint16_t _pad2; // order enum (Move/Attack/Idle/...)
   int32_t cargo_energy, cargo_alloy;      // Drones: carried, not yet deposited
 };
 struct EnemyView {           // visible enemies: observable info only
@@ -188,10 +188,10 @@ struct TileView {            // only fog-visible tiles
 ```c
 struct Command {
   uint32_t entity_id; // issuer: a unit, or the Core/Factory for Produce (ABI 10)
-  uint16_t kind;   // enum: Move, MoveAttack, Attack, Gather (reserved, rejected), Build, DeployClaim, Produce
+  uint16_t kind;   // enum: Move, MoveAttack and Gather (reserved, rejected), Attack, Build, DeployClaim, Produce
   uint16_t arg_type;
-  int32_t  ax, ay; // target tile (Move/MoveAttack/Attack-at / Build / DeployClaim)
-  uint32_t target_id; // Attack target (unit or structure id)
+  int32_t  ax, ay; // target tile (Move / Build / DeployClaim)
+  uint32_t target_id; // Move/Attack preferred target (unit or structure id), ABI 16
   uint16_t aux;    // unit_type for Produce/Build; reserved otherwise
   uint16_t _pad;
 };
@@ -241,11 +241,11 @@ phase's acceptance implicitly.
 - UBSan + ASan builds pass on the test matches.
 - Fog test: bot's snapshot never contains an entity outside its vision.
 - Combat: first-strike kills before simultaneous; mutual kills both die; splash hits
-  friendlies. Movement: tile contest → tonnage then id; chains advance, swaps and loops blocked; MoveAttack halts on
-  the step a target enters range.
+  friendlies. Movement: tile contest → tonnage then id; chains advance, swaps and loops blocked; a Move fires from
+  where it ends (ABI 16: no MoveAttack halt).
 
 **Stop-and-ask**
-- **Line-of-sight** (needed in `snapshot` fog-mask and MoveAttack halt) — surface, don't guess.
+- **Line-of-sight** (needed in `snapshot` fog-mask and combat targeting) — surface, don't guess.
 
 ### Phase 2 — Replay Playback + Minimal Visualizer
 **Goal:** watch matches (you can't tune what you can't see). Input-log model.

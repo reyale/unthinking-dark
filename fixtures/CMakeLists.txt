@@ -19,22 +19,14 @@ endif()
 set(FIXTURE_WASM_DIR ${CMAKE_BINARY_DIR}/fixtures_wasm)
 set(FIXTURE_WASM_DIR ${FIXTURE_WASM_DIR} PARENT_SCOPE)
 
-set(_wasi ${wasi_sdk_SOURCE_DIR})
 set(_flags
-    --target=wasm32-wasip1 --sysroot=${_wasi}/share/wasi-sysroot
-    -std=c++23 -O2 -DNDEBUG -fno-exceptions -fno-rtti
-    -ffp-contract=off -fno-fast-math -mno-bulk-memory
     -I${CMAKE_SOURCE_DIR}/engine/src -I${CMAKE_CURRENT_SOURCE_DIR}
     # After the system headers: sdk/cpp/include also holds -nostdlib stand-ins for <cstdint>
     # and <type_traits>, which must not shadow libc++'s.
     -idirafter ${CMAKE_SOURCE_DIR}/sdk/cpp/include
 )
-set(_link
-    -Wl,--no-entry -Wl,--strip-all -Wl,--export-memory
-    -Wl,--export=abi_version -Wl,--export=init -Wl,--export=on_tick
-    -Wl,--export=SNAPSHOT_ADDR -Wl,--export=COMMAND_ADDR
-)
-# Of the engine, a bot links only what has no World behind it.
+# Of the engine, a bot links only what has no World behind it (the same list is installed as
+# the bot SDK: ud_install_bot_sdk in cmake/Install.cmake).
 set(_srcs
     ${CMAKE_CURRENT_SOURCE_DIR}/wasm_main.cpp
     ${CMAKE_SOURCE_DIR}/engine/src/grid.cpp
@@ -54,17 +46,15 @@ foreach(_entry ${UD_FIXTURE_BOTS})
   list(GET _parts 0 _name)
   list(GET _parts 1 _class)
   set(_out ${FIXTURE_WASM_DIR}/${_name}.wasm)
-  add_custom_command(
-      OUTPUT ${_out}
-      COMMAND ${CMAKE_COMMAND} -E make_directory ${FIXTURE_WASM_DIR}
-      COMMAND ${_wasi}/bin/clang++ ${_flags}
-              "-DUD_BOT_HEADER=\"${_name}_bot.hpp\"" -DUD_BOT_CLASS=game::${_class}
-              ${_srcs} ${_link} -o ${_out}
-      DEPENDS ${_srcs} ${_deps}
+  ud_wasm_bot_command(${_out}
+      WASI_SDK ${wasi_sdk_SOURCE_DIR}
+      SOURCES ${_srcs}
+      FLAGS ${_flags} "-DUD_BOT_HEADER=\"${_name}_bot.hpp\"" -DUD_BOT_CLASS=game::${_class}
+      DEPENDS ${_deps}
       COMMENT "Compiling fixture ${_class} to wasm32"
-      VERBATIM
   )
   list(APPEND _outputs ${_out})
 endforeach()
 
 add_custom_target(fixture_bots_wasm ALL DEPENDS ${_outputs})
+install(FILES ${_outputs} DESTINATION ${UD_INSTALL_DATADIR}/bots)

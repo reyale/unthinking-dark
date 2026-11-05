@@ -5,6 +5,7 @@
 
 #include "entity.hpp"
 #include "shape_model.hpp"
+#include "version.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -425,6 +426,7 @@ struct App {
 // ---- Main -----------------------------------------------------------------
 
 int main(int argc, char** argv) {
+  if (game::print_version_if_asked(argc, argv, "ud_shape_editor")) return 0;
   if (argc >= 2)
     strncpy(g.shape_path, argv[1], sizeof(g.shape_path) - 1);
 

@@ -4,6 +4,7 @@
 #include "render.hpp"
 #include "replay.hpp"
 #include "replay_io.hpp"
+#include "version.hpp"
 
 #include <cstdio>
 #include <termios.h>
@@ -42,8 +43,9 @@ static game::Map map_from_log(const game::ReplayLog& log) {
 // ---- Main -------------------------------------------------------------------
 
 int main(int argc, char** argv) {
+  if (game::print_version_if_asked(argc, argv, "ud_viz")) return 0;
   if (argc < 2) {
-    fprintf(stderr, "usage: ud_viz <replay.ud>\n");
+    fprintf(stderr, "usage: ud_viz <replay.ud> | --version\n");
     fprintf(stderr, "  Glyphs: d=drone  i=interceptor  f=frigate  a=artillery\n");
     fprintf(stderr, "          C=core   T=factory      N=claim\n");
     fprintf(stderr, "  Cyan = faction 0, Red = faction 1\n");

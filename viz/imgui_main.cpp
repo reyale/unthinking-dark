@@ -19,6 +19,7 @@
 #include "stats.hpp"
 #include "territory.hpp"
 #include "wincheck.hpp"
+#include "version.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -1347,6 +1348,7 @@ static void draw_sel_panel(const ImGuiIO& io) {
 // ---- Main -----------------------------------------------------------------
 
 int main(int argc, char** argv) {
+  if (game::print_version_if_asked(argc, argv, "ud_viz_imgui")) return 0;
   const char* replay_arg = nullptr;
   for (int i = 1; i < argc; ++i) {
     if (strcmp(argv[i], "--shapes") == 0 && i + 1 < argc)

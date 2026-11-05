@@ -195,7 +195,7 @@ private:
     const Vec2 to = route_waypoint(router_, {kGoalNear, at, radius}, pos,
                                    [&](Vec2 p) { return manhattan(p, at) <= radius; },
                                    stats_for(static_cast<UnitType>(u.type)).speed);
-    issue(to != pos ? move_cmd(u.id, CommandKind::MoveAttack, to)
+    issue(to != pos ? move_cmd(u.id, CommandKind::Move, to)
                     : move_cmd(u.id, CommandKind::Attack, {0, 0}));
   }
 

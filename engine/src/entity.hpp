@@ -71,7 +71,7 @@ struct Unit {
   int32_t shield_wait{0}; // unhit ticks still needed before the shield regenerates
 
   OrderType current_order{OrderType::Idle};
-  Vec2 order_target{};    // tile target for Move/MoveAttack/Attack
+  Vec2 order_target{};    // tile target for Move/Attack
   UnitId attack_target{}; // explicit attack target (may be null)
 
   int32_t move_steps_remaining{0}; // steps left this tick's movement phase

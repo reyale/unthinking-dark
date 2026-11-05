@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <array>
 #include <climits>
+#include <map>
 
 namespace arena {
 
@@ -34,9 +35,10 @@ int32_t columns(const Army& a) { return (ships(a) + kRanks - 1) / kRanks; }
 // Sends every ship at the enemy and shoots with focus fire: the same orders for both sides, so
 // only the armies differ. Ships move down one distance field to the nearest enemy ship, in which
 // our ships standing to fire are walls: the rest flow around the firing line to open positions,
-// so a swarm surrounds instead of queueing behind its own front rank. The arena tests fighting,
-// not scouting, so the commander is told where every enemy ship is (read from the world at the
-// start of the tick, the state its snapshot shows). Faction 1 stands on the mirror image of
+// so a swarm surrounds instead of queueing behind its own front rank, and each stops where it
+// can fire at where a spotted enemy is headed. The arena tests fighting, not scouting, so the
+// commander is told where every enemy ship is (read from the world at the start of the tick,
+// the state its snapshot shows). Faction 1 stands on the mirror image of
 // faction 0's field and breaks step ties in that mirrored frame, so neither side is favoured.
 class Commander : public game::Bot {
 public:
@@ -60,6 +62,24 @@ public:
         enemies.push_back(u.pos);
     if (mine.empty() || enemies.empty()) return {};
 
+    std::vector<Vec2> ahead;
+    std::map<uint32_t, Vec2> seen;
+    for (const auto& [id, u] : world_.units) {
+      if (!u.alive() || u.faction.value == snap.header.my_faction_id) continue;
+      const auto last = last_seen_.find(id.value);
+      ahead.push_back(last == last_seen_.end()
+                          ? u.pos
+                          : Vec2{2 * u.pos.x - last->second.x, 2 * u.pos.y - last->second.y});
+      seen.emplace(id.value, u.pos);
+    }
+    last_seen_ = std::move(seen);
+    auto spotted = [&](Vec2 at) {
+      for (const game::UnitView& u : snap.my_units)
+        if (game::manhattan({u.x, u.y}, at) <= game::stats_for(static_cast<UnitType>(u.type)).sight)
+          return true;
+      return false;
+    };
+
     const auto focus = game::focus_fire(snap, mine);
     std::vector<bool> wall(static_cast<size_t>(w_ * h_), false);
     for (const auto& [id, s] : world_.structures) wall[idx(s.pos)] = true;
@@ -76,8 +96,17 @@ public:
         continue;
       }
       const Vec2 pos{u->x, u->y};
+      const auto& st = game::stats_for(static_cast<UnitType>(u->type));
+      // A Move goes all the way, so the ship stops itself where it can fire at an enemy its side
+      // will see: where that enemy will be if it moves as it did last tick, since both sides
+      // move at once.
+      auto can_fire = [&](Vec2 at) {
+        for (const Vec2& e : ahead)
+          if (game::manhattan(at, e) <= st.range && spotted(e)) return true;
+        return false;
+      };
       Vec2 p = pos;
-      for (int32_t i = 0; i < game::stats_for(static_cast<UnitType>(u->type)).speed; ++i) {
+      for (int32_t i = 0; i < st.speed && !can_fire(p); ++i) {
         Vec2 best = p;
         for (const Vec2& d : dirs_) {
           const Vec2 n{p.x + d.x, p.y + d.y};
@@ -86,7 +115,7 @@ public:
         if (best == p) break;
         p = best;
       }
-      out.push_back(p != pos ? game::move_cmd(u->id, game::CommandKind::MoveAttack, p)
+      out.push_back(p != pos ? game::move_cmd(u->id, game::CommandKind::Move, p)
                              : game::move_cmd(u->id, game::CommandKind::Attack, {0, 0}));
     }
     return out;
@@ -96,6 +125,7 @@ private:
   static constexpr int32_t kFar = INT32_MAX;
 
   const game::World& world_;
+  std::map<uint32_t, Vec2> last_seen_; // enemy id -> where it stood last tick
   std::array<Vec2, 4> dirs_{};
   int32_t w_{0}, h_{0};
 

@@ -2,6 +2,7 @@
 #include "arena.hpp"
 #include "config.hpp"
 #include "stats.hpp"
+#include "version.hpp"
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
@@ -31,6 +32,7 @@ void usage() {
           "  --ticks N        fight length limit (default 400)\n"
           "  --spacing N      tiles between neighbours in a block (default 1: packed)\n"
           "  --replay A B F   write the fight A vs B to replay F; armies as \"15I 6F 0A 2B\"\n"
+          "  --version        print the build version and exit\n"
           "value = energy + alloy * %d (alloy harvests %dx slower)\n",
           game::cfg::HARVEST_ENERGY / game::cfg::HARVEST_ALLOY,
           game::cfg::HARVEST_ENERGY / game::cfg::HARVEST_ALLOY);
@@ -217,6 +219,7 @@ void round_robin(int32_t budget, int32_t parts, const arena::Setup& setup) {
 } // namespace
 
 int main(int argc, char** argv) {
+  if (game::print_version_if_asked(argc, argv, "ud_arena")) return 0;
   Args args;
   if (!parse(argc, argv, args)) {
     usage();

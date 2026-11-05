@@ -6,10 +6,12 @@
 #include "replay_io.hpp"
 #include "world.hpp"
 #include "../../fixtures/idle_bot.hpp"
+#include "version.hpp"
 
 #include <cstdio>
 
 int main(int argc, char** argv) {
+  if (game::print_version_if_asked(argc, argv, "gen_example_replay")) return 0;
   const char* path = (argc >= 2) ? argv[1] : "demo.ud";
 
   game::World w;

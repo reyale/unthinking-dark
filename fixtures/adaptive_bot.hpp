@@ -31,8 +31,8 @@ namespace game {
 // (a nebula near the target if there is one), then strikes enemy claims, unfinished first, and
 // finally the Command Core. It falls back to the ambush when the ships it meets outweigh it.
 //
-// A ship fires only on a tick it is ordered to Attack or MoveAttack, so every ship gets one:
-// Attack aimed at a focus-fire target when something is in range, MoveAttack when moving.
+// A ship fires only on a tick it is ordered to Move or Attack, so every ship gets one: Attack
+// aimed at a focus-fire target when something is in range, Move when moving.
 // Focus fire: each ship (ascending id) takes the in-range enemy with the least hp + shield left
 // after the shots already assigned, so damage lands on one target at a time and isn't wasted on
 // a ship already dead.
@@ -172,12 +172,12 @@ private:
   static constexpr int32_t kGoalAmbush = 1; // a free ambush tile
 
   template <class Goal>
-  void go(const UnitView& u, const Router::GoalKey& key, Goal goal, CommandKind kind) {
+  void go(const UnitView& u, const Router::GoalKey& key, Goal goal) {
     const Vec2 pos{u.x, u.y};
     const Vec2 to =
         waypoint(router_, key, pos, goal, stats_for(static_cast<UnitType>(u.type)).speed);
-    if (to != pos) issue(move_cmd(u.id, kind, to));
-    else if (kind != CommandKind::Move) attack(u.id, 0);
+    if (to != pos) issue(move_cmd(u.id, CommandKind::Move, to));
+    else attack(u.id, 0);
   }
 
   // Into range of `at`. Ships of every range head for the one field to within kApproach of it
@@ -188,7 +188,7 @@ private:
       attack(u.id, 0);
       return;
     }
-    go_near(u, field_at, field_r, CommandKind::MoveAttack);
+    go_near(u, field_at, field_r);
   }
 
   // A foe moves every tick, and a field to where it stands now would be redone every tick. So
@@ -203,13 +203,13 @@ private:
   }
 
   // Being near a point depends on the map alone, so these fields are kept across ticks.
-  void go_near(const UnitView& u, Vec2 at, int32_t radius, CommandKind kind) {
+  void go_near(const UnitView& u, Vec2 at, int32_t radius) {
     const Vec2 pos{u.x, u.y};
     const Vec2 to = route_waypoint(router_, {kGoalNear, at, radius}, pos,
                                    [&](Vec2 p) { return manhattan(p, at) <= radius; },
                                    stats_for(static_cast<UnitType>(u.type)).speed);
-    if (to != pos) issue(move_cmd(u.id, kind, to));
-    else if (kind != CommandKind::Move) attack(u.id, 0);
+    if (to != pos) issue(move_cmd(u.id, CommandKind::Move, to));
+    else attack(u.id, 0);
   }
 
   // ---- Knowledge ----------------------------------------------------------------------------
@@ -527,8 +527,7 @@ private:
     }
     const Vec2 to = scout_hidden_ ? scout_hide_ : enemy_core_;
     const int32_t near = scout_hidden_ ? 0 : 2;
-    go_near(*s, to, near, CommandKind::Move);
-    if (!busy_.contains(s->id)) attack(s->id, 0);
+    go_near(*s, to, near);
   }
 
   // ---- Army ---------------------------------------------------------------------------------
@@ -669,7 +668,7 @@ private:
       if (busy_.contains(u->id)) continue;
       const Mode mode = squad_.contains(u->id) ? mode_ : Mode::Hold;
       if (mode == Mode::Retreat) {
-        go_near(*u, ambush_, kGatherRadius, CommandKind::Move);
+        go_near(*u, ambush_, kGatherRadius);
         continue;
       }
       if (auto f = focus_.find(u->id); f != focus_.end()) {
@@ -700,7 +699,7 @@ private:
         continue;
       }
       if (mode == Mode::Stage) {
-        go_near(*u, stage_, kGatherRadius, CommandKind::MoveAttack);
+        go_near(*u, stage_, kGatherRadius);
       } else if (mode == Mode::Strike) {
         approach(*u, target_, range, target_, kApproach);
       } else if (!ambush_tiles_.empty() && !in_ambush(pos)) {
@@ -708,12 +707,11 @@ private:
                                       [&](Vec2 t) { return !occupied.contains(t); });
         if (room)
           go(*u, {kGoalAmbush, ambush_, ambush_reach_},
-             [&](Vec2 p) { return in_ambush(p) && !occupied.contains(p); },
-             CommandKind::MoveAttack);
+             [&](Vec2 p) { return in_ambush(p) && !occupied.contains(p); });
         else
-          go_near(*u, ambush_, kGatherRadius, CommandKind::MoveAttack);
+          go_near(*u, ambush_, kGatherRadius);
       } else if (ambush_tiles_.empty()) {
-        go_near(*u, ambush_, kGatherRadius, CommandKind::MoveAttack);
+        go_near(*u, ambush_, kGatherRadius);
       } else {
         attack(u->id, 0);
       }

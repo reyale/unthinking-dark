@@ -154,7 +154,7 @@ extern "C" int32_t on_tick() {
         if (bfs_gen[u.y][u.x] != g_gen) continue;  // unreachable
         // dist=0: stay in place and keep attacking
       }
-      cmd.kind = (uint16_t)game::CommandKind::MoveAttack;
+      cmd.kind = (uint16_t)game::CommandKind::Move;
       cmd.ax = nx; cmd.ay = ny;
     }
 

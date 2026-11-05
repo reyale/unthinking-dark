@@ -24,21 +24,6 @@ struct CombatTarget {
   bool is_null() const { return unit_id.is_null() && struct_id.is_null(); }
 };
 
-bool target_in_range(const World&, const Unit& unit, const FactionSight& sight,
-                     const Occupancy& occ) {
-  const int32_t range = unit.stats().range;
-  if (range == 0)
-    return false;
-  return occ.any_within(unit.pos, range, [&](const auto& e) {
-    return e.faction != unit.faction && sight.sees(unit.faction, e.pos);
-  });
-}
-
-bool target_in_range(const World& world, const Unit& unit) {
-  const Occupancy occ(world);
-  return target_in_range(world, unit, FactionSight(world, occ), occ);
-}
-
 // Pick the best target for `attacker`, among enemies in range that its faction can see (see
 // FactionSight). Priority order:
 //   1. Explicit unit target from command (if valid and in range)
@@ -162,8 +147,10 @@ static void volley(World& world, bool first_strike, GetCmd& get_cmd, const Facti
     if (!unit.alive() || unit.stats().first_strike != first_strike)
       continue;
     const Command* cmd = get_cmd(uid);
-    auto kind = cmd ? static_cast<CommandKind>(cmd->kind) : CommandKind::Move;
-    if (kind != CommandKind::Attack && kind != CommandKind::MoveAttack)
+    if (!cmd)
+      continue;
+    const auto kind = static_cast<CommandKind>(cmd->kind);
+    if (kind != CommandKind::Attack && kind != CommandKind::Move)
       continue;
 
     CombatTarget tgt = pick_target(world, unit, cmd, sight, occ);

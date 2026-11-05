@@ -49,8 +49,9 @@ ValidatedCommands validate_commands(const World& world, uint32_t faction_id,
 
     // Per-kind validation
     switch (kind) {
-    case CommandKind::Move:
-    case CommandKind::MoveAttack: {
+    case CommandKind::MoveAttack:
+      continue; // reserved: a Move fires already, and nothing halts it
+    case CommandKind::Move: {
       Vec2 target{cmd.ax, cmd.ay};
       if (!world.map.in_bounds(target))
         continue;

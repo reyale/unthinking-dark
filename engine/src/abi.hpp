@@ -22,7 +22,7 @@ namespace game {
 
 enum class CommandKind : uint16_t {
   Move = 0,
-  MoveAttack = 1,
+  MoveAttack = 1, // reserved: always rejected (every Move fires, see Command::target_id)
   Attack = 2,
   Gather = 3, // reserved: always rejected (harvesting is automatic)
   Build = 4,
@@ -37,7 +37,7 @@ struct Command {
   uint16_t kind;      // CommandKind
   uint16_t arg_type;  // reserved / unit_type for Produce/Build
   int32_t ax, ay;     // target tile
-  uint32_t target_id; // Attack target (unit or structure id)
+  uint32_t target_id; // Move/Attack: preferred target (unit or structure id), 0 for none
   uint16_t aux;       // unit_type for Produce/Build
   uint16_t _pad;
 };

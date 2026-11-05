@@ -46,7 +46,8 @@ if(OpenGL_FOUND AND glfw3_FOUND)
     ${imgui_SOURCE_DIR}
     ${imgui_SOURCE_DIR}/backends
   )
-  target_link_libraries(ud_imgui PUBLIC glfw OpenGL::GL)
+  # glfw loads its GL symbols with dlopen; an LTO link (Release) drops the implicit -ldl.
+  target_link_libraries(ud_imgui PUBLIC glfw OpenGL::GL ${CMAKE_DL_LIBS})
   target_compile_options(ud_imgui PRIVATE -w)  # imgui ships with minor warnings
 
   # Baked-in default so the apps find the repo's shapes from any working directory;

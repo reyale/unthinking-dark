@@ -1,11 +1,13 @@
 #include "map_io.hpp"
 #include "map_validate.hpp"
+#include "version.hpp"
 #include <iostream>
 #include <cstdlib>
 
 int main(int argc, char* argv[]) {
+  if (game::print_version_if_asked(argc, argv, "ud_mapcheck")) return 0;
   if (argc != 2) {
-    std::cerr << "usage: ud_mapcheck <file.json>\n";
+    std::cerr << "usage: ud_mapcheck <file.json> | --version\n";
     return 1;
   }
 

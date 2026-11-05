@@ -27,6 +27,7 @@ FetchContent_Declare(
     GIT_TAG        v1.14.0
 )
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+set(INSTALL_GTEST OFF CACHE BOOL "" FORCE) # keep `cmake --install` to our own package
 # gtest v1.14 rejects CXX_STANDARD 23 inside its cmake; build it at 20 (ABI-compatible).
 set(CMAKE_CXX_STANDARD 20)
 FetchContent_MakeAvailable(googletest)
@@ -79,17 +80,21 @@ target_link_libraries(wasmtime_lib INTERFACE dl m pthread)
 # ---------------------------------------------------------------------------
 # wasi-sdk: clang with a C++ standard library for wasm32, so the fixture bots (which use std::map
 # and friends) also build as .wasm; see fixtures/CMakeLists.txt. Pinned to 24 (LLVM 18): from
-# LLVM 19 clang emits bulk-memory instructions by default, which the runner rejects.
+# LLVM 19 clang emits bulk-memory instructions by default, which the runner rejects. The
+# installed package fetches the same one for bots built outside the repo (ai_gameBot.cmake).
 # ---------------------------------------------------------------------------
+set(UD_WASI_SDK_URL
+    https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-24/wasi-sdk-24.0-x86_64-linux.tar.gz)
+set(UD_WASI_SDK_SHA256 c6c38aab56e5de88adf6c1ebc9c3ae8da72f88ec2b656fb024eda8d4167a0bc5)
 option(UD_WASM_FIXTURES "Also build the fixture bots as .wasm (downloads wasi-sdk)" ON)
 if(UD_WASM_FIXTURES)
-  FetchContent_Declare(
-      wasi_sdk
-      URL      https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-24/wasi-sdk-24.0-x86_64-linux.tar.gz
-      URL_HASH SHA256=c6c38aab56e5de88adf6c1ebc9c3ae8da72f88ec2b656fb024eda8d4167a0bc5
-  )
+  FetchContent_Declare(wasi_sdk URL ${UD_WASI_SDK_URL} URL_HASH SHA256=${UD_WASI_SDK_SHA256})
   FetchContent_MakeAvailable(wasi_sdk)
 endif()
+
+include(cmake/Install.cmake)
+include(cmake/Version.cmake)
+include(cmake/WasmBot.cmake)
 
 add_subdirectory(engine)
 add_subdirectory(maps)
@@ -98,6 +103,8 @@ add_subdirectory(tools)
 add_subdirectory(runner)
 add_subdirectory(profiler)
 add_subdirectory(fixtures)
+
+ud_install_package(ud_run ud_mapgen ud_mapcheck ud_profile ud_viz ud_viz_nc ud_viz_imgui)
 
 # ---------------------------------------------------------------------------
 # Tests

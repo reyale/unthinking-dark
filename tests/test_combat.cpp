@@ -4,6 +4,7 @@
 #include "command.hpp"
 #include "config.hpp"
 #include "match.hpp"
+#include "movement.hpp"
 #include "snapshot.hpp"
 #include "world.hpp"
 
@@ -29,6 +30,61 @@ static game::ValidatedCommands attack_cmd(game::UnitId attacker) {
 // lets a longer-ranged ship fire there.
 static void spot(game::World& w, game::FactionId f, game::Vec2 at) {
   w.spawn_unit(f, game::UnitType::Drone, at);
+}
+
+static game::ValidatedCommands move_to(game::UnitId unit, game::Vec2 to, uint32_t target = 0) {
+  game::Command cmd{};
+  cmd.entity_id = unit.value;
+  cmd.kind = static_cast<uint16_t>(game::CommandKind::Move);
+  cmd.ax = to.x;
+  cmd.ay = to.y;
+  cmd.target_id = target;
+  game::ValidatedCommands vc;
+  vc.emplace(unit, cmd);
+  return vc;
+}
+
+// ---- Who fires ------------------------------------------------------------
+
+// Enough hull for a test target to take a hit and stay alive.
+constexpr int32_t kSturdy = 100;
+
+
+// Every Move is an attack-move: the ship steps its full speed, then fires from where it ended.
+TEST(Combat, AMovingShipFiresFromWhereItEnds) {
+  game::World w = make_combat_world();
+  auto& frigate = w.spawn_unit({0}, game::UnitType::Frigate, {1, 5}); // range 3, speed 1
+  auto& target = w.spawn_unit({1}, game::UnitType::Drone, {5, 5});
+  target.hp = kSturdy;
+  const auto cmds = move_to(frigate.id, {8, 5});
+  game::run_movement(w, cmds, {});
+  game::run_combat(w, cmds, {});
+  EXPECT_EQ(frigate.pos, (game::Vec2{2, 5}));
+  EXPECT_EQ(target.hp, kSturdy - game::cfg::FRIGATE_DMG);
+}
+
+TEST(Combat, AShipWithoutOrdersHoldsFire) {
+  game::World w = make_combat_world();
+  w.spawn_unit({0}, game::UnitType::Frigate, {5, 5});
+  auto& inter = w.spawn_unit({1}, game::UnitType::Interceptor, {6, 5});
+  game::run_combat(w, {}, {});
+  EXPECT_EQ(inter.shield, game::cfg::INTERCEPTOR_SHIELD);
+}
+
+// A Move's target_id is the preferred target; out of range, the nearest seen enemy is shot.
+TEST(Combat, AMoveShootsItsTargetIfInRangeElseTheNearest) {
+  game::World w = make_combat_world();
+  auto& frigate = w.spawn_unit({0}, game::UnitType::Frigate, {5, 5});
+  auto& near = w.spawn_unit({1}, game::UnitType::Drone, {6, 5});
+  auto& far = w.spawn_unit({1}, game::UnitType::Drone, {5, 7});
+  auto& gone = w.spawn_unit({1}, game::UnitType::Drone, {9, 9});
+  for (game::Unit* u : {&near, &far, &gone}) u->hp = kSturdy;
+  game::run_combat(w, move_to(frigate.id, frigate.pos, far.id.value), {});
+  EXPECT_EQ(far.hp, kSturdy - game::cfg::FRIGATE_DMG);
+  EXPECT_EQ(near.hp, kSturdy);
+  game::run_combat(w, move_to(frigate.id, frigate.pos, gone.id.value), {});
+  EXPECT_EQ(near.hp, kSturdy - game::cfg::FRIGATE_DMG);
+  EXPECT_EQ(gone.hp, kSturdy);
 }
 
 // ---- First-strike --------------------------------------------------------
@@ -197,7 +253,7 @@ TEST(Combat, BaseDestructionEndsMatch) {
       for (const auto& u : snap.my_units) {
         game::Command cmd{};
         cmd.entity_id = u.id;
-        cmd.kind = static_cast<uint16_t>(game::CommandKind::MoveAttack);
+        cmd.kind = static_cast<uint16_t>(game::CommandKind::Move);
         cmd.ax = 8; cmd.ay = 5;
         out.push_back(cmd);
       }

@@ -98,7 +98,7 @@ These are non-negotiable; each one silently breaks replay if violated.
   by the fog-of-war rule below: any of its living units or structures. A gun that outranges
   its own sight (Artillery) fires at full range only with a spotter. Sight is checked against
   who is alive when the shot is picked: a spotter killed in the first-strike sub-phase spots
-  nothing for the simultaneous one. MoveAttack halts only on a target its side sees.
+  nothing for the simultaneous one.
 - **Fog of war:** **active-only for what moves.** A faction sees a tile only if currently
   within a friendly unit's sight radius or a friendly structure's sight (`CORE_SIGHT` for
   the Command Core, `STRUCTURE_SIGHT` for the rest) (a
@@ -147,10 +147,15 @@ engine-provided last-seen positions in v1).
 
 ### 4.3 Commands
 One validated command max per unit per tick. Command modes:
-- `Move(unit_id, path/target)` — move only; ignore enemies.
-- `MoveAttack(unit_id, path/target)` — advance, but **auto-halt** as soon as a valid
-  enemy target is in range (then fire in combat phase).
-- `Attack(unit_id, target?)` — attack in place / hold and fire; does not move.
+- `Move(unit_id, target tile, target?)` — every Move is an attack-move: the unit steps its
+  full speed toward the tile (unless blocked), then fires in the combat phase from where it
+  ended. `target_id` is the preferred target; when it isn't in range (or is 0), the ship shoots
+  the nearest enemy its side sees in range. **Nothing halts a Move short of its tile**: where
+  a ship stops is the bot's call, so a bot that wants to stand at range moves only that far.
+  (ABI 16 retired `MoveAttack`, which halted on the first step a target was in range: that was
+  the engine choosing positions for the bot. Its kind value is reserved and rejected.)
+- `Attack(unit_id, target?)` — hold and fire; does not move. Same targeting.
+- A ship given no command holds fire.
 - Economy/structure commands: `Build(unit_id, what, where)`,
   `DeployClaim(unit_id, where)`, `Produce(producer_id, unit_type)`. A command's issuer is an
   entity id: a unit, or for Produce the Command Core (Drones) or a Factory (combat ships).
@@ -184,10 +189,7 @@ Stepped movement, up to `N = max unit speed` micro-steps, all units in lockstep:
 ```
 for step in 1..=N:
     for each unit still moving:
-        if MoveAttack and a valid enemy target is now in range (+LoS):
-            mark unit "halted" (will fire in combat phase); it takes no further steps
-        else:
-            propose next tile along the unit's path
+        propose next tile toward the unit's target tile (none once there)
     resolve all proposed tiles simultaneously:
         - tile contested by 2+ units → highest collision-priority (tonnage) wins;
           ties → lowest unit-id
@@ -198,9 +200,10 @@ for step in 1..=N:
         - blocked unit → stays put for the step (it proposes again next step)
     apply all valid steps
 ```
-- The MoveAttack halt check MUST run at the same per-step granularity as movement, in
-  lockstep, or first-strike/kiting interactions break.
-- `Move` steps full N unless blocked. `Attack`-in-place units don't move.
+- `Move` steps its unit's full speed unless blocked or at its tile. `Attack`-in-place units
+  don't move.
+- Both sides move at once, so a bot stopping at range must predict where the enemy will be
+  (the arena's commander assumes each enemy moves as it did last tick).
 
 ### Phase 3 — Combat (against final positions)
 - **Targeting rule (deterministic, part of contract):** command's target if valid and in
@@ -476,10 +479,10 @@ and a late climax; draws rare (they are allowed, §7); turtles lose.
 ## 13. Deferred / Open Items (explicitly out of v1 scope)
 
 **Pathing bucket (resolve later):**
-- Attack-move halt precision (step-into-range-then-hold vs. stop-one-tile-short).
-- Per-step re-pathing ownership (bot-owned vs engine-owned).
-- Stepped-move × first-strike × ranged-halt-distance interaction (the kiting-vs-run-down
-  balance — validate in sim; it's the heart of the counter-triangle).
+- Kiting vs running down (stepped moves × first strike × where bots stop): validate in sim
+  with chasing and retreating fights; `ud_arena` only fights head-on. (Attack-move halts are
+  resolved: there are none, every Move fires, ABI 16. Re-pathing is the bot's: the engine
+  never re-routes.)
 
 **Other deferred:**
 - Terrain-respecting territory (claim signal flowing around walls, not through) and
@@ -507,7 +510,7 @@ and a late climax; draws rare (they are allowed, §7); turtles lose.
   to flip the region it controls.
 - **Fuel:** Wasmtime's deterministic instruction meter = the gas limit. Deterministic, so
   it's both the in-match rule and the basis of the pre-match profiler.
-- **Forfeit (tick):** a bot failed to produce valid commands this tick (fuel/OOM/trap);
-  its units repeat-last/idle. Tracked as a stat; never a direct loss.
+- **Forfeit:** a bot ran out of fuel, went over the memory cap or trapped (in init or any
+  tick) and loses the match there; both in the same tick is a Draw (§2.4).
 - **g (game-progress clock):** `tick / tick_cap`, drives both the descending win threshold
   and Claim Node fragility.

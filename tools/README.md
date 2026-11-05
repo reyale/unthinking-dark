@@ -29,8 +29,10 @@ for 100 ticks. Feed the output to `ud_viz` to inspect it:
 The balance arena. Armies of equal value meet on an open field and fight to the last ship. Both
 sides get the same commander: every ship fires with focus fire, and the rest move down one
 distance field to the nearest enemy ship. Ships standing to fire count as walls, so the others
-flow around the firing line and surround instead of queueing behind it. The commander is told
-where the enemy is, because the arena tests fighting, not scouting. Nothing fires blind, so
+flow around the firing line and surround instead of queueing behind it. A moving ship stops on
+the first tile from which it can fire at where an enemy its side will see is headed (the
+enemy's last move, repeated): the engine never halts a Move. The commander is told where the
+enemy is, because the arena tests fighting, not scouting. Nothing fires blind, so
 Artillery needs other ships to spot for it. What survives, weighed by cost and hull left, shows
 which ships and mixes are worth their price.
 
