@@ -14,7 +14,7 @@ namespace game {
 // it while it is built). Drones
 // harvest, combat units stay within kGuardRadius of home and only engage enemies that come
 // inside it. Attrition can't beat it, so the descending territory threshold has to
-// (IMPLEMENTATION_PLAN Phase 3).
+// (IMPLEMENTATION_PLAN v1, docs/archive, Phase 3).
 class TurtleBot : public Bot {
 public:
   static constexpr int32_t kGuardRadius = 6;

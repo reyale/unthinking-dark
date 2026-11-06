@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-// IMPLEMENTATION_PLAN Phase 3: a turtle reliably loses to the descending territory threshold.
+// Plan v1 (docs/archive), Phase 3: a turtle reliably loses to the descending territory threshold.
 // TurtleBot holds one claim at home and can't be ground down; ExpanderBot never attacks and
 // can only win on territory. If the threshold works, the expander wins on it, never by
 // reaching the tick cap, from either side of every map.

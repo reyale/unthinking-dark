@@ -128,4 +128,5 @@ ln -s build/compile_commands.json compile_commands.json
 ## Design and implementation docs
 
 - [docs/DESIGN.md](docs/DESIGN.md) — full game rules, tick resolution, win conditions, unit roster, ABI contract
-- [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) — build phases, technical decisions, acceptance criteria
+- [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md) — the roadmap: what to build next (the v1 build plan is in `docs/archive/`)
+- [AGENTS.md](AGENTS.md) — how to work in the code: build, layout, invariants, conventions (`CLAUDE.md` links to it)

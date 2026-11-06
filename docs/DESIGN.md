@@ -71,6 +71,10 @@ These are non-negotiable; each one silently breaks replay if violated.
 
 ### 2.3 Budgets
 - **Per-tick fuel budget** (lean): bounds per-tick reasoning. (v1 placeholder — tune in sim.)
+- **Sized once, for the largest map**, and the same on every map: the budgets give both bots
+  the same compute; they aren't meant to be scarce. `FUEL_PER_TICK` (75M) is ~1.7× the worst
+  fixture tick in the profiler's `max_legal` scenario: re-measure if the caps or the fixtures
+  change.
 - **One-time startup budget** (fat): a separate, generous budget for a setup/init call
   before tick 0, for precomputation and allocation. Overrunning startup = bot fails to
   initialize = it cannot play, and loses at tick 0 (§2.4).
@@ -192,6 +196,22 @@ Commands are **proposals**. The engine validates and resolves; invalid/contradic
 commands are rejected deterministically. A bot proposing two commands for one unit:
 **first listed wins, rest ignored** (v1 rule).
 
+### 4.4 ABI versions
+`cfg::ABI_VERSION` (currently 17) names the wire contract; a bot exports `abi_version()` and is
+refused if it differs. Bumping it invalidates every compiled bot and every replay file.
+- 8: `StructureView`, all own structures.
+- 9: `EnemyStructureView`, enemy structures in sight.
+- 10: `Command::unit_id` renamed `entity_id`: Produce is issued by the Core (Drones) or a
+  Factory (ships) itself.
+- 11: `UnitView::cargo_energy/cargo_alloy`.
+- 12: `StructureView::build_ticks_left` and `EnemyStructureView::building`, for claim
+  construction.
+- 13: Factories are built the same way, so those fields apply to them too.
+- 14: shields: `UnitView::shield/shield_wait`, `EnemyView::shield`.
+- 15: the unit cap scales with map area, which grows the snapshot buffer.
+- 16: `MoveAttack` retired: every Move fires, nothing halts it (§4.3).
+- 17: `init` gets a per-bot seed, `init(i32 faction_id, i64 seed)` (§4.2).
+
 ---
 
 ## 5. Tick Resolution (the per-tick law — MUST follow order exactly)
@@ -262,6 +282,7 @@ for step in 1..=N:
 - Harvest: a Drone on or adjacent to a resource node adds `HARVEST_ENERGY` /
   `HARVEST_ALLOY` to its **cargo** (once per tick however many nodes it touches), up to
   `DRONE_CARGO_ENERGY` / `DRONE_CARGO_ALLOY`. Cargo is not spendable.
+- Resource nodes never deplete (decided, not an omission).
 - Deposit: a Drone within `DEPOSIT_RANGE` (v1: 1) of its own Command Core or a Claim Node
   banks its whole cargo into the faction's `energy` / `alloy`. Harvest runs first, so a
   Drone between a node and a drop-off banks every tick. A Drone that dies loses its cargo.
