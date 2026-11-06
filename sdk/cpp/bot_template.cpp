@@ -1,4 +1,4 @@
-// Unthinking Depths — C++ Bot Template
+// Unthinking Dark — C++ Bot Template
 //
 // Quick start:
 //   make                    compiles this file → bot_template.wasm

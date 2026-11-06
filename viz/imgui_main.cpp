@@ -1459,7 +1459,7 @@ int main(int argc, char** argv) {
   const char* glsl = "#version 330";
 #endif
 
-  GLFWwindow* win = glfwCreateWindow(1520, 860, "Unthinking Depths", nullptr, nullptr);
+  GLFWwindow* win = glfwCreateWindow(1520, 860, "Unthinking Dark", nullptr, nullptr);
   if (!win) { glfwTerminate(); fprintf(stderr, "glfwCreateWindow failed\n"); return 1; }
   glfwMakeContextCurrent(win);
   glfwSwapInterval(1);

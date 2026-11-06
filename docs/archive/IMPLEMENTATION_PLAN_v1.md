@@ -1,4 +1,4 @@
-# IMPLEMENTATION_PLAN_v1.md — Unthinking Depths (archived: every phase built; the roadmap is ../IMPLEMENTATION_PLAN.md)
+# IMPLEMENTATION_PLAN_v1.md — Unthinking Dark (archived: every phase built; the roadmap is ../IMPLEMENTATION_PLAN.md)
 
 Companion to `DESIGN.md`. This is the build plan for Claude Code. Read `DESIGN.md` first;
 this document specifies **what to build, in what order, with what technical contracts, and

@@ -1,6 +1,6 @@
 # viz/
 
-Replay visualizer for Unthinking Depths.
+Replay visualizer for Unthinking Dark.
 
 ## Executables
 

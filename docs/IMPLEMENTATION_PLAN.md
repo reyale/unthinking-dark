@@ -1,4 +1,4 @@
-# IMPLEMENTATION_PLAN.md — Unthinking Depths: engine roadmap
+# IMPLEMENTATION_PLAN.md — Unthinking Dark: engine roadmap
 
 What to build next in this repo (the engine, runner, SDKs, maps and tools), in rough priority
 order, each with its goal, what's done when it's done, and where to stop and ask. `DESIGN.md`

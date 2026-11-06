@@ -1,6 +1,6 @@
 # tools/
 
-Developer utilities for Unthinking Depths.
+Developer utilities for Unthinking Dark.
 
 ## gen_example_replay
 
