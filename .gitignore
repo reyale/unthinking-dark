@@ -9,3 +9,5 @@ viz/web/
 .python-version
 # Built bots: the SDK examples compile next to their sources (tests/CMakeLists.txt)
 *.wasm
+# The engine the one-shot validation builds for itself (prompts/validate_bot.py)
+build-oneshot/

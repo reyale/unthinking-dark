@@ -263,6 +263,7 @@ struct App {
   double            shapes_checked_t = 0.0;
   uint32_t          tick_cap = 0;
   bool              show_zones = true;
+  bool              chrome = true;            // the ImGui toolbars; a page embedding us draws its own
   int               zones_frame = -1;     // frame `zones` was computed for
   std::vector<int8_t> zones;              // territory owner per tile (territory_owners)
   game::TerritoryState zone_pct;
@@ -1389,16 +1390,18 @@ static void frame() {
       ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
       ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus);
 
-  draw_file_bar();
+  if (g.chrome) draw_file_bar();
 
   if (g.loaded) {
     const auto& fr = g.frames[static_cast<size_t>(g.cur)];
     update_zones();
-    draw_playback_bar(fr);
-    draw_territory_bar(fr);
-    ImGui::Separator();
+    if (g.chrome) {
+      draw_playback_bar(fr);
+      draw_territory_bar(fr);
+      ImGui::Separator();
+    }
     draw_grid(fr);
-  } else {
+  } else if (g.chrome) {
     ImGui::Separator();
     ImGui::Spacing();
     ImGui::SetCursorPosX((io.DisplaySize.x - 380.0f) * 0.5f);
@@ -1424,6 +1427,88 @@ static void frame() {
 extern "C" EMSCRIPTEN_KEEPALIVE void load_replay_from_fs() {
   strncpy(g.path_buf, "/replay.ud", sizeof(g.path_buf) - 1);
   try_load("/replay.ud");
+}
+
+// What the viewer shows now, as JSON, for a page that draws its own status around the canvas
+// (the tournament site's match page polls it). Valid until the next call.
+extern "C" EMSCRIPTEN_KEEPALIVE const char* viewer_status() {
+  static std::string out;
+  if (!g.loaded) {
+    out = "{\"loaded\":false}";
+    return out.c_str();
+  }
+  const auto& fr = g.frames[static_cast<size_t>(g.cur)];
+  update_zones();
+  struct Side { int ships = 0, drones = 0, claims = 0, building = 0, factories = 0; };
+  Side side[2];
+  for (const auto& u : fr.units) {
+    if (u.hp <= 0 || u.faction.value > 1) continue;
+    (u.type == game::UnitType::Drone ? side[u.faction.value].drones
+                                     : side[u.faction.value].ships)++;
+  }
+  for (const auto& st : fr.structures) {
+    if (st.hp <= 0 || st.faction.value > 1) continue;
+    Side& sd = side[st.faction.value];
+    if (st.type == game::StructureType::ClaimNode)
+      (st.build_ticks_left == 0 ? sd.claims : sd.building)++;
+    else if (st.type == game::StructureType::Factory)
+      sd.factories++;
+  }
+  char buf[256];
+  out.clear();
+  snprintf(buf, sizeof(buf),
+           "{\"loaded\":true,\"frame\":%d,\"frames\":%d,\"tick\":%u,\"playing\":%s,"
+           "\"fps\":%.0f,\"view\":%d,\"zones\":%s,\"threshold\":%d,\"sides\":[",
+           g.cur, g.total, fr.tick, g.playing ? "true" : "false", g.fps, g.view,
+           g.show_zones ? "true" : "false", game::win_threshold(fr.tick, g.tick_cap));
+  out += buf;
+  for (int f = 0; f < 2; ++f) {
+    snprintf(buf, sizeof(buf),
+             "%s{\"territory\":%u,\"energy\":%d,\"alloy\":%d,\"ships\":%d,\"drones\":%d,"
+             "\"claims\":%d,\"building\":%d,\"factories\":%d}",
+             f ? "," : "", g.zone_pct.pct_faction[f], fr.resources[f].energy,
+             fr.resources[f].alloy, side[f].ships, side[f].drones, side[f].claims,
+             side[f].building, side[f].factories);
+    out += buf;
+  }
+  out += "],\"result\":";
+  if (fr.result.has_value()) {
+    const auto& res = *fr.result;
+    const bool draw = res.reason == game::WinReason::Draw;
+    snprintf(buf, sizeof(buf), "{\"winner\":%d,\"text\":\"%s\"}",
+             draw ? -1 : static_cast<int>(res.winner.value),
+             game::result_reason(res, fr.forfeits, {"A", "B"}).c_str());
+    out += buf;
+  } else {
+    out += "null";
+  }
+  out += "}";
+  return out.c_str();
+}
+
+enum ViewerOp : int { kPlay = 0, kSeek = 1, kView = 2, kFps = 3, kZones = 4, kChrome = 5 };
+
+// The page's controls: play (1) / pause (0), seek to a frame, view (-2 union, -1 god, 0/1 a
+// side), frames per second, zones on/off, and the ImGui toolbars on/off.
+extern "C" EMSCRIPTEN_KEEPALIVE void viewer_control(int op, int value) {
+  switch (op) {
+  case kPlay:
+    if (g.loaded && value && g.cur + 1 >= g.total) g.cur = 0; // play again from the start
+    g.playing = g.loaded && value != 0;
+    g.last_t = glfwGetTime();
+    break;
+  case kSeek:
+    if (g.loaded) {
+      g.cur = std::clamp(value, 0, g.total - 1);
+      g.playing = false;
+    }
+    break;
+  case kView: g.view = std::clamp(value, -2, 1); break;
+  case kFps: g.fps = static_cast<float>(std::clamp(value, 1, 60)); break;
+  case kZones: g.show_zones = value != 0; break;
+  case kChrome: g.chrome = value != 0; break;
+  default: break;
+  }
 }
 #endif
 

@@ -165,6 +165,10 @@ forfeit.
 optional; Z toggles claim zones via `territory_owners()`), `ud_shape_editor` (edits `.udshapes`).
 `Makefile.em` builds `ud_viz_imgui` for the browser → `viz/web/`; the tournament site's watch page
 loads a replay by writing `/replay.ud` to the module's FS and calling `_load_replay_from_fs()`.
+A page embedding it reads `_viewer_status()` (JSON: frame, tick, play state, view, each side's
+territory, resources, units, claims; the result) and drives `_viewer_control(op, value)` (play,
+seek, view, fps, zones, and op 5 hides the ImGui toolbars); browser build only. The site depends
+on both: keep their names and JSON keys, and add rather than change.
 Both ImGui apps default to the repo's `shapes.udshapes` (`--shapes <file>` overrides;
 `ud_viz_imgui` hot-reloads it); the browser build embeds it, so rebuild it after editing shapes.
 Dear ImGui v1.91.6 comes from FetchContent: configure the CMake build once before `Makefile.em`.
@@ -208,6 +212,10 @@ Compile flags enforcing these: `-ffp-contract=off -fno-fast-math` (`cmake/Compil
   layout → bump the magic and refuse the old one with a clear message (`replay_io.cpp`).
 - **Append only:** `TickFault` and `WinReason` values (written to replays), and the keys of
   `ud_run --json` and `ud_profile --json` (the tournament harness stores them).
+- **The one-shot prompt** (`prompts/one_shot_bot.md`, for AI-written ladder bots) describes the
+  rules and points at the files that hold every number. A new mechanic, a changed bot
+  interface or build, or a moved file it names → update it in the same change; its
+  `validate_bot.py` must keep working (`prompts/README.md`).
 - **Caps** bound the snapshot buffer: `UNIT_HARD_CAP` (the unit cap on the largest map) and
   `STRUCTURE_HARD_CAP`; the runner clamps to them when copying in. Budgets are sized once for
   the largest map (DESIGN §2.3): re-measure with `ud_profile` if caps or fixtures change.
