@@ -10,7 +10,7 @@ Build order and acceptance criteria: `docs/IMPLEMENTATION_PLAN.md`.
 
 ## Current State
 
-**Phases 1–5 complete. 338/338 tests passing.**
+**Phases 1–7 complete. 338/338 tests passing.**
 
 | Phase | Status | Notes |
 |-------|--------|-------|
@@ -19,14 +19,14 @@ Build order and acceptance criteria: `docs/IMPLEMENTATION_PLAN.md`.
 | 3 — Territory | ✅ Done | Voronoi partition, descending win threshold, Claim Node fragility |
 | 4 — WASM runner | ✅ Done | Wasmtime C API in `runner/`; `ud_run` CLI in `tools/` |
 | 5 — Bot SDK | ✅ Done | C++ template + ABI headers in `sdk/cpp/`; `ud_profile` deterministic profiler in `profiler/` |
-| 6 — Tournament | 🔲 Not started | |
-| 7 — Calibration | 🔲 Not started | |
+| 6 — Tournament | ✅ Done | Separate repo `../ai-game-tournament` (`udt`): Glicko-2 rounds, SQL match records, website + API; runs the installed engine (`ud_run`/`ud_profile --json`) in a locked-down Docker container per match |
+| 7 — Calibration | ✅ Done | Constants in `config.hpp` tuned with `ud_arena` (counter-triangle, shields) and the fixture matchups (`Turtle.*`, `Rush.*`, `Econ.*`, `Adaptive.*` in `map_tests`); budgets sized by `ud_profile`. Re-run them after any balance change |
 
 Additional work:
 - **Draws are allowed** (`WinReason::Draw`): both Command Cores die the same tick, both bots
   fault the same tick, or the tick cap is reached with territory difference ≤
   `cfg::DRAW_TERRITORY_MARGIN` (5%). Don't "fix" them away.
-- `ABI_VERSION` is 16 (8 added `StructureView`: all own structures; 9 added `EnemyStructureView`:
+- `ABI_VERSION` is 17 (8 added `StructureView`: all own structures; 9 added `EnemyStructureView`:
   enemy structures in sight; 10 renamed `Command::unit_id` → `entity_id`: Produce is issued by the
   Core (Drones) or a Factory (ships) itself; 11 added `UnitView::cargo_energy/cargo_alloy`; 12 added `StructureView::build_ticks_left` and
   `EnemyStructureView::building` for claim construction; 13: Factories are built the same way,
@@ -77,7 +77,7 @@ cmake --build build-cov --target coverage
 
 For LSP support: `ln -s build/compile_commands.json compile_commands.json`
 
-**Version:** every tool takes `--version` and prints e.g. `ud_run v0.2.0-3-g5183546-dirty (ABI 16)`:
+**Version:** every tool takes `--version` and prints e.g. `ud_run v0.2.0-3-g5183546-dirty (ABI 17)`:
 `git describe --tags --always --dirty`, re-read on every build (`cmake/Version.cmake`), or
 `-DUD_VERSION=<string>` to set it. It is `game::build_version()` (`version.hpp`, in the engine
 library, so installed users get it too); a new tool calls `game::print_version_if_asked()` first.
@@ -349,14 +349,12 @@ Compile flags enforcing these: `-ffp-contract=off -fno-fast-math` (in `cmake/Com
 
 ---
 
-## What Is NOT Built Yet
+## Out of Scope
 
-- **Phase 6:** Tournament/ladder harness, stats aggregation
-- **Phase 7:** Balance calibration pass
-
-Out of v1 scope entirely (stop and ask if it seems necessary):
+Every phase of the plan is built. Out of v1 scope entirely (stop and ask if it seems necessary):
 cross-architecture replay, terrain-respecting territory/vision, procedural maps, 8-connectivity,
-zero-copy ABI, OS-level match sandboxing, 3rd resource type.
+zero-copy ABI, 3rd resource type. OS-level isolation of matches is the tournament harness's job
+(its Docker sandbox), not the engine's: the engine's own wall is the runner's (DESIGN §2.1a).
 
 ---
 

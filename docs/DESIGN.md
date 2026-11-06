@@ -49,9 +49,10 @@ Bots are other people's binaries, so a bot reaches nothing outside its own linea
 - Runaway recursion hits Wasmtime's stack limit and is a crash (forfeit), not the host's.
 - The host reads and writes only the snapshot and command buffers, whose addresses are
   checked against the bot's memory when it loads.
-`Sandbox.*` in `runner_tests` holds a hostile module for each of these. Out of scope for v1:
-OS-level sandboxing of the match process; the tournament harness bounds each
-match by wall-clock timeout and binary size.
+`Sandbox.*` in `runner_tests` holds a hostile module for each of these. The engine doesn't
+isolate its own process from the OS; the tournament harness does, running each match in a
+locked-down container (no network, read-only, unprivileged, resource caps) with a wall-clock
+timeout and a binary size limit.
 
 ### 2.2 Determinism invariants (MUST)
 These are non-negotiable; each one silently breaks replay if violated.
