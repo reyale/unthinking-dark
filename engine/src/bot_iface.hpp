@@ -53,7 +53,7 @@ public:
   virtual ~Bot() = default;
 
   // Called once before tick 0. Fat budget; bot allocates/precomputes here.
-  virtual void on_init(const Map& map, uint32_t faction_id) = 0;
+  virtual void on_init(const Map& map, uint32_t faction_id, uint64_t seed) = 0;
 
   // Called every tick. Returns raw commands; engine validates them.
   // Implementations MUST NOT retain a reference to `snap` after returning.

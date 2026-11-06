@@ -24,6 +24,8 @@ PYTHON310 := $(firstword $(shell which python3.12 2>/dev/null) \
                          $(shell which python3.10 2>/dev/null))
 ifneq ($(PYTHON310),)
   EMCC := $(PYTHON310) $(EMCC_PY)
+  # emcc runs helpers (the file packager, for the embedded shapes) with this Python too.
+  export EMSDK_PYTHON := $(PYTHON310)
 else
   EMCC ?= emcc
 endif
@@ -58,7 +60,10 @@ ENGINE_SRCS := \
   $(ENGINE_DIR)/frame.cpp     \
   $(ENGINE_DIR)/file_io.cpp
 
-VIZ_SRCS := web_main.cpp
+# The same isometric viewer as ud_viz_imgui, with the repo's shapes built in.
+VIZ_SRCS := imgui_main.cpp web_version.cpp
+SHAPES   := ../shapes.udshapes
+VERSION  := $(shell git describe --tags --always --dirty 2>/dev/null || echo unknown)
 
 IMGUI_SRCS := \
   $(IMGUI_DIR)/imgui.cpp                          \
@@ -72,6 +77,8 @@ ALL_SRCS := $(ENGINE_SRCS) $(VIZ_SRCS) $(IMGUI_SRCS)
 
 # ---- Flags ------------------------------------------------------------------
 
+# 32-bit draw indices: a big map's isometric draw list passes 65536 vertices, which the
+# desktop build gets past with glDrawElementsBaseVertex, missing from WebGL.
 CXXFLAGS := \
   -std=c++20 -O2                 \
   -I$(ENGINE_DIR)                \
@@ -79,6 +86,10 @@ CXXFLAGS := \
   -I$(IMGUI_DIR)/backends        \
   -I$(XXHASH_DIR)                \
   -DXXH_INLINE_ALL               \
+  '-DImDrawIdx=unsigned int'     \
+  -DUD_DEFAULT_SHAPES_PATH=\"/shapes.udshapes\" \
+  -DUD_WEB_VERSION=\"$(VERSION)\" \
+  -fexceptions                   \
   -ffp-contract=off -fno-fast-math \
   -w
 
@@ -88,6 +99,8 @@ LDFLAGS := \
   -s ALLOW_MEMORY_GROWTH=1                                   \
   -s EXPORTED_FUNCTIONS=_main,_load_replay_from_fs           \
   -s EXPORTED_RUNTIME_METHODS=FS                             \
+  -fexceptions                                               \
+  --embed-file $(SHAPES)@/shapes.udshapes                    \
   --shell-file shell.html
 
 # ---- Targets ----------------------------------------------------------------
@@ -96,7 +109,7 @@ LDFLAGS := \
 
 all: check-deps $(OUTDIR)/index.html
 
-$(OUTDIR)/index.html: $(ALL_SRCS) shell.html Makefile.em | $(OUTDIR)
+$(OUTDIR)/index.html: $(ALL_SRCS) $(wildcard *.hpp) $(SHAPES) shell.html Makefile.em | $(OUTDIR)
 	$(EMCC) $(CXXFLAGS) $(LDFLAGS) $(ALL_SRCS) -o $@
 	@echo ""
 	@echo "Built: $(OUTDIR)/index.html"

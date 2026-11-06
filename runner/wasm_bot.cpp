@@ -241,6 +241,15 @@ WasmBot::WasmBot(const std::vector<uint8_t>& wasm)
   // unbounded CPU inside its budget. Without them the compiler emits ordinary metered loops.
   wasmtime_config_wasm_bulk_memory_set(cfg, false);
   wasmtime_config_cranelift_nan_canonicalization_set(cfg, true);
+  // Bots are other people's binaries. Only what the ABI needs is on: one 32-bit memory, the
+  // capped creator below sees all of it; no GC heap, which allocates outside it.
+  wasmtime_config_wasm_multi_memory_set(cfg, false);
+  wasmtime_config_wasm_memory64_set(cfg, false);
+  wasmtime_config_wasm_gc_set(cfg, false);
+  wasmtime_config_wasm_function_references_set(cfg, false);
+  wasmtime_config_wasm_exceptions_set(cfg, false);
+  wasmtime_config_wasm_stack_switching_set(cfg, false);
+  wasmtime_config_wasm_custom_page_sizes_set(cfg, false);
   // Copy-on-write data initialization maps a module's data segments straight into Wasmtime's
   // own mmap'd memory, which a host memory creator replaces; with both, Wasmtime panics on any
   // module with sizeable data (a bot linking libc, say). Segments are then copied in instead.
@@ -250,6 +259,9 @@ WasmBot::WasmBot(const std::vector<uint8_t>& wasm)
   impl_->engine = wasm_engine_new_with_config(cfg); // config ownership transferred
 
   impl_->store  = wasmtime_store_new(impl_->engine, nullptr, nullptr);
+  // Memory size is left to the creator, which turns a grow past the cap into a forfeit; a
+  // refused table grow just returns -1.
+  wasmtime_store_limiter(impl_->store, -1, game::cfg::TABLE_CAP_ELEMENTS, 1, 1, 1);
   impl_->linker = wasmtime_linker_new(impl_->engine);
 
   // Compile.
@@ -263,7 +275,8 @@ WasmBot::WasmBot(const std::vector<uint8_t>& wasm)
     return;
   }
 
-  // Instantiate (no host imports required for v1 bots).
+  // Instantiate with an empty linker: no host functions at all (no WASI), so a module that
+  // imports anything (files, sockets, clock, environment) fails here.
   wasm_trap_t* trap = nullptr;
   err = wasmtime_linker_instantiate(
       impl_->linker, impl_->ctx(), impl_->module, &impl_->instance, &trap);
@@ -343,7 +356,7 @@ WasmBot::WasmBot(const std::vector<uint8_t>& wasm)
 
 WasmBot::~WasmBot() = default;
 
-void WasmBot::on_init(const game::Map& map, uint32_t faction_id) {
+void WasmBot::on_init(const game::Map& map, uint32_t faction_id, uint64_t seed) {
   if (!healthy_) return;
 
   auto* ctx = impl_->ctx();
@@ -352,13 +365,15 @@ void WasmBot::on_init(const game::Map& map, uint32_t faction_id) {
   wasmtime_context_set_fuel(ctx, game::cfg::FUEL_STARTUP);
   impl_->memory_gate.over_cap = false;
 
-  wasmtime_val_t arg{};
-  arg.kind   = WASMTIME_I32;
-  arg.of.i32 = static_cast<int32_t>(faction_id);
+  wasmtime_val_t args[2]{};
+  args[0].kind   = WASMTIME_I32;
+  args[0].of.i32 = static_cast<int32_t>(faction_id);
+  args[1].kind   = WASMTIME_I64;
+  args[1].of.i64 = static_cast<int64_t>(seed);
 
   wasm_trap_t* trap = nullptr;
   wasmtime_error_t* err =
-      wasmtime_func_call(ctx, &impl_->fn_init, &arg, 1, nullptr, 0, &trap);
+      wasmtime_func_call(ctx, &impl_->fn_init, args, 2, nullptr, 0, &trap);
 
   uint64_t remaining = 0;
   wasmtime_context_get_fuel(ctx, &remaining);

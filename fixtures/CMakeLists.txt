@@ -10,6 +10,8 @@ set(UD_FIXTURE_BOTS
     turtle:TurtleBot
     expander:ExpanderBot
     adaptive:AdaptiveBot
+    aggro:AggroBot
+    boom:BoomBot
 )
 
 if(NOT UD_WASM_FIXTURES)
@@ -30,6 +32,7 @@ set(_flags
 set(_srcs
     ${CMAKE_CURRENT_SOURCE_DIR}/wasm_main.cpp
     ${CMAKE_SOURCE_DIR}/engine/src/grid.cpp
+    ${CMAKE_SOURCE_DIR}/engine/src/rng.cpp
     ${CMAKE_SOURCE_DIR}/engine/src/stats.cpp
     ${CMAKE_SOURCE_DIR}/sdk/cpp/runtime.cpp
     ${CMAKE_SOURCE_DIR}/sdk/cpp/wasi_stubs.cpp

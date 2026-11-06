@@ -58,7 +58,7 @@ Report run_scenario(const std::vector<uint8_t>& wasm, const Scenario& s);
 // scenario as an ordinary match and compare meters.
 class PassiveBot : public game::Bot {
 public:
-  void on_init(const game::Map&, uint32_t) override {}
+  void on_init(const game::Map&, uint32_t, uint64_t) override {}
   std::vector<game::Command> on_tick(const game::Snapshot&) override { return {}; }
 };
 

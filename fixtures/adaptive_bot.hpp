@@ -3,6 +3,7 @@
 #include "bot_util.hpp"
 #include "config.hpp"
 #include "entity.hpp"
+#include "rng.hpp"
 #include "stats.hpp"
 #include <algorithm>
 #include <array>
@@ -14,19 +15,60 @@
 
 namespace game {
 
+// What sets one adaptive bot's strategy apart from another's: how hard it expands, how early it
+// builds an army and how readily it pushes. The defaults are AdaptiveBot's; AggroBot and BoomBot
+// (aggro_bot.hpp, boom_bot.hpp) are the same bot with other values.
+struct AdaptiveStyle {
+  size_t max_claimers = 2;            // Drones out claiming at once
+  int32_t claims_before_factory = 1;  // finished claims before the first Factory
+  int32_t defend_radius = 8;          // enemy units this near an own structure are a threat
+  int32_t push_margin_pct = 150;      // push with an army worth this share of the enemy's seen
+  int32_t min_push_value = 150;       // and worth at least this
+  int32_t blind_push_value = 250;     // with no enemy ships seen
+  int32_t retreat_pct = 60;           // fall back below this share of the enemy met
+  int32_t gather_pct = 75;            // of the army gathered before it strikes
+  // Each match the bot plays a variation drawn from its init seed: the counts above move by
+  // up to one, every share and value by up to this percentage, either way. 0 plays the style
+  // as written.
+  int32_t jitter_pct = 20;
+
+  AdaptiveStyle varied(uint64_t seed) const {
+    if (jitter_pct <= 0) return *this;
+    Rng rng{seed};
+    auto scale = [&](int32_t v) {
+      const auto spread = static_cast<uint32_t>(2 * jitter_pct + 1);
+      const int32_t pct = 100 - jitter_pct + static_cast<int32_t>(rng.next_u32(spread));
+      return std::max<int32_t>(1, (v * pct + 50) / 100);
+    };
+    auto nudge = [&](int32_t v, int32_t lo) {
+      return std::max(lo, v - 1 + static_cast<int32_t>(rng.next_u32(3)));
+    };
+    AdaptiveStyle s = *this;
+    s.max_claimers = static_cast<size_t>(nudge(static_cast<int32_t>(max_claimers), 1));
+    s.claims_before_factory = nudge(claims_before_factory, 0);
+    s.defend_radius = scale(defend_radius);
+    s.push_margin_pct = scale(push_margin_pct);
+    s.min_push_value = scale(min_push_value);
+    s.blind_push_value = scale(blind_push_value);
+    s.retreat_pct = scale(retreat_pct);
+    s.gather_pct = std::min(100, scale(gather_pct));
+    return s;
+  }
+};
+
 // Plays every system, so matches against it exercise real combat: it expands over a claim
 // lattice, builds Factories, counter-picks ships against what it has seen, scouts, ambushes
 // from nebulae and pushes when it has the stronger army.
 //
 // Economy: the Core makes Drones up to the cap. Drones harvest, except a builder beside each
-// unfinished structure and up to kMaxClaimers claimers, sent out while alloy covers a claim.
-// The first Factory comes once kClaimsBeforeFactory claims stand (or at once if the base is
+// unfinished structure and up to max_claimers claimers, sent out while alloy covers a claim.
+// The first Factory comes once claims_before_factory claims stand (or at once if the base is
 // threatened), and the bot saves for it; later ones only from surplus.
 //
 // Army: the first Interceptor scouts the mirrored spawn and hides in a nebula by the enemy
 // Core. The rest wait in an ambush: the nebula patch nearest home on the way to the enemy.
 // Enemy ships near an own structure are always fought first. With an army worth
-// kPushMarginPct% of the enemy army it has seen, it pushes in a wave (ships built meanwhile
+// push_margin_pct% of the enemy army it has seen, it pushes in a wave (ships built meanwhile
 // wait at home for the next one): it gathers out of sight
 // (a nebula near the target if there is one), then strikes enemy claims, unfinished first, and
 // finally the Command Core. It falls back to the ambush when the ships it meets outweigh it.
@@ -38,22 +80,16 @@ namespace game {
 // a ship already dead.
 class AdaptiveBot : public Bot {
 public:
+  explicit AdaptiveBot(AdaptiveStyle style = {}) : base_(style), style_(style) {}
+
   static constexpr int32_t kSpacing = cfg::CLAIM_INFLUENCE / 2;
-  static constexpr size_t kMaxClaimers = 2;
-  static constexpr int32_t kClaimsBeforeFactory = 1;
-  static constexpr int32_t kDefendRadius = 8;  // enemy units this near an own structure
   static constexpr int32_t kEngageRadius = 6;  // enemy ships this near a pushing ship
   static constexpr int32_t kAmbushRadius = 10; // nebula this near home can be the ambush
   static constexpr int32_t kRallyDist = 5;     // no such nebula: wait this far out
   static constexpr int32_t kStageMin = 3;      // gathering point's distance from the target
   static constexpr int32_t kStageMax = 9;
   static constexpr int32_t kGatherRadius = 3;
-  static constexpr int32_t kGatherPct = 75;    // of the army gathered before it strikes
   static constexpr uint32_t kGatherTimeout = 60;
-  static constexpr int32_t kPushMarginPct = 150;
-  static constexpr int32_t kMinPushValue = 150;
-  static constexpr int32_t kBlindPushValue = 250; // with no enemy ships seen
-  static constexpr int32_t kRetreatPct = 60; // fall back below this share of the enemy met
   static constexpr uint32_t kRetreatTicks = 80;
   static constexpr uint32_t kForgetTicks = 200; // enemy ships unseen this long are forgotten
   static constexpr uint32_t kScoutCooldown = 400;
@@ -66,7 +102,8 @@ public:
   static constexpr int32_t kBattleshipSpareE = 120;
   static constexpr size_t kBattleshipMinArmy = 6;
 
-  void on_init(const Map& map, uint32_t) override {
+  void on_init(const Map& map, uint32_t, uint64_t seed) override {
+    style_ = base_.varied(seed);
     map_ = map;
     router_.reset(map);
     for (int32_t y = 0; y < map.height; ++y)
@@ -91,7 +128,11 @@ public:
 
   bool healthy() const override { return true; }
 
+  const AdaptiveStyle& style() const { return style_; } // this match's
+
 private:
+  AdaptiveStyle base_, style_;
+
   enum class Mode : uint8_t { Hold, Stage, Strike, Retreat };
 
   struct SeenUnit {
@@ -315,7 +356,7 @@ private:
     for (const auto& e : snap.visible_enemies) {
       bool near_home = false, near_any = false;
       for (const auto& s : snap.my_structures) {
-        if (manhattan({e.x, e.y}, {s.x, s.y}) > kDefendRadius) continue;
+        if (manhattan({e.x, e.y}, {s.x, s.y}) > style_.defend_radius) continue;
         near_any = true;
         if (static_cast<StructureType>(s.type) != StructureType::ClaimNode) near_home = true;
       }
@@ -386,7 +427,7 @@ private:
     int32_t reserve_e = 0, reserve_a = 0;
     if (factories < cap && !factory_building) {
       if (factories == 0) {
-        want_factory = finished_claims >= kClaimsBeforeFactory || !home_threats_.empty();
+        want_factory = finished_claims >= style_.claims_before_factory || !home_threats_.empty();
         if (want_factory) {
           reserve_e = cfg::FACTORY_COST_E;
           reserve_a = cfg::FACTORY_COST_A;
@@ -451,7 +492,7 @@ private:
     // Claimers are the newest Drones, sent only while alloy covers every claim in flight.
     for (auto it = drones_.rbegin(); it != drones_.rend(); ++it) {
       const UnitView* d = *it;
-      if (lattice_.exhausted() || lattice_.claimers() >= kMaxClaimers) break;
+      if (lattice_.exhausted() || lattice_.claimers() >= style_.max_claimers) break;
       const int32_t in_flight = static_cast<int32_t>(lattice_.claimers()) + 1;
       if (free_alloy < cfg::CLAIM_COST_A * in_flight) break;
       if (lattice_.assigned(d->id) || builds.contains(d->id) || d->id == factory_builder_)
@@ -627,7 +668,7 @@ private:
 
     if (mode_ == Mode::Stage || mode_ == Mode::Strike) {
       if (!home_threats_.empty()) set_mode(Mode::Hold);
-      else if (int64_t{mine} * 100 < int64_t{met} * kRetreatPct) set_mode(Mode::Retreat);
+      else if (int64_t{mine} * 100 < int64_t{met} * style_.retreat_pct) set_mode(Mode::Retreat);
       else if (target_id_ == 0 || !enemy_structures_.contains(target_id_)) {
         const uint32_t was = target_id_;
         choose_target(c);
@@ -647,9 +688,9 @@ private:
       if (threats_.empty()) {
         const int32_t theirs = enemy_army_value();
         const bool stronger =
-            theirs == 0 ? mine >= kBlindPushValue
-                        : mine >= kMinPushValue &&
-                              int64_t{mine} * 100 >= int64_t{theirs} * kPushMarginPct;
+            theirs == 0 ? mine >= style_.blind_push_value
+                        : mine >= style_.min_push_value &&
+                              int64_t{mine} * 100 >= int64_t{theirs} * style_.push_margin_pct;
         if (stronger) start_push(c);
       }
     }
@@ -657,7 +698,7 @@ private:
       int32_t gathered = 0;
       for (const UnitView* u : squad)
         if (manhattan({u->x, u->y}, stage_) <= kGatherRadius + 1) ++gathered;
-      if (gathered * 100 >= static_cast<int32_t>(squad.size()) * kGatherPct ||
+      if (gathered * 100 >= static_cast<int32_t>(squad.size()) * style_.gather_pct ||
           tick_ - mode_since_ > kGatherTimeout)
         set_mode(Mode::Strike);
     }

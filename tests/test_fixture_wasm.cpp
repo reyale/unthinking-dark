@@ -1,4 +1,6 @@
 #include "adaptive_bot.hpp"
+#include "aggro_bot.hpp"
+#include "boom_bot.hpp"
 #include "config.hpp"
 #include "econ_bot.hpp"
 #include "expander_bot.hpp"
@@ -43,6 +45,7 @@ const std::vector<Fixture>& fixtures() {
       fixture<game::IdleBot>("idle"),         fixture<game::RushBot>("rush"),
       fixture<game::EconBot>("econ"),         fixture<game::TurtleBot>("turtle"),
       fixture<game::ExpanderBot>("expander"), fixture<game::AdaptiveBot>("adaptive"),
+      fixture<game::AggroBot>("aggro"),       fixture<game::BoomBot>("boom"),
   };
   return all;
 }

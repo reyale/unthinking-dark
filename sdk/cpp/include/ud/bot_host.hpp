@@ -60,11 +60,11 @@ extern "C" void __wasm_call_ctors(void);
   alignas(8) game::Command COMMAND_ADDR[game::cfg::UNIT_HARD_CAP];                            \
   }                                                                                           \
   static BotType* ud_hosted_bot = nullptr;                                                    \
-  extern "C" void init(int32_t faction_id) {                                                  \
+  extern "C" void init(int32_t faction_id, int64_t seed) {                                    \
     __wasm_call_ctors();                                                                      \
     ud_hosted_bot = new BotType();                                                            \
     ud_hosted_bot->on_init(ud::host::read_map(SNAPSHOT_ADDR),                                 \
-                           static_cast<uint32_t>(faction_id));                                \
+                           static_cast<uint32_t>(faction_id), static_cast<uint64_t>(seed));   \
   }                                                                                           \
   extern "C" int32_t on_tick() {                                                              \
     const std::vector<game::Command> cmds =                                                   \

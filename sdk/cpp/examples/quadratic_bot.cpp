@@ -17,7 +17,7 @@ static int32_t mdist(int32_t ax, int32_t ay, int32_t bx, int32_t by) {
   return dx + dy;
 }
 
-extern "C" void init(int32_t) {}
+extern "C" void init(int32_t, int64_t) {}
 
 extern "C" int32_t on_tick() {
   const auto* h       = reinterpret_cast<const game::SnapshotHeader*>(SNAPSHOT_ADDR);

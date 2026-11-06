@@ -7,6 +7,10 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 #include <GLFW/glfw3.h>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#include <emscripten/html5.h>
+#endif
 
 #include "config.hpp"
 #include "vision.hpp"
@@ -1347,6 +1351,82 @@ static void draw_sel_panel(const ImGuiIO& io) {
 
 // ---- Main -----------------------------------------------------------------
 
+static GLFWwindow* g_win = nullptr;
+
+static void frame() {
+  GLFWwindow* win = g_win;
+#ifdef __EMSCRIPTEN__
+  // The canvas fills the page: follow its size, so ImGui lays out for what is on screen.
+  double css_w = 0, css_h = 0;
+  emscripten_get_element_css_size("#canvas", &css_w, &css_h);
+  int win_w = 0, win_h = 0;
+  glfwGetWindowSize(win, &win_w, &win_h);
+  if (static_cast<int>(css_w) != win_w || static_cast<int>(css_h) != win_h)
+    glfwSetWindowSize(win, static_cast<int>(css_w), static_cast<int>(css_h));
+#endif
+  glfwPollEvents();
+  ImGuiIO& io = ImGui::GetIO();
+  poll_shape_reload(glfwGetTime());
+
+  if (g.loaded && g.playing) {
+    double now = glfwGetTime();
+    if (now - g.last_t >= 1.0 / static_cast<double>(g.fps)) {
+      if (g.cur + 1 < g.total) ++g.cur; else g.playing = false;
+      g.last_t = now;
+    }
+  }
+
+  ImGui_ImplOpenGL3_NewFrame();
+  ImGui_ImplGlfw_NewFrame();
+  ImGui::NewFrame();
+
+  handle_input(io, win);
+  if (g.loaded) update_fx(glfwGetTime());
+
+  ImGui::SetNextWindowPos({0, 0});
+  ImGui::SetNextWindowSize(io.DisplaySize);
+  ImGui::Begin("##ud", nullptr,
+      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
+      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus);
+
+  draw_file_bar();
+
+  if (g.loaded) {
+    const auto& fr = g.frames[static_cast<size_t>(g.cur)];
+    update_zones();
+    draw_playback_bar(fr);
+    draw_territory_bar(fr);
+    ImGui::Separator();
+    draw_grid(fr);
+  } else {
+    ImGui::Separator();
+    ImGui::Spacing();
+    ImGui::SetCursorPosX((io.DisplaySize.x - 380.0f) * 0.5f);
+    ImGui::TextDisabled("Enter a path above, or drag and drop a .ud file here.");
+  }
+
+  ImGui::End();
+
+  draw_sel_panel(io);
+
+  ImGui::Render();
+  int fb_w, fb_h;
+  glfwGetFramebufferSize(win, &fb_w, &fb_h);
+  glViewport(0, 0, fb_w, fb_h);
+  glClearColor(0.08f, 0.08f, 0.10f, 1.0f);
+  glClear(GL_COLOR_BUFFER_BIT);
+  ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+  glfwSwapBuffers(win);
+}
+
+#ifdef __EMSCRIPTEN__
+// The page writes the replay into the in-memory file system, then calls this.
+extern "C" EMSCRIPTEN_KEEPALIVE void load_replay_from_fs() {
+  strncpy(g.path_buf, "/replay.ud", sizeof(g.path_buf) - 1);
+  try_load("/replay.ud");
+}
+#endif
+
 int main(int argc, char** argv) {
   if (game::print_version_if_asked(argc, argv, "ud_viz_imgui")) return 0;
   const char* replay_arg = nullptr;
@@ -1367,10 +1447,17 @@ int main(int argc, char** argv) {
   }
 
   if (!glfwInit()) { fprintf(stderr, "glfwInit failed\n"); return 1; }
+#ifdef __EMSCRIPTEN__
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3); // WebGL 2
+  glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 0);
+  const char* glsl = "#version 300 es";
+#else
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
   glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
   glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
   glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
+  const char* glsl = "#version 330";
+#endif
 
   GLFWwindow* win = glfwCreateWindow(1520, 860, "Unthinking Depths", nullptr, nullptr);
   if (!win) { glfwTerminate(); fprintf(stderr, "glfwCreateWindow failed\n"); return 1; }
@@ -1390,65 +1477,17 @@ int main(int argc, char** argv) {
   ImGui::GetIO().IniFilename = nullptr;
 
   ImGui_ImplGlfw_InitForOpenGL(win, true);
-  ImGui_ImplOpenGL3_Init("#version 330");
+  ImGui_ImplOpenGL3_Init(glsl);
 
   g.last_t = glfwGetTime();
+  g_win = win;
 
-  while (!glfwWindowShouldClose(win)) {
-    glfwPollEvents();
-    ImGuiIO& io = ImGui::GetIO();
-    poll_shape_reload(glfwGetTime());
-
-    if (g.loaded && g.playing) {
-      double now = glfwGetTime();
-      if (now - g.last_t >= 1.0 / static_cast<double>(g.fps)) {
-        if (g.cur + 1 < g.total) ++g.cur; else g.playing = false;
-        g.last_t = now;
-      }
-    }
-
-    ImGui_ImplOpenGL3_NewFrame();
-    ImGui_ImplGlfw_NewFrame();
-    ImGui::NewFrame();
-
-    handle_input(io, win);
-    if (g.loaded) update_fx(glfwGetTime());
-
-    ImGui::SetNextWindowPos({0, 0});
-    ImGui::SetNextWindowSize(io.DisplaySize);
-    ImGui::Begin("##ud", nullptr,
-        ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
-        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus);
-
-    draw_file_bar();
-
-    if (g.loaded) {
-      const auto& fr = g.frames[static_cast<size_t>(g.cur)];
-      update_zones();
-      draw_playback_bar(fr);
-      draw_territory_bar(fr);
-      ImGui::Separator();
-      draw_grid(fr);
-    } else {
-      ImGui::Separator();
-      ImGui::Spacing();
-      ImGui::SetCursorPosX((io.DisplaySize.x - 380.0f) * 0.5f);
-      ImGui::TextDisabled("Enter a path above, or drag and drop a .ud file here.");
-    }
-
-    ImGui::End();
-
-    draw_sel_panel(io);
-
-    ImGui::Render();
-    int fb_w, fb_h;
-    glfwGetFramebufferSize(win, &fb_w, &fb_h);
-    glViewport(0, 0, fb_w, fb_h);
-    glClearColor(0.08f, 0.08f, 0.10f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT);
-    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-    glfwSwapBuffers(win);
-  }
+#ifdef __EMSCRIPTEN__
+  emscripten_set_main_loop(frame, 0, 1); // never returns
+#else
+  while (!glfwWindowShouldClose(win))
+    frame();
+#endif
 
   ImGui_ImplOpenGL3_Shutdown();
   ImGui_ImplGlfw_Shutdown();

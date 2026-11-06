@@ -262,3 +262,27 @@ TEST(RushVsEcon, AggroIssuedCommandsIdleDidNot) {
   EXPECT_TRUE(a_issued);
   EXPECT_FALSE(b_issued);
 }
+
+// Each bot gets a seed of its own at init, drawn from the match seed: the same match seed gives
+// the same seeds again, another gives others, and the two sides never share one.
+TEST(BotSeed, EachSideGetsItsOwnFromTheMatchSeed) {
+  struct Seeded : game::IdleBot {
+    uint64_t seed = 0;
+    void on_init(const game::Map& m, uint32_t f, uint64_t s) override {
+      seed = s;
+      IdleBot::on_init(m, f, s);
+    }
+  };
+  auto seeds = [](uint64_t match_seed) {
+    auto w = make_bot_world(match_seed);
+    Seeded a, b;
+    game::run_match(w, a, 0, b, 1, 1);
+    return std::pair{a.seed, b.seed};
+  };
+  const auto [a, b] = seeds(42);
+  EXPECT_EQ(a, game::bot_seed(42, 0));
+  EXPECT_EQ(b, game::bot_seed(42, 1));
+  EXPECT_NE(a, b);
+  EXPECT_EQ(seeds(42), std::pair(a, b));
+  EXPECT_NE(seeds(43).first, a);
+}

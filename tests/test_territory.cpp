@@ -286,7 +286,7 @@ TEST(Territory, SimultaneousBaseDeathIsDraw) {
     uint32_t my_unit_id;
     uint32_t target_id;
     AttackCoreBot(uint32_t uid, uint32_t tid) : my_unit_id(uid), target_id(tid) {}
-    void on_init(const game::Map&, uint32_t) override {}
+    void on_init(const game::Map&, uint32_t, uint64_t) override {}
     std::vector<game::Command> on_tick(const game::Snapshot&) override {
       game::Command cmd{};
       cmd.entity_id   = my_unit_id;

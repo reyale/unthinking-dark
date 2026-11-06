@@ -208,8 +208,8 @@ std::vector<Scenario> make_suite() {
 class Metered : public game::Bot {
 public:
   explicit Metered(game::Bot& inner) : inner_(inner) {}
-  void on_init(const game::Map& map, uint32_t faction) override {
-    inner_.on_init(map, faction);
+  void on_init(const game::Map& map, uint32_t faction, uint64_t seed) override {
+    inner_.on_init(map, faction, seed);
     init = inner_.last_metrics();
   }
   std::vector<game::Command> on_tick(const game::Snapshot& snap) override {

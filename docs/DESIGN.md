@@ -34,6 +34,25 @@ calibration and should be a named constant, not a magic number.
   memory across ticks (bots retain their own state/maps/plans). The engine never mutates
   bot memory out-of-band.
 
+### 2.1a Isolation
+Bots are other people's binaries, so a bot reaches nothing outside its own linear memory:
+- **No host imports at all.** The runner links an empty linker: no WASI, so no files, sockets,
+  clock, randomness, environment, arguments or process exit. A module that imports anything
+  (function, memory, table or global, from any module name) fails to load. Bots built with
+  wasi-libc link `sdk/cpp/wasi_stubs.cpp`, which defines those imports as traps inside the bot.
+- **Only the features the ABI needs**: one 32-bit linear memory (multi-memory, memory64,
+  shared memory, custom page sizes off), no GC heap, function references, exceptions or stack
+  switching, threads, SIMD or bulk memory. These are refused when the module loads.
+- **One memory, one table, one instance** per store; tables cap at `cfg::TABLE_CAP_ELEMENTS`
+  (`table.grow` is one instruction, so fuel alone can't bound it; a refused grow returns -1).
+- A start function runs with no fuel, so it can't run before the budgets apply.
+- Runaway recursion hits Wasmtime's stack limit and is a crash (forfeit), not the host's.
+- The host reads and writes only the snapshot and command buffers, whose addresses are
+  checked against the bot's memory when it loads.
+`Sandbox.*` in `runner_tests` holds a hostile module for each of these. Out of scope for v1:
+OS-level sandboxing of the match process; the tournament harness bounds each
+match by wall-clock timeout and binary size.
+
 ### 2.2 Determinism invariants (MUST)
 These are non-negotiable; each one silently breaks replay if violated.
 1. **Single seeded PRNG**, consumed in a fixed order (see combat phase). Seed stored in
@@ -120,7 +139,7 @@ These are non-negotiable; each one silently breaks replay if violated.
 ### 4.1 Shape
 ```
 // Author implements:
-fn on_init(map) -> ()               // one-time, fat startup budget, allocate/precompute
+fn on_init(map, faction, seed) -> ()   // one-time, fat startup budget, allocate/precompute
 fn on_tick(world: WorldView) -> Vec<Command>   // per tick, lean fuel budget
 ```
 
@@ -141,6 +160,13 @@ Contains only what fog permits:
 `on_init` gets the whole map: before `init` the runner fills the snapshot buffer with a
 snapshot holding only tiles, one `TileView` per tile of the map (terrain and resource
 amount), and the header's `map_w`/`map_h`/`my_faction_id`.
+
+`on_init` also gets a **seed** (the wasm export is `init(i32 faction_id, i64 seed)`): the
+bot's own, `bot_seed(match seed, faction)`, so it is new every match (`ud_run` draws the
+match seed from the clock unless `--seed` is given), the two sides of a match never share
+one, and re-running a match with its recorded seed gives both bots the same seeds again. A
+bot may prime any RNG it likes with it to vary its play reproducibly, or ignore it. The
+engine draws nothing from it.
 
 Bot must track its own memory of things that leave vision (active-only fog: no
 engine-provided last-seen positions in v1).

@@ -4,7 +4,9 @@
 //   make                    compiles this file → bot_template.wasm
 //   make BOT=my_bot.cpp     compiles your file → my_bot.wasm
 //
-// The engine calls init() once before tick 0, then on_tick() every tick.
+// The engine calls init() once before tick 0, then on_tick() every tick. init() also gets a
+// seed of the bot's own, new every match (and the same again when the match is re-run with its
+// seed): prime an RNG with it to vary the bot's play reproducibly, or ignore it.
 // It writes the snapshot into SNAPSHOT_ADDR before each call and reads
 // up to (return value) Command structs from COMMAND_ADDR after each call.
 
@@ -42,11 +44,13 @@ static const game::TileView* tiles() {
 
 // ---- Bot state -------------------------------------------------------------
 static uint32_t g_faction = 0;
+static uint64_t g_seed = 0;
 
 // ---- Bot implementation (edit from here down) ------------------------------
 
-extern "C" void init(int32_t faction_id) {
+extern "C" void init(int32_t faction_id, int64_t seed) {
   g_faction = static_cast<uint32_t>(faction_id);
+  g_seed = static_cast<uint64_t>(seed);
 }
 
 extern "C" int32_t on_tick() {

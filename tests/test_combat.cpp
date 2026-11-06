@@ -247,7 +247,7 @@ TEST(Combat, BaseDestructionEndsMatch) {
   w.command_core({1})->hp = 1;
 
   struct RushBot : game::Bot {
-    void on_init(const game::Map&, uint32_t) override {}
+    void on_init(const game::Map&, uint32_t, uint64_t) override {}
     std::vector<game::Command> on_tick(const game::Snapshot& snap) override {
       std::vector<game::Command> out;
       for (const auto& u : snap.my_units) {
@@ -263,7 +263,7 @@ TEST(Combat, BaseDestructionEndsMatch) {
   };
 
   struct IdleB : game::Bot {
-    void on_init(const game::Map&, uint32_t) override {}
+    void on_init(const game::Map&, uint32_t, uint64_t) override {}
     std::vector<game::Command> on_tick(const game::Snapshot&) override { return {}; }
     bool healthy() const override { return true; }
   };

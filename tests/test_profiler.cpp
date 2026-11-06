@@ -29,7 +29,7 @@ static std::vector<uint8_t> wat_bot(std::string_view body) {
   (global (export "SNAPSHOT_ADDR") i32 (i32.const 0))
   (global (export "COMMAND_ADDR")  i32 (i32.const 327680))
   (func (export "abi_version") (result i32) i32.const @ABI@)
-  (func (export "init") (param i32))
+  (func (export "init") (param i32 i64))
   (func (export "on_tick") (result i32) @BODY@)
 ))wat";
   wat.replace(wat.find("@ABI@"), 5, std::to_string(game::cfg::ABI_VERSION));

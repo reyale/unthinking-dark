@@ -43,7 +43,7 @@ public:
   static constexpr int32_t kClearRadius = 8;
   static constexpr int32_t kPostRadius = 3;
 
-  void on_init(const Map& map, uint32_t) override {
+  void on_init(const Map& map, uint32_t, uint64_t) override {
     map_ = map;
     router_.reset(map);
   }

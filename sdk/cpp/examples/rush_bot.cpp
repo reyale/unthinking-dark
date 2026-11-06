@@ -90,7 +90,7 @@ static int32_t mdist(int32_t ax, int32_t ay, int32_t bx, int32_t by) {
   return dx + dy;
 }
 
-extern "C" void init(int32_t faction_id) {
+extern "C" void init(int32_t faction_id, int64_t) {
   g_faction = static_cast<uint32_t>(faction_id);
   g_enemy_x = (faction_id == 0) ? game::cfg::MAP_MAX_W - 3 : 2;
   g_enemy_y = (faction_id == 0) ? game::cfg::MAP_MAX_H - 3 : 2;

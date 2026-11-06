@@ -26,6 +26,7 @@ function(ud_install_bot_sdk)
   file(GLOB _ud ${PROJECT_SOURCE_DIR}/sdk/cpp/include/ud/*.hpp)
   install(FILES ${_ud} DESTINATION ${UD_INSTALL_INCLUDEDIR}/ud)
   install(FILES ${PROJECT_SOURCE_DIR}/engine/src/grid.cpp ${PROJECT_SOURCE_DIR}/engine/src/stats.cpp
+                ${PROJECT_SOURCE_DIR}/engine/src/rng.cpp
                 ${PROJECT_SOURCE_DIR}/sdk/cpp/runtime.cpp ${PROJECT_SOURCE_DIR}/sdk/cpp/wasi_stubs.cpp
           DESTINATION ${UD_INSTALL_DATADIR}/sdk)
   install(FILES ${PROJECT_SOURCE_DIR}/cmake/WasmBot.cmake ${PROJECT_SOURCE_DIR}/cmake/ai_gameBot.cmake

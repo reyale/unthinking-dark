@@ -22,7 +22,7 @@ static constexpr std::string_view IDLE_WAT = R"wat(
   (global (export "SNAPSHOT_ADDR") i32 (i32.const 0))
   (global (export "COMMAND_ADDR")  i32 (i32.const 327680))
   (func   (export "abi_version") (result i32) i32.const @ABI@)
-  (func   (export "init")    (param i32))
+  (func   (export "init")    (param i32 i64))
   (func   (export "on_tick") (result i32) i32.const 0)
 )
 )wat";
@@ -35,7 +35,7 @@ static constexpr std::string_view TOO_SMALL_WAT = R"wat(
   (global (export "SNAPSHOT_ADDR") i32 (i32.const 0))
   (global (export "COMMAND_ADDR")  i32 (i32.const 60000))
   (func   (export "abi_version") (result i32) i32.const @ABI@)
-  (func   (export "init")    (param i32))
+  (func   (export "init")    (param i32 i64))
   (func   (export "on_tick") (result i32) i32.const 0)
 )
 )wat";
@@ -47,7 +47,7 @@ static constexpr std::string_view FUEL_HOG_INIT_WAT = R"wat(
   (global (export "SNAPSHOT_ADDR") i32 (i32.const 0))
   (global (export "COMMAND_ADDR")  i32 (i32.const 327680))
   (func (export "abi_version") (result i32) i32.const @ABI@)
-  (func (export "init") (param i32)
+  (func (export "init") (param i32 i64)
     (block $break
       (loop $loop
         br $loop)))
@@ -63,7 +63,7 @@ static constexpr std::string_view TICK_ECHO_WAT = R"wat(
   (global (export "SNAPSHOT_ADDR") i32 (i32.const 0))
   (global (export "COMMAND_ADDR")  i32 (i32.const 327680))
   (func (export "abi_version") (result i32) i32.const @ABI@)
-  (func (export "init") (param i32))
+  (func (export "init") (param i32 i64))
   (func (export "on_tick") (result i32)
     (i32.store
       (i32.const 327688)
@@ -80,7 +80,7 @@ static constexpr std::string_view COMMAND_WRITER_WAT = R"wat(
   (global (export "SNAPSHOT_ADDR") i32 (i32.const 0))
   (global (export "COMMAND_ADDR")  i32 (i32.const 327680))
   (func (export "abi_version") (result i32) i32.const @ABI@)
-  (func (export "init") (param i32))
+  (func (export "init") (param i32 i64))
   (func (export "on_tick") (result i32)
     (i32.store (i32.const 327680) (i32.const 57005))
     (i32.store (i32.const 327688) (i32.const 7))
@@ -97,7 +97,7 @@ static constexpr std::string_view UNIT_COUNT_WAT = R"wat(
   (global (export "SNAPSHOT_ADDR") i32 (i32.const 0))
   (global (export "COMMAND_ADDR")  i32 (i32.const 327680))
   (func (export "abi_version") (result i32) i32.const @ABI@)
-  (func (export "init") (param i32))
+  (func (export "init") (param i32 i64))
   (func (export "on_tick") (result i32)
     (i32.load (i32.const 32)))
 )
@@ -112,7 +112,7 @@ static constexpr std::string_view UNIT_ID_ROUNDTRIP_WAT = R"wat(
   (global (export "SNAPSHOT_ADDR") i32 (i32.const 0))
   (global (export "COMMAND_ADDR")  i32 (i32.const 327680))
   (func (export "abi_version") (result i32) i32.const @ABI@)
-  (func (export "init") (param i32))
+  (func (export "init") (param i32 i64))
   (func (export "on_tick") (result i32)
     (local $units_off i32)
     (local.set $units_off (i32.load (i32.const 44)))
@@ -130,7 +130,7 @@ static constexpr std::string_view TICK_FUEL_HOG_WAT = R"wat(
   (global (export "SNAPSHOT_ADDR") i32 (i32.const 0))
   (global (export "COMMAND_ADDR")  i32 (i32.const 327680))
   (func (export "abi_version") (result i32) i32.const @ABI@)
-  (func (export "init") (param i32))
+  (func (export "init") (param i32 i64))
   (func (export "on_tick") (result i32)
     (block $break
       (loop $loop
@@ -146,7 +146,7 @@ static constexpr std::string_view TRAP_WAT = R"wat(
   (global (export "SNAPSHOT_ADDR") i32 (i32.const 0))
   (global (export "COMMAND_ADDR")  i32 (i32.const 327680))
   (func (export "abi_version") (result i32) i32.const @ABI@)
-  (func (export "init") (param i32))
+  (func (export "init") (param i32 i64))
   (func (export "on_tick") (result i32)
     unreachable)
 )
@@ -159,7 +159,7 @@ static constexpr std::string_view ABI_MISMATCH_WAT = R"wat(
   (global (export "SNAPSHOT_ADDR") i32 (i32.const 0))
   (global (export "COMMAND_ADDR")  i32 (i32.const 327680))
   (func (export "abi_version") (result i32) i32.const 5)
-  (func (export "init") (param i32))
+  (func (export "init") (param i32 i64))
   (func (export "on_tick") (result i32) i32.const 0)
 )
 )wat";
@@ -275,7 +275,7 @@ TEST(WasmBot, InitFuelExhaustionMarksUnhealthy) {
   ASSERT_TRUE(bot.healthy()); // loads fine
 
   auto w = make_world();
-  bot.on_init(w.map, 0); // burns all init fuel
+  bot.on_init(w.map, 0, 0); // burns all init fuel
 
   EXPECT_FALSE(bot.healthy());
   EXPECT_FALSE(bot.last_error().empty());
@@ -365,7 +365,7 @@ TEST(WasmBot, TickFaultEndsTheBot) {
   for (auto wat : {TICK_FUEL_HOG_WAT, TRAP_WAT}) {
     runner::WasmBot bot(to_wasm(wat));
     ASSERT_TRUE(bot.healthy());
-    bot.on_init(make_world().map, 0);
+    bot.on_init(make_world().map, 0, 0);
     ASSERT_TRUE(bot.healthy());
 
     EXPECT_TRUE(bot.on_tick(make_snap()).empty());
@@ -598,7 +598,7 @@ static std::string grow_wat(uint32_t pages, bool only_even_ticks) {
   (global (export "COMMAND_ADDR")  i32 (i32.const 327680))
   (global $last (mut i32) (i32.const 12345))
   (func (export "abi_version") (result i32) i32.const @ABI@)
-  (func (export "init") (param i32))
+  (func (export "init") (param i32 i64))
   (func (export "on_tick") (result i32)
     (i32.store (i32.const 327680) (i32.const 57005))   ;; entity_id
     (i32.store (i32.const 327688) (global.get $last))  ;; ax = previous grow result
@@ -615,7 +615,7 @@ static std::string grow_wat(uint32_t pages, bool only_even_ticks) {
 TEST(WasmBot, GrowPastMemoryCapFaultsTheBot) {
   runner::WasmBot bot(to_wasm(grow_wat(kCapPages, false)));
   ASSERT_TRUE(bot.healthy()) << bot.last_error();
-  bot.on_init(make_world().map, 0);
+  bot.on_init(make_world().map, 0, 0);
   const uint64_t before = bot.last_metrics().memory_bytes;
 
   auto cmds = bot.on_tick(make_snap());
@@ -628,7 +628,7 @@ TEST(WasmBot, GrowPastMemoryCapFaultsTheBot) {
 TEST(WasmBot, GrowingExactlyToTheCapIsAllowed) {
   runner::WasmBot bot(to_wasm(grow_wat(kCapPages - 6, false))); // 6 initial pages
   ASSERT_TRUE(bot.healthy()) << bot.last_error();
-  bot.on_init(make_world().map, 0);
+  bot.on_init(make_world().map, 0, 0);
   EXPECT_EQ(bot.on_tick(make_snap()).size(), 1u);
   EXPECT_EQ(bot.last_metrics().fault, game::TickFault::None);
   EXPECT_EQ(bot.last_metrics().memory_bytes, uint64_t{game::cfg::MEMORY_CAP_MB} << 20);
@@ -640,7 +640,7 @@ TEST(WasmBot, GrowingExactlyToTheCapIsAllowed) {
 TEST(WasmBot, SmallGrowIsNotAFault) {
   runner::WasmBot bot(to_wasm(grow_wat(10, false)));
   ASSERT_TRUE(bot.healthy()) << bot.last_error();
-  bot.on_init(make_world().map, 0);
+  bot.on_init(make_world().map, 0, 0);
   EXPECT_EQ(bot.on_tick(make_snap()).size(), 1u);
   EXPECT_EQ(bot.last_metrics().fault, game::TickFault::None);
   EXPECT_EQ(bot.last_metrics().memory_bytes, 16u * 65536);
@@ -648,13 +648,13 @@ TEST(WasmBot, SmallGrowIsNotAFault) {
 
 TEST(WasmBot, InitGrowPastMemoryCapFailsLoad) {
   std::string wat = grow_wat(kCapPages, false);
-  wat.replace(wat.find("(func (export \"init\") (param i32))"),
-              std::string("(func (export \"init\") (param i32))").size(),
-              "(func (export \"init\") (param i32) (drop (memory.grow (i32.const " +
+  wat.replace(wat.find("(func (export \"init\") (param i32 i64))"),
+              std::string("(func (export \"init\") (param i32 i64))").size(),
+              "(func (export \"init\") (param i32 i64) (drop (memory.grow (i32.const " +
                   std::to_string(kCapPages) + "))))");
   runner::WasmBot bot(to_wasm(wat));
   ASSERT_TRUE(bot.healthy()) << bot.last_error();
-  bot.on_init(make_world().map, 0);
+  bot.on_init(make_world().map, 0, 0);
   EXPECT_FALSE(bot.healthy()) << "an init overrun is a load failure";
   EXPECT_EQ(bot.last_metrics().fault, game::TickFault::OutOfMemory);
 }
@@ -670,17 +670,17 @@ TEST(WasmBot, InitialMemoryOverCapRejectedAtLoad) {
 
 TEST(WasmBot, FuelAndTrapForfeitsCarryTheirCause) {
   runner::WasmBot hog(to_wasm(TICK_FUEL_HOG_WAT));
-  hog.on_init(make_world().map, 0);
+  hog.on_init(make_world().map, 0, 0);
   hog.on_tick(make_snap());
   EXPECT_EQ(hog.last_metrics().fault, game::TickFault::OutOfFuel);
 
   runner::WasmBot crash(to_wasm(TRAP_WAT));
-  crash.on_init(make_world().map, 0);
+  crash.on_init(make_world().map, 0, 0);
   crash.on_tick(make_snap());
   EXPECT_EQ(crash.last_metrics().fault, game::TickFault::Trap);
 
   runner::WasmBot fine(to_wasm(IDLE_WAT));
-  fine.on_init(make_world().map, 0);
+  fine.on_init(make_world().map, 0, 0);
   fine.on_tick(make_snap());
   EXPECT_EQ(fine.last_metrics().fault, game::TickFault::None);
 }
@@ -695,7 +695,7 @@ static std::string trap_on_tick_wat(uint32_t tick) {
   (global (export "SNAPSHOT_ADDR") i32 (i32.const 0))
   (global (export "COMMAND_ADDR")  i32 (i32.const 327680))
   (func (export "abi_version") (result i32) i32.const @ABI@)
-  (func (export "init") (param i32))
+  (func (export "init") (param i32 i64))
   (func (export "on_tick") (result i32)
     (if (i32.eq (i32.load (i32.const 0)) (i32.const @TICK@)) (then unreachable))
     (i32.const 0))
@@ -815,7 +815,7 @@ TEST(SdkLifecycle, LargeCopiesRunAsMeteredLoops) {
 
   runner::WasmBot bot(runner::load_wasm_file(path));
   ASSERT_TRUE(bot.healthy()) << bot.last_error();
-  bot.on_init(make_world().map, 0);
+  bot.on_init(make_world().map, 0, 0);
   ASSERT_TRUE(bot.healthy()) << bot.last_error();
   for (uint32_t t = 0; t < 3; ++t) {
     bot.on_tick(make_snap(t));
@@ -836,7 +836,7 @@ static constexpr std::string_view STRUCTURE_ECHO_WAT = R"wat(
   (global (export "SNAPSHOT_ADDR") i32 (i32.const 0))
   (global (export "COMMAND_ADDR")  i32 (i32.const 327680))
   (func (export "abi_version") (result i32) i32.const @ABI@)
-  (func (export "init") (param i32))
+  (func (export "init") (param i32 i64))
   (func (export "on_tick") (result i32)
     (local $off i32)
     (local.set $off (i32.load (i32.const 60)))
@@ -872,7 +872,7 @@ static constexpr std::string_view ENEMY_STRUCTURE_ECHO_WAT = R"wat(
   (global (export "SNAPSHOT_ADDR") i32 (i32.const 0))
   (global (export "COMMAND_ADDR")  i32 (i32.const 327680))
   (func (export "abi_version") (result i32) i32.const @ABI@)
-  (func (export "init") (param i32))
+  (func (export "init") (param i32 i64))
   (func (export "on_tick") (result i32)
     (local $off i32)
     (local.set $off (i32.load (i32.const 68)))
@@ -913,4 +913,110 @@ TEST(WasmBot, OverCapSnapshotIsClampedToTheBuffer) {
   snap.visible_enemy_structures.resize(game::cfg::STRUCTURE_HARD_CAP + 50);
   auto cmds = bot.on_tick(snap);
   EXPECT_EQ(cmds.size(), size_t{game::cfg::UNIT_HARD_CAP});
+}
+
+// ---- Sandbox ----------------------------------------------------------------
+// Bots are other people's binaries. The runner links no host functions at all (no WASI), so a
+// bot can reach nothing outside its own memory: no files, network, clock, environment or
+// processes. These modules try the ways out and the ways to take more of the host than a match
+// allows.
+
+static std::string sandbox_wat(std::string_view imports, std::string_view extra,
+                               std::string_view tick = "i32.const 0",
+                               std::string_view memory = R"((memory (export "memory") 6))") {
+  std::string s = "(module\n";
+  s += imports;
+  s += "\n";
+  s += memory;
+  s += R"(
+  (global (export "SNAPSHOT_ADDR") i32 (i32.const 0))
+  (global (export "COMMAND_ADDR")  i32 (i32.const 327680))
+  (func (export "abi_version") (result i32) i32.const @ABI@)
+  (func (export "init") (param i32 i64))
+)";
+  s += extra;
+  s += "\n(func (export \"on_tick\") (result i32)\n";
+  s += tick;
+  s += "))";
+  return s;
+}
+
+TEST(Sandbox, EveryHostImportIsRefused) {
+  for (std::string_view imp : {
+           R"((import "wasi_snapshot_preview1" "fd_write" (func (param i32 i32 i32 i32) (result i32))))",
+           R"((import "wasi_snapshot_preview1" "fd_read" (func (param i32 i32 i32 i32) (result i32))))",
+           R"((import "wasi_snapshot_preview1" "path_open" (func)))",
+           R"((import "wasi_snapshot_preview1" "sock_accept" (func (param i32 i32 i32) (result i32))))",
+           R"((import "wasi_snapshot_preview1" "sock_send" (func)))",
+           R"((import "wasi_snapshot_preview1" "sock_recv" (func)))",
+           R"((import "wasi_snapshot_preview1" "clock_time_get" (func)))",
+           R"((import "wasi_snapshot_preview1" "random_get" (func)))",
+           R"((import "wasi_snapshot_preview1" "environ_get" (func)))",
+           R"((import "wasi_snapshot_preview1" "proc_exit" (func (param i32))))",
+           R"((import "wasi_unstable" "fd_write" (func)))",
+           R"((import "wasi:sockets/tcp" "connect" (func)))",
+           R"((import "env" "system" (func)))",
+           R"((import "env" "table" (table 1 funcref)))",
+           R"((import "env" "g" (global i32)))",
+       }) {
+    runner::WasmBot bot(to_wasm(sandbox_wat(imp, "")));
+    EXPECT_FALSE(bot.healthy()) << imp;
+    EXPECT_NE(bot.last_error().find("import"), std::string::npos) << imp << ": " << bot.last_error();
+  }
+  // Memory the host would share with the bot.
+  runner::WasmBot bot(to_wasm(sandbox_wat("", "", "i32.const 0",
+                                          R"((import "env" "memory" (memory 6)) (export "memory" (memory 0)))")));
+  EXPECT_FALSE(bot.healthy());
+  EXPECT_NE(bot.last_error().find("import"), std::string::npos) << bot.last_error();
+}
+
+// A start function runs during instantiation, before any budget is set: it must get none.
+TEST(Sandbox, StartFunctionGetsNoFuel) {
+  runner::WasmBot bot(to_wasm(sandbox_wat("", "(func $spin (loop br 0)) (start $spin)")));
+  EXPECT_FALSE(bot.healthy());
+}
+
+// Each of these could take host memory or CPU outside the metered, capped linear memory.
+TEST(Sandbox, FeaturesBeyondTheAbiAreRefused) {
+  const std::vector<std::pair<std::string_view, std::string>> cases = {
+      {"second memory", sandbox_wat("", "(memory 1000)")},
+      {"memory64", sandbox_wat("", "", "i32.const 0", R"((memory (export "memory") i64 6))")},
+      {"shared memory", sandbox_wat("", "", "i32.const 0", R"((memory (export "memory") 6 6 shared))")},
+      {"huge table", sandbox_wat("", "(table 100000000 funcref)")},
+      {"gc arrays", sandbox_wat("", "(type $a (array (mut i8)))",
+                                "(drop (array.new_default $a (i32.const 1000000000))) i32.const 0")},
+  };
+  for (const auto& [name, wat] : cases) {
+    runner::WasmBot bot(to_wasm(wat));
+    EXPECT_FALSE(bot.healthy()) << name;
+  }
+}
+
+// table.grow is one instruction, so fuel can't bound it; the store's table limit does.
+TEST(Sandbox, TableGrowthIsCapped) {
+  runner::WasmBot bot(to_wasm(sandbox_wat(
+      "", "(table $t 1 funcref)",
+      "(if (i32.ne (table.grow $t (ref.null func) (i32.const 100000000)) (i32.const -1))"
+      "  (then unreachable)) i32.const 0")));
+  ASSERT_TRUE(bot.healthy()) << bot.last_error();
+  bot.on_tick(game::Snapshot{});
+  EXPECT_TRUE(bot.healthy()) << bot.last_error();
+}
+
+TEST(Sandbox, RunawayRecursionIsACrashNotTheHosts) {
+  runner::WasmBot bot(to_wasm(sandbox_wat("", "(func $r (call $r))", "call $r i32.const 0")));
+  ASSERT_TRUE(bot.healthy()) << bot.last_error();
+  bot.on_tick(game::Snapshot{});
+  EXPECT_FALSE(bot.healthy());
+  EXPECT_EQ(bot.last_metrics().fault, game::TickFault::Trap);
+}
+
+// The buffer addresses are the bot's to give: ones that point outside its memory are refused.
+TEST(Sandbox, BufferAddressesOutsideTheBotsMemoryAreRefused) {
+  for (const std::string_view global : {"(i32.const 0))", "(i32.const 327680))"}) {
+    std::string wat = sandbox_wat("", "");
+    wat.replace(wat.find(global), global.size(), "(i32.const -16))");
+    runner::WasmBot bot(to_wasm(wat));
+    EXPECT_FALSE(bot.healthy()) << global;
+  }
 }

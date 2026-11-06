@@ -17,7 +17,7 @@ struct Plan { int32_t cells[kCells]; };
 static Plan g_now, g_prev;
 static unsigned char g_bytes[kCells];
 
-extern "C" void init(int32_t) {}
+extern "C" void init(int32_t, int64_t) {}
 
 extern "C" int32_t on_tick() {
   const auto* h = reinterpret_cast<const game::SnapshotHeader*>(SNAPSHOT_ADDR);

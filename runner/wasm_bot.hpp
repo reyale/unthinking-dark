@@ -32,7 +32,7 @@ public:
   WasmBot(const WasmBot&) = delete;
   WasmBot& operator=(const WasmBot&) = delete;
 
-  void on_init(const game::Map& map, uint32_t faction_id) override;
+  void on_init(const game::Map& map, uint32_t faction_id, uint64_t seed) override;
   std::vector<game::Command> on_tick(const game::Snapshot& snap) override;
   bool healthy() const override { return healthy_; }
   game::BotMetrics last_metrics() const override { return last_metrics_; }

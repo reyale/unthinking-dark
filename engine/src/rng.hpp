@@ -35,6 +35,13 @@ private:
   uint64_t draw_count_{0};
 
   static uint64_t splitmix64(uint64_t& x);
+  friend uint64_t bot_seed(uint64_t match_seed, uint32_t faction);
 };
+
+// The seed a bot gets at init (Bot::on_init): its own, drawn from the match seed and its
+// faction, so a replay's seed gives the same bots the same seeds, and the two sides of a
+// mirror match don't get one between them. Bots may prime their own RNG with it, or not.
+// Nothing in the engine draws from it.
+uint64_t bot_seed(uint64_t match_seed, uint32_t faction);
 
 } // namespace game

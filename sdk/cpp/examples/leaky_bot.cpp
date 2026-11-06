@@ -17,7 +17,7 @@ static constexpr uint32_t kRecordBytes = 1024;
 
 static uint32_t g_log_end = 0; // linear-memory offset of the end of the history log
 
-extern "C" void init(int32_t) { g_log_end = (uint32_t)(uintptr_t)&__heap_base; }
+extern "C" void init(int32_t, int64_t) { g_log_end = (uint32_t)(uintptr_t)&__heap_base; }
 
 extern "C" int32_t on_tick() {
   const auto* h     = reinterpret_cast<const game::SnapshotHeader*>(SNAPSHOT_ADDR);

@@ -43,4 +43,9 @@ uint32_t Rng::next_u32(uint32_t bound) {
     (static_cast<uint64_t>(static_cast<uint32_t>(next())) * uint64_t{bound}) >> 32);
 }
 
+uint64_t bot_seed(uint64_t match_seed, uint32_t faction) {
+  uint64_t x = match_seed ^ (0xa0761d6478bd642full * (uint64_t{faction} + 1));
+  return Rng::splitmix64(x);
+}
+
 } // namespace game

@@ -33,7 +33,8 @@ The threshold falls over time so turtling loses. **Draws are allowed**: both Com
 ## Bot API
 
 ```cpp
-void on_init(MapInfo);                        // one-time setup, generous fuel budget
+void on_init(MapInfo, faction, seed);         // one-time setup, generous fuel budget; the
+                                              // seed is the bot's own, new each match
 std::vector<Command> on_tick(WorldView);      // per tick, metered fuel budget
 ```
 
@@ -103,7 +104,10 @@ cd viz && make -f Makefile.em
 make -f Makefile.em serve
 ```
 
-Drop any `.ud` replay file onto the page to load it. Same controls as the desktop viewer.
+Drop any `.ud` replay file onto the page to load it. It is the desktop viewer (`ud_viz_imgui`)
+compiled for the browser, with the repo's `shapes.udshapes` built in: rebuild after editing shapes.
+If `python3` on the PATH is older than 3.10, pass a newer one: `make -f Makefile.em
+PYTHON310=~/.pyenv/versions/3.12.13/bin/python`.
 
 ## Coverage
 

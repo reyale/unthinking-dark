@@ -10,6 +10,7 @@
 #include "turtle_bot.hpp"
 #include <gtest/gtest.h>
 #include <set>
+#include <tuple>
 #include <string>
 
 // AdaptiveBot is the fixture that plays every system (Factories, counter-picked ships,
@@ -28,9 +29,9 @@ public:
   std::set<game::StructureType> structures;
   bool hid_in_nebula{false};
 
-  void on_init(const game::Map& map, uint32_t faction) override {
+  void on_init(const game::Map& map, uint32_t faction, uint64_t seed) override {
     map_ = map;
-    AdaptiveBot::on_init(map, faction);
+    AdaptiveBot::on_init(map, faction, seed);
   }
 
   std::vector<game::Command> on_tick(const game::Snapshot& snap) override {
@@ -130,4 +131,30 @@ TEST(Adaptive, ReplayReproducesHash) {
   uint64_t fingerprint = 0;
   game::replay_frames(rec.replay, &fingerprint);
   EXPECT_EQ(fingerprint, rec.replay.expected_hash) << "viewers check the log with this alone";
+}
+
+// The bot plays a variation of its style drawn from its seed: a new match seed, another game;
+// the same one, the same game again.
+TEST(Adaptive, VariesItsPlayWithTheMatchSeed) {
+  const auto md = maps::load_map(kDataDir + "/twin_peaks.json");
+  auto game_with = [&](uint64_t seed) {
+    game::AdaptiveBot a, b;
+    auto w = maps::world_from_map(md, seed);
+    const auto rec = game::run_match(w, a, 0, b, 1, game::cfg::TICK_CAP);
+    return std::tuple{rec.replay.expected_hash, a.style().push_margin_pct, a.style().gather_pct};
+  };
+  std::set<uint64_t> hashes;
+  std::set<std::pair<int32_t, int32_t>> styles;
+  for (uint64_t seed = 1; seed <= 4; ++seed) {
+    const auto [hash, margin, gather] = game_with(seed);
+    hashes.insert(hash);
+    styles.insert({margin, gather});
+  }
+  EXPECT_GE(hashes.size(), 3u);
+  EXPECT_GE(styles.size(), 3u);
+  EXPECT_EQ(std::get<0>(game_with(2)), std::get<0>(game_with(2)));
+
+  game::AdaptiveStyle fixed;
+  fixed.jitter_pct = 0;
+  EXPECT_EQ(fixed.varied(123).push_margin_pct, fixed.push_margin_pct);
 }

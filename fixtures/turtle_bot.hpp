@@ -20,7 +20,7 @@ public:
   static constexpr int32_t kGuardRadius = 6;
   static constexpr int32_t kHomeRadius = 2;
 
-  void on_init(const Map& map, uint32_t) override {
+  void on_init(const Map& map, uint32_t, uint64_t) override {
     map_ = map;
     router_.reset(map);
   }

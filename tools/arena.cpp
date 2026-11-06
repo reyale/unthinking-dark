@@ -44,7 +44,7 @@ class Commander : public game::Bot {
 public:
   explicit Commander(const game::World& world) : world_(world) {}
 
-  void on_init(const game::Map& map, uint32_t faction) override {
+  void on_init(const game::Map& map, uint32_t faction, uint64_t) override {
     // Forward (toward the enemy's side) first, then across, then back.
     const int32_t fwd = faction == 0 ? 1 : -1;
     dirs_ = {Vec2{fwd, 0}, Vec2{0, 1}, Vec2{0, -1}, Vec2{-fwd, 0}};
@@ -267,8 +267,8 @@ double Outcome::margin() const {
 Outcome fight(const Army& a, const Army& b, const Setup& s) {
   game::World w = battlefield(a, b, s);
   Commander ca{w}, cb{w};
-  ca.on_init(w.map, 0);
-  cb.on_init(w.map, 1);
+  ca.on_init(w.map, 0, 0);
+  cb.on_init(w.map, 1, 0);
   Outcome o;
   o.start_a = standing(w, FactionId{0});
   o.start_b = standing(w, FactionId{1});

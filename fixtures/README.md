@@ -31,7 +31,7 @@ of engine interfaces that tests need to instantiate without caring about bot log
 
 ## Every fixture is also a WASM bot
 
-The fixtures are written against `game::Bot` (`on_init(Map)`, `on_tick(Snapshot)`), exactly
+The fixtures are written against `game::Bot` (`on_init(Map, faction, seed)`, `on_tick(Snapshot)`), exactly
 what the wire carries, so each one also builds, unchanged, as a `.wasm` module:
 `fixtures/CMakeLists.txt` compiles `wasm_main.cpp` once per fixture with wasi-sdk (fetched
 and pinned by the top-level CMakeLists; `-DUD_WASM_FIXTURES=OFF` skips it), and

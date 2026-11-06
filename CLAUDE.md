@@ -10,7 +10,7 @@ Build order and acceptance criteria: `docs/IMPLEMENTATION_PLAN.md`.
 
 ## Current State
 
-**Phases 1–5 complete. 328/328 tests passing.**
+**Phases 1–5 complete. 338/338 tests passing.**
 
 | Phase | Status | Notes |
 |-------|--------|-------|
@@ -32,7 +32,13 @@ Additional work:
   `EnemyStructureView::building` for claim construction; 13: Factories are built the same way,
   so those fields now apply to them too; 14 added shields: `UnitView::shield/shield_wait`,
   `EnemyView::shield`; 15: the unit cap scales with map area, which grows the snapshot buffer; 16 retired
-  `MoveAttack`: every Move fires, nothing halts it). Bumping it invalidates all existing replay files and every compiled bot.
+  `MoveAttack`: every Move fires, nothing halts it; 17: `init` gets a per-bot seed, `init(i32 faction_id,
+  i64 seed)` / `Bot::on_init(map, faction, seed)`, see "Bot seeds" below). Bumping it invalidates all existing replay files and every compiled bot.
+- **Bot seeds:** each bot gets its own seed at init, `game::bot_seed(match seed, faction)`
+  (`rng.hpp`): new each match (`ud_run`'s match seed is clock-based unless `--seed`), never
+  shared by the two sides, and the same again when a match is re-run with its seed. Bots may
+  use it to vary their play; the engine draws nothing from it (it isn't game state, so the
+  determinism invariants are untouched). The bot SDK ships `rng.cpp` so bots can use `game::Rng`.
 - The unit cap scales with the map: `cfg::unit_cap(w, h)` is `UNIT_CAP_PCT` (4%) of the area per
   side (queued ships count), so 256 on 80×80. `UNIT_HARD_CAP` is that cap on the largest map
   (655); it and `STRUCTURE_HARD_CAP` (128) bound the snapshot buffer, and the runner clamps to them
@@ -139,6 +145,11 @@ in waves (gather out of sight, then enemy claims, unfinished first, then the Cor
 army outweighs what it has seen; it fights enemy ships near its structures first. Ships fire
 only on a tick they are ordered to Move or Attack, so it orders every ship every tick, with
 focus fire via `target_id`.
+Its strategy knobs are an `AdaptiveStyle` (claimers, Factory timing, push and retreat
+margins, guard radius), varied each match from its init seed by up to `jitter_pct` (20%;
+counts by ±1), so no two seeds play the same game. `AggroBot` (`aggro_bot.hpp`: Factory at
+once, pushes when even, retreats late) and `BoomBot` (`boom_bot.hpp`: four claimers, Factory
+after three claims, wide guard, pushes only far ahead) are the same bot with other styles.
 Every fixture also builds as a `.wasm` bot from the same source (`fixtures/CMakeLists.txt`,
 wasi-sdk fetched by CMake, `sdk/cpp/include/ud/bot_host.hpp`) into `build/fixtures_wasm/`;
 `FixtureWasm.*` (`fixture_wasm_tests`) requires each to play exactly as natively, with no
@@ -159,6 +170,13 @@ by each unfinished structure; `ClaimLattice` hands out claim sites.
 `WasmBot` implements `game::Bot`. Loads `.wasm` files via Wasmtime C API, enforces fuel limits,
 validates ABI version before first tick. `load_wasm_file()` reads bytes; `WasmBot::healthy()`
 must be true before use.
+
+**Isolation (DESIGN §2.1a):** the linker is empty (no WASI or any host function), so a bot
+can't touch files, network, clock or environment; any import fails the load. Only one 32-bit
+memory and one table (`cfg::TABLE_CAP_ELEMENTS`) per store, via `wasmtime_store_limiter`;
+multi-memory, memory64, GC, function references, exceptions and stack switching are off.
+`Sandbox.*` tests try each way out: keep them passing, and keep new features off unless a bot
+needs them.
 
 **Forfeits:** a bot that runs out of fuel, traps, or tries to grow memory past
 `cfg::MEMORY_CAP_MB` (in init or any tick) **loses the match** (`WinReason::Forfeit`; both in
@@ -206,10 +224,12 @@ Standard match setup (Command Core + starting units on free tiles near each spaw
 | `ud_viz_nc` | ncurses renderer (optional, requires libncurses) |
 | `ud_viz_imgui` | Dear ImGui, isometric 2:1 projection (optional, requires libglfw3-dev). Z toggles claim zones, drawn with the engine's `territory_owners()`. Out-of-sight terrain is dimmed, never hidden (terrain is public). Resource nodes are amber crystal clusters, nebulae drifting violet gas (thin veil drawn over units inside); a Drone's cargo is a matching amber bar on its lower-left edge (HP is lower-right, with a cyan shield bar just inside it) |
 | `ud_shape_editor` | ImGui editor for unit/structure render shapes; reads/writes `.udshapes` files (`shape_model.hpp`) |
-| `Makefile.em` | Emscripten browser build → `viz/web/index.html`; drag-and-drop `.ud` files |
+| `Makefile.em` | Emscripten browser build of `ud_viz_imgui` itself (`imgui_main.cpp`, `web_version.cpp`) → `viz/web/index.html`; drag-and-drop `.ud` files. The page loads a replay by writing `/replay.ud` to the module's FS and calling `_load_replay_from_fs()` (the tournament site's watch page does this) |
 
 Both ImGui apps default to the repo's `shapes.udshapes` (path baked in via the `UD_SHAPES_FILE`
 CMake cache variable); override per run with `--shapes <file>`. `ud_viz_imgui` hot-reloads it on save.
+The browser build embeds `shapes.udshapes` at build time: rebuild it (`make -f Makefile.em`) after
+editing shapes.
 
 ImGui build fetches Dear ImGui v1.91.6 via CMake FetchContent. The browser build uses the same
 source; run `cmake -B build && cmake --build build` first to populate `build/_deps/`.

@@ -2,6 +2,7 @@
 #include "bot_iface.hpp"
 #include "config.hpp"
 #include "grid.hpp"
+#include "rng.hpp"
 #include "snapshot.hpp"
 #include "tick.hpp"
 #include "world.hpp"
@@ -53,10 +54,10 @@ MatchRecord run_match(World& world, Bot& bot_a, uint32_t faction_a, Bot& bot_b, 
     writer->begin(rec.replay);
 
   // Init bots
-  bot_a.on_init(world.map, faction_a);
+  bot_a.on_init(world.map, faction_a, bot_seed(world.rng_seed, faction_a));
   rec.replay.init_fuel_a     = bot_a.last_metrics().fuel_consumed;
   rec.replay.init_mem_bytes_a = bot_a.last_metrics().memory_bytes;
-  bot_b.on_init(world.map, faction_b);
+  bot_b.on_init(world.map, faction_b, bot_seed(world.rng_seed, faction_b));
   rec.replay.init_fuel_b     = bot_b.last_metrics().fuel_consumed;
   rec.replay.init_mem_bytes_b = bot_b.last_metrics().memory_bytes;
 
