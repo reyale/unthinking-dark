@@ -95,8 +95,8 @@ LDFLAGS := \
   -s USE_GLFW=3                                              \
   -s FULL_ES3=1                                              \
   -s ALLOW_MEMORY_GROWTH=1                                   \
-  -s EXPORTED_FUNCTIONS=_main,_load_replay_from_fs,_viewer_status,_viewer_control \
-  -s EXPORTED_RUNTIME_METHODS=FS,UTF8ToString                \
+  -s EXPORTED_FUNCTIONS=_main,_load_replay_from_fs,_viewer_status,_viewer_control,_viewer_set_names \
+  -s EXPORTED_RUNTIME_METHODS=FS,UTF8ToString,ccall          \
   -fexceptions                                               \
   --embed-file $(SHAPES)@/shapes.udshapes                    \
   --embed-file $(FONT)@/font.ttf                             \

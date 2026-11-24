@@ -57,6 +57,7 @@ struct Args {
   bool        seed_set{false};
   uint32_t    ticks{static_cast<uint32_t>(game::cfg::TICK_CAP)};
   bool        json{false};
+  std::string name_a, name_b; // empty: the bot's file name
 };
 
 [[noreturn]] static void usage(const char* prog, int code = 1) {
@@ -68,6 +69,8 @@ struct Args {
       "  --seed <N>           RNG seed            (default: time-based random)\n"
       "  --ticks <N>          tick cap            (default: %d)\n"
       "  --json               print the result as one JSON object\n"
+      "  --name-a <name>      side A's name in the replay (default: bot_a's file name)\n"
+      "  --name-b <name>      side B's name in the replay (default: bot_b's file name)\n"
       "  --version            print the build version and exit\n",
       prog, game::cfg::TICK_CAP);
   std::exit(code);
@@ -94,6 +97,8 @@ static Args parse_args(int argc, char** argv) {
     else if (!strcmp(argv[i], "--seed"))  { a.seed = std::stoull(need("--seed")); a.seed_set = true; }
     else if (!strcmp(argv[i], "--ticks")) a.ticks = static_cast<uint32_t>(std::stoul(need("--ticks")));
     else if (!strcmp(argv[i], "--json"))  a.json = true;
+    else if (!strcmp(argv[i], "--name-a")) a.name_a = need("--name-a");
+    else if (!strcmp(argv[i], "--name-b")) a.name_b = need("--name-b");
     else if (!strcmp(argv[i], "--help"))  usage(argv[0], 0);
     else { fprintf(stderr, "unknown option: %s\n", argv[i]); usage(argv[0]); }
   }
@@ -230,8 +235,9 @@ int main(int argc, char** argv) {
     return fail(args, "map", -1, e.what());
   }
 
-  const std::string name_a = basename_noext(args.bot_a);
-  const std::string name_b = basename_noext(args.bot_b);
+  // A harness that stores bots by hash names them; else the file names will do.
+  const std::string name_a = args.name_a.empty() ? basename_noext(args.bot_a) : args.name_a;
+  const std::string name_b = args.name_b.empty() ? basename_noext(args.bot_b) : args.name_b;
 
   if (!args.json) {
     printf("Map:   %s (%dx%d)\n", md.name.c_str(), md.map.width, md.map.height);

@@ -150,7 +150,7 @@ the buffer addresses, meters fuel, caps memory. `healthy()` must be true before 
 
 | Binary | Purpose |
 |--------|---------|
-| `ud_run` | One 1v1 match: `ud_run <a.wasm> <b.wasm> [--map f] [--out f] [--seed N] [--ticks N] [--json]`. `--json` is for the harness: result, per-side faults and stats, from replaying the frames (which also checks the replay reproduces the hash). |
+| `ud_run` | One 1v1 match: `ud_run <a.wasm> <b.wasm> [--map f] [--out f] [--seed N] [--ticks N] [--json] [--name-a S] [--name-b S]` (names default to the file names). `--json` is for the harness: result, per-side faults and stats, from replaying the frames (which also checks the replay reproduces the hash). |
 | `ud_mapgen` / `ud_mapcheck` | Generate / validate a map JSON. |
 | `gen_example_replay` | A fixture replay for tests. |
 | `ud_arena` | Balance arena: equal-value armies (pure and every mix) fight on an open field; prints margins and rankings. Logic in `arena.hpp/.cpp`, tested by `Arena.*` (mirror fights must stay exactly even). See `tools/README.md`. |
@@ -203,8 +203,9 @@ a pinned emsdk, ImGui and a Python ≥ 3.10). `index.html?replay=<url>&play=1` o
 The tournament site's watch page loads one by writing `/replay.ud` to the module's FS and
 calling `_load_replay_from_fs()`. A page embedding it reads `_viewer_status()` (JSON: frame,
 tick, play state, view, each side's territory, resources, units, claims; the result; `autocam`,
-`hud`) and drives `_viewer_control(op, value)` (play, seek, view, fps, zones, op 5 the HUD
-on/off, op 6 the auto camera); browser build only. The site depends on both: keep their names
+`hud`, `names`) and drives `_viewer_control(op, value)` (play, seek, view, fps, zones, op 5 the
+HUD on/off, op 6 the auto camera); `_viewer_set_names(a, b)` (via `ccall`) replaces the names a
+replay holds, which the site's are its bots' hashes; browser build only. The site depends on both: keep their names
 and JSON keys, and add rather than change.
 Both ImGui apps default to the repo's `shapes.udshapes` (`--shapes <file>` overrides;
 `ud_viz_imgui` hot-reloads it); the browser build embeds it and the HUD's font (Dear ImGui's

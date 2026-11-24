@@ -220,6 +220,9 @@ struct App {
   double last_t  = 0.0; // when the frame shown was stepped to, while playing
   char   path_buf[512] = {};
   std::string names[2] = {"TEAM A", "TEAM B"};
+  // Set by the page (viewer_set_names): a replay names its sides as the harness ran them, which
+  // may be file names; the page knows what people call them.
+  std::string name_override[2];
 
   // Camera: the tile at the middle of the free part of the window, and the tile width in
   // pixels. Eased toward the targets, which the auto camera or the mouse set.
@@ -477,6 +480,8 @@ static void try_load(const char* path) {
     compute_stats();
     g.names[0] = log.name_a.empty() ? "TEAM A" : upper(log.name_a);
     g.names[1] = log.name_b.empty() ? "TEAM B" : upper(log.name_b);
+    for (int f = 0; f < 2; ++f)
+      if (!g.name_override[f].empty()) g.names[f] = upper(g.name_override[f]);
     g.fx     = FxState{};
     g.cur    = 0;
     g.total  = static_cast<int>(g.frames.size());
@@ -2724,8 +2729,26 @@ extern "C" EMSCRIPTEN_KEEPALIVE const char* viewer_status() {
   } else {
     out += "null";
   }
-  out += "}";
+  out += ",\"names\":[";
+  for (int f = 0; f < 2; ++f) {
+    out += f ? ",\"" : "\"";
+    for (unsigned char c : g.names[f]) {
+      if (c == '"' || c == '\\') out += '\\';
+      if (c >= 0x20) out += static_cast<char>(c);
+    }
+    out += "\"";
+  }
+  out += "]}";
   return out.c_str();
+}
+
+// The sides' names to show, for this replay and any loaded after it; empty keeps the replay's.
+extern "C" EMSCRIPTEN_KEEPALIVE void viewer_set_names(const char* a, const char* b) {
+  const char* in[2] = {a, b};
+  for (int f = 0; f < 2; ++f) {
+    g.name_override[f] = in[f] ? in[f] : "";
+    if (!g.name_override[f].empty()) g.names[f] = upper(g.name_override[f]);
+  }
 }
 
 enum ViewerOp : int {
