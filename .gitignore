@@ -1,4 +1,6 @@
 build/
+# ...but not validate_bot.py's bot build, which is source.
+!prompts/build/
 build-cov/
 build-rel/
 build-web/

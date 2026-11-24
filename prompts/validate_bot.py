@@ -15,8 +15,9 @@
 Exit status: 0 passed, 1 didn't build, 2 faulted somewhere (the report says where).
 
 The engine comes from an install prefix (bin/ud_run, share/ai_game/...): --prefix, else
-$AI_GAME_PREFIX, else ../ai-game-install if it is current, else one built here once, in
-build-oneshot/ (a Release build and install: a few minutes the first time). Standard library
+$AI_GAME_PREFIX, else the install this script is part of (share/ai_game/prompts/), else
+../ai-game-install if it is current, else one built here once, in build-oneshot/ (a Release
+build and install: a few minutes the first time). Standard library
 only, so it runs anywhere the engine builds.
 """
 
@@ -34,6 +35,10 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
+# Installed, this script is <prefix>/share/ai_game/prompts/validate_bot.py: REPO is then
+# share/ai_game (prompts/build sits beside it all the same), and the engine is that prefix.
+INSTALL = REPO.parents[1]
+INSTALLED = (REPO / "bots").is_dir() and (INSTALL / "bin" / "ud_run").exists()
 CMAKE = shutil.which("cmake", path=f"{Path.home()}/.local/bin:{os.environ.get('PATH', '')}")
 # Generated maps besides the installed ones: a mid size, a big one, and the largest legal
 # board, where fuel and memory run highest (config.hpp MAP_MAX_W/H).
@@ -64,6 +69,8 @@ def find_prefix(arg: str | None) -> Path:
     for cand in (arg, os.environ.get("AI_GAME_PREFIX")):
         if cand:
             return Path(cand).resolve()
+    if INSTALLED:
+        return INSTALL
     sibling = (REPO.parent / "ai-game-install").resolve()
     if (sibling / "bin" / "ud_run").exists():
         mine = run(["git", "-C", REPO, "describe", "--tags", "--always", "--dirty"]).stdout.strip()

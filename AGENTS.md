@@ -48,7 +48,8 @@ library, so installed users get it too); a new tool calls `game::print_version_i
 ```
 `find_package(ai_game 0.1.0 REQUIRED)` (with `-DCMAKE_PREFIX_PATH=<dir>`) gives `ai_game::engine`,
 `ai_game::maps`, `ai_game::runner`, and `AI_GAME_BOTS_DIR` / `AI_GAME_MAPS_DIR` / `AI_GAME_WEB_DIR`
-(the fixture bots as `.wasm`, the maps, the browser viewer the tournament site serves). A Release
+(the fixture bots as `.wasm`, the maps, the browser viewer the tournament site serves), and
+`AI_GAME_PROMPTS_DIR` (all of `prompts/` but `entries/`). A Release
 build includes the viewer (`UD_WEB_VIEWER`, below), so its first configure fetches emsdk (~1.6 GB);
 `-DUD_EMSDK=<dir>` reuses one, `-DUD_WEB_VIEWER=OFF` skips it. Before copying anything, the
 install profiles every fixture bot it ships (`ud_profile`, all scenarios) and stops if one

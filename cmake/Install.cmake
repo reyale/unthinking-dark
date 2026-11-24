@@ -1,6 +1,7 @@
 # `cmake --install build --prefix <dir>` installs the engine, map and WASM-runner libraries with
 # their headers, a CMake package (find_package(ai_game) gives ai_game::engine, ai_game::maps and
-# ai_game::runner), the CLI tools, the maps, the fixture bots built as .wasm, and the bot SDK
+# ai_game::runner), the CLI tools, the maps, the fixture bots built as .wasm, the one-shot
+# prompt and its validator, and the bot SDK
 # (ai_game_add_bot(), cmake/ai_gameBot.cmake). For projects outside this repo: the tournament
 # harness, and bots.
 include(GNUInstallDirs)
@@ -33,8 +34,20 @@ function(ud_install_bot_sdk)
           DESTINATION ${UD_INSTALL_CMAKEDIR})
 endfunction()
 
+# prompts/ whole (the one-shot prompt, validate_bot.py and its bot build), so each engine
+# version carries the exact prompt its one-shot bots were written from (prompts/README.md),
+# and anything added there later goes too. Not entries/: the bots one-shot runs wrote here.
+function(ud_install_prompts)
+  install(DIRECTORY ${PROJECT_SOURCE_DIR}/prompts/ DESTINATION ${UD_INSTALL_DATADIR}/prompts
+          PATTERN entries EXCLUDE
+          PATTERN __pycache__ EXCLUDE
+          PATTERN *.py PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ
+                                   GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+endfunction()
+
 function(ud_install_package)
   ud_install_bot_sdk()
+  ud_install_prompts()
   foreach(_tool ${ARGN})
     if(TARGET ${_tool})
       install(TARGETS ${_tool} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

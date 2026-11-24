@@ -13,6 +13,8 @@ include("${CMAKE_CURRENT_LIST_DIR}/ai_gameTargets.cmake")
 # The fixture bots (.wasm) and the maps (.json).
 set(AI_GAME_BOTS_DIR "${PACKAGE_PREFIX_DIR}/@UD_INSTALL_DATADIR@/bots")
 set(AI_GAME_MAPS_DIR "${PACKAGE_PREFIX_DIR}/@UD_INSTALL_DATADIR@/maps")
+# The one-shot prompt (one_shot_bot.md) and validate_bot.py.
+set(AI_GAME_PROMPTS_DIR "${PACKAGE_PREFIX_DIR}/@UD_INSTALL_DATADIR@/prompts")
 set(AI_GAME_BIN_DIR "${PACKAGE_PREFIX_DIR}/@CMAKE_INSTALL_BINDIR@")
 # The browser replay viewer (index.html/.js/.wasm), when the install was built with it (Release).
 set(AI_GAME_WEB_DIR "${PACKAGE_PREFIX_DIR}/@UD_INSTALL_DATADIR@/web")

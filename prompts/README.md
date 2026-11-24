@@ -46,8 +46,14 @@ before it finishes. "One-shot" means one prompt and no human help, not one try a
    - every game not won.
 
 Exit 0 passed, 1 didn't build, 2 faulted. The engine comes from `--prefix`, else
-`$AI_GAME_PREFIX`, else `../ai-game-install` if it matches this checkout's `git describe`, else
-an install it builds once in `build-oneshot/` (ignored by git). `--quick` skips the profile and
+`$AI_GAME_PREFIX`, else the install it is part of (see below), else `../ai-game-install` if it
+matches this checkout's `git describe`, else an install it builds once in `build-oneshot/`
+(ignored by git).
+
+`cmake --install` copies this whole directory (all but `entries/`) to
+`<prefix>/share/ai_game/prompts/` (`AI_GAME_PROMPTS_DIR`), so every engine version carries the
+exact prompt its one-shot bots were written from; the copy of `validate_bot.py` there validates
+against that install. The prompt itself still sends the model to this repository's sources. `--quick` skips the profile and
 the generated maps while iterating. It needs only Python 3.8+ and CMake 3.20+ (it looks in
 `~/.local/bin` too).
 
