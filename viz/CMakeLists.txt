@@ -18,21 +18,29 @@ else()
 endif()
 
 # ---- Optional: Dear ImGui visualizer ----------------------------------------
-# Requires OpenGL and GLFW3 (e.g. apt install libglfw3-dev on Ubuntu).
-# Dear ImGui is fetched automatically via FetchContent.
+# The desktop build requires OpenGL and GLFW3 (e.g. apt install libglfw3-dev on Ubuntu); the
+# browser build (UD_WEB_VIEWER, cmake/WebViewer.cmake) needs neither. Dear ImGui is fetched
+# automatically via FetchContent for either.
 find_package(OpenGL QUIET)
 find_package(glfw3 3.3 QUIET)
+option(UD_WEB_VIEWER "Add the web_viewer target (fetches emsdk, ~1.6 GB)" OFF)
+
+include(FetchContent)
+FetchContent_Declare(imgui
+  GIT_REPOSITORY https://github.com/ocornut/imgui.git
+  GIT_TAG        v1.91.6   # any >= 1.87 should work; bump as desired
+  GIT_SHALLOW    TRUE
+)
+if((OpenGL_FOUND AND glfw3_FOUND) OR UD_WEB_VIEWER)
+  FetchContent_MakeAvailable(imgui)
+endif()
+if(UD_WEB_VIEWER)
+  include(${CMAKE_SOURCE_DIR}/cmake/WebViewer.cmake)
+  ud_add_web_viewer(${imgui_SOURCE_DIR})
+endif()
 
 if(OpenGL_FOUND AND glfw3_FOUND)
   message(STATUS "Found OpenGL and GLFW — building ud_viz_imgui")
-
-  include(FetchContent)
-  FetchContent_Declare(imgui
-    GIT_REPOSITORY https://github.com/ocornut/imgui.git
-    GIT_TAG        v1.91.6   # any >= 1.87 should work; bump as desired
-    GIT_SHALLOW    TRUE
-  )
-  FetchContent_MakeAvailable(imgui)
 
   add_library(ud_imgui STATIC
     ${imgui_SOURCE_DIR}/imgui.cpp

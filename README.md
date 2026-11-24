@@ -97,17 +97,20 @@ cd build && ctest --output-on-failure
 Build a self-contained `web/index.html` that runs in any browser — no install required for the viewer:
 
 ```bash
-# Prerequisites: emsdk activated, CMake build done once (fetches imgui/xxhash)
-cd viz && make -f Makefile.em
+# Fetches everything it needs at configure time: a pinned emsdk (~1.6 GB, once per build
+# dir), Dear ImGui, xxHash, and a Python >= 3.10 for emcc (via uv if the system's is older).
+~/.local/bin/cmake -B build-web -DCMAKE_BUILD_TYPE=Release -DUD_WASM_FIXTURES=OFF -DUD_WEB_VIEWER=ON
+~/.local/bin/cmake --build build-web --target web_viewer      # → viz/web/index.html
 
 # Serve locally and open http://localhost:8080
-make -f Makefile.em serve
+cd viz/web && python3 -m http.server 8080
 ```
 
 Drop any `.ud` replay file onto the page to load it. It is the desktop viewer (`ud_viz_imgui`)
 compiled for the browser, with the repo's `shapes.udshapes` built in: rebuild after editing shapes.
-If `python3` on the PATH is older than 3.10, pass a newer one: `make -f Makefile.em
-PYTHON310=~/.pyenv/versions/3.12.13/bin/python`.
+To reuse an emsdk you already have (with Emscripten 7.0.1 installed and activated), add
+`-DUD_EMSDK=~/emsdk`; `-DUD_PYTHON=<python>` picks the Python. `viz/Makefile.em` still runs by
+hand with `EMSDK_DIR=`, `PYTHON310=` and `IMGUI_DIR=`. Details: `cmake/WebViewer.cmake`.
 
 ## Coverage
 

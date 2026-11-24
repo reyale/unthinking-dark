@@ -23,7 +23,8 @@ cd build && ctest --output-on-failure
 
 `Determinism.*` must always pass. If it flakes, stop everything and fix it first.
 
-- Requires CMake ≥ 3.20 (system cmake is 3.16; use `~/.local/bin/cmake`, which is 4.x).
+- Requires CMake ≥ 3.20 (system cmake is 3.16; use `~/.local/bin/cmake`, which is 4.x; if it's
+  missing, `uv tool install cmake` puts it back).
 - Configuring downloads a pinned wasi-sdk (~120 MB, once) to build the fixture bots as `.wasm`;
   `-DUD_WASM_FIXTURES=OFF` skips it and the `fixture_wasm_tests`.
 - **Linux only** for the native build: the runner's capped bot memory uses `mmap`/`mprotect`, and
@@ -163,15 +164,17 @@ forfeit.
 
 `ud_viz` (terminal), `ud_viz_nc` (ncurses, optional), `ud_viz_imgui` (Dear ImGui, isometric,
 optional; Z toggles claim zones via `territory_owners()`), `ud_shape_editor` (edits `.udshapes`).
-`Makefile.em` builds `ud_viz_imgui` for the browser → `viz/web/`; the tournament site's watch page
-loads a replay by writing `/replay.ud` to the module's FS and calling `_load_replay_from_fs()`.
+`Makefile.em` builds `ud_viz_imgui` for the browser → `viz/web/`, run by the `web_viewer` target
+(`-DUD_WEB_VIEWER=ON`, `cmake/WebViewer.cmake`: fetches a pinned emsdk, ImGui and a Python ≥ 3.10).
+The tournament site's watch page loads a replay by writing `/replay.ud` to the module's FS and calling `_load_replay_from_fs()`.
 A page embedding it reads `_viewer_status()` (JSON: frame, tick, play state, view, each side's
 territory, resources, units, claims; the result) and drives `_viewer_control(op, value)` (play,
 seek, view, fps, zones, and op 5 hides the ImGui toolbars); browser build only. The site depends
 on both: keep their names and JSON keys, and add rather than change.
 Both ImGui apps default to the repo's `shapes.udshapes` (`--shapes <file>` overrides;
 `ud_viz_imgui` hot-reloads it); the browser build embeds it, so rebuild it after editing shapes.
-Dear ImGui v1.91.6 comes from FetchContent: configure the CMake build once before `Makefile.em`.
+Dear ImGui v1.91.6 comes from FetchContent. Emscripten is pinned (`UD_EMSDK_VERSION`); recent
+versions link the C++ runtime only through `em++`, which the Makefile uses.
 
 ### sdk/cpp/ — C++ bot SDK
 

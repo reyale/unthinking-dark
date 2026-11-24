@@ -1,6 +1,7 @@
 build/
 build-cov/
 build-rel/
+build-web/
 compile_commands.json
 Testing/
 *.ud

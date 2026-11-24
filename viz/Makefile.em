@@ -1,34 +1,26 @@
 # Builds the browser replay player via Emscripten.
 #
-# Prerequisites:
-#   1. emsdk installed and activated:
-#        git clone https://github.com/emscripten-core/emsdk.git ~/emsdk
-#        ~/emsdk/emsdk install latest && ~/emsdk/emsdk activate latest
-#        source ~/emsdk/emsdk_env.sh
+# Easiest: let CMake fetch every dependency (a pinned emsdk, Dear ImGui, xxHash, and a
+# Python >= 3.10 via uv if the system has none) and run this file with their paths:
+#   cmake -B ../build -DUD_WEB_VIEWER=ON && cmake --build ../build --target web_viewer
 #
-#   2. Dear ImGui and xxHash fetched (CMake FetchContent does this):
-#        cmake -B ../build && cmake --build ../build
-#
-# Usage:
-#   make -f Makefile.em          # build → web/index.html
+# By hand, with your own emsdk:
+#   make -f Makefile.em EMSDK_DIR=~/emsdk PYTHON310=/path/to/python3.12
 #   make -f Makefile.em serve    # build + serve at http://localhost:8080
 #   make -f Makefile.em clean
 
 OUTDIR := web
 
-# Auto-detect a Python >= 3.10 to invoke emcc.py, since Ubuntu 20.04 ships 3.8.
-# Override with: make -f Makefile.em EMCC=emcc  (if your PATH python3 is >= 3.10)
-EMCC_PY   := $(HOME)/emsdk/upstream/emscripten/emcc.py
-PYTHON310 := $(firstword $(shell which python3.12 2>/dev/null) \
+# emcc.py runs under a Python >= 3.10, which Ubuntu 20.04 doesn't ship, so find one or take it
+# from the command line. em++, not emcc: recent Emscripten links the C++ runtime only for em++.
+EMSDK_DIR ?= $(HOME)/emsdk
+EMCC_PY   := $(EMSDK_DIR)/upstream/emscripten/em++.py
+PYTHON310 ?= $(firstword $(shell which python3.12 2>/dev/null) \
                          $(shell which python3.11 2>/dev/null) \
                          $(shell which python3.10 2>/dev/null))
-ifneq ($(PYTHON310),)
-  EMCC := $(PYTHON310) $(EMCC_PY)
-  # emcc runs helpers (the file packager, for the embedded shapes) with this Python too.
-  export EMSDK_PYTHON := $(PYTHON310)
-else
-  EMCC ?= emcc
-endif
+EMCC := $(PYTHON310) $(EMCC_PY)
+# emcc runs helpers (the file packager, for the embedded shapes) with this Python too.
+export EMSDK_PYTHON := $(PYTHON310)
 
 # ---- Dependency locations ---------------------------------------------------
 # FetchContent places them here after the first CMake build.
@@ -121,23 +113,20 @@ $(OUTDIR):
 check-deps:
 	@test -f "$(EMCC_PY)" || { \
 	  echo ""; \
-	  echo "error: emsdk not found at ~/emsdk."; \
-	  echo "Install: git clone https://github.com/emscripten-core/emsdk.git ~/emsdk"; \
-	  echo "         ~/emsdk/emsdk install latest && ~/emsdk/emsdk activate latest"; \
+	  echo "error: emsdk not found at '$(EMSDK_DIR)'."; \
+	  echo "Configure with -DUD_WEB_VIEWER=ON to fetch it, or pass EMSDK_DIR=<dir>."; \
 	  echo ""; \
 	  exit 1; }
 	@test -n "$(PYTHON310)" || { \
 	  echo ""; \
 	  echo "error: Python 3.10+ not found (emscripten requires >= 3.10)."; \
-	  echo "Install: sudo add-apt-repository ppa:deadsnakes/ppa"; \
-	  echo "         sudo apt-get update && sudo apt-get install python3.12"; \
+	  echo "Configure with -DUD_WEB_VIEWER=ON (fetches one with uv), or pass PYTHON310=<python>."; \
 	  echo ""; \
 	  exit 1; }
 	@test -f "$(IMGUI_DIR)/imgui.cpp" || { \
 	  echo ""; \
 	  echo "error: Dear ImGui not found at '$(IMGUI_DIR)'."; \
-	  echo "Run this first to fetch dependencies:"; \
-	  echo "  cmake -B ../build && cmake --build ../build"; \
+	  echo "Configure with -DUD_WEB_VIEWER=ON to fetch it, or pass IMGUI_DIR=<dir>."; \
 	  echo ""; \
 	  exit 1; }
 	@test -f "$(XXHASH_DIR)/xxhash.h" || { \
