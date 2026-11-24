@@ -1,5 +1,6 @@
 #pragma once
 #include <compare>
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 #include <cassert>
@@ -42,6 +43,12 @@ constexpr bool is_passable(Terrain t) {
   return t != Terrain::Asteroid;
 }
 
+// Structures go on open ground or nebula: never on an asteroid, and never on a resource node,
+// which would make one tile both the harvest point and its drop-off.
+constexpr bool is_buildable(Terrain t) {
+  return is_passable(t) && t != Terrain::ResourceNode;
+}
+
 inline const char* terrain_type_name(Terrain t) {
   switch (t) {
   case Terrain::Open:         return "Open";
@@ -64,6 +71,7 @@ struct Map {
   bool in_bounds(Vec2 p) const { return p.x >= 0 && p.x < width && p.y >= 0 && p.y < height; }
 
   bool passable(Vec2 p) const { return in_bounds(p) && is_passable(tile_at(p).terrain); }
+  bool buildable(Vec2 p) const { return in_bounds(p) && is_buildable(tile_at(p).terrain); }
 
   const Tile& tile_at(Vec2 p) const {
     assert(in_bounds(p));

@@ -93,7 +93,9 @@ Read DESIGN.md for the full rules; this is the shape of it.
   - The Core produces Drones.
   - Factories produce ships.
   - Drones build Factories and deploy Claim Nodes, which take ticks of work with a Drone
-    nearby.
+    nearby. No structure goes on a resource node or an asteroid, and a claim must be at least
+    `cfg::CLAIM_MIN_SPACING` from your other claims (finished or not); a refused placement
+    costs nothing but wastes the Drone's tick.
   - Claims own the territory around them (nearest claim wins a tile), bank cargo, add Drone
     and Factory slots, and shoot weakly. They grow fragile as the match goes on.
 - **Ships:** several types, with different strengths and counters, and shields that recharge

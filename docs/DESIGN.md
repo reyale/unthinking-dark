@@ -290,10 +290,15 @@ for step in 1..=N:
   deducted. Insufficient resources → action fails (logged). Producing a Drone also fails at
   the **Drone cap**, and building a Factory at the **Factory cap** (§6).
 - Only Drones Build or DeployClaim (anything else is rejected at validation). Both need a
-  free target tile at this point (after movement): passable, no structure, no living unit.
-  The tile must also be near the Drone (Manhattan): within `BUILD_RANGE` (v1: 1) for a
-  Factory, `CLAIM_DEPLOY_RANGE` (v1: 2) for a Claim Node. Otherwise the action fails and
-  nothing is deducted. (There is no Gather command: harvesting is automatic. Its kind value
+  free target tile at this point (after movement): buildable terrain (open or nebula, never
+  an asteroid or a **resource node**: a structure on a node would be its own harvest point
+  and drop-off), no structure, no living unit. The tile must also be near the Drone
+  (Manhattan): within `BUILD_RANGE` (v1: 1) for a Factory, `CLAIM_DEPLOY_RANGE` (v1: 2) for
+  a Claim Node. A new claim must also be at least `CLAIM_MIN_SPACING` (v1: 6, half of
+  `CLAIM_INFLUENCE`) from every living claim of its own side, finished or not, including
+  one placed earlier the same tick; enemy claims don't count, so ground can still be
+  contested. Without it, claims stack to multiply Drone and Factory slots and drop-offs.
+  Otherwise the action fails and nothing is deducted. (There is no Gather command: harvesting is automatic. Its kind value
   is reserved and always rejected.)
 - **Construction** (Factories and Claim Nodes alike): a placed structure starts at
   `BUILD_START_HP` and needs `BUILD_TICKS` (v1: 20) ticks of work. It gets a tick of work
@@ -359,7 +364,7 @@ fires (v1: 6, Artillery's range), computed from the ship stats, so nothing can s
 from beyond its sight. Other structures are deliberately short-sighted: Frigates, Battleships and
 Artillery out-range them, so outlying claims and Factories can be shot from out of sight and
 need defending.
-| **Claim Node** | scales high→~1 over match | Voronoi territory anchor; **shoots, very weakly** once finished: `CLAIM_ATTACK_DMG` (v1: 1) per tick at the nearest enemy unit it can see within `CLAIM_ATTACK_RANGE` (v1: 2), enough to see off a lone scout at full claim hp but not two, and out-ranged by Frigates and Artillery; deployed by a Drone onto a tile within `CLAIM_DEPLOY_RANGE` (v1: 2) of itself, so Drones must travel to stake ground, and built over `BUILD_TICKS` while a Drone stays by it (§5 Phase 4); cracked by firepower (esp. Artillery splash) |
+| **Claim Node** | scales high→~1 over match | Voronoi territory anchor; **shoots, very weakly** once finished: `CLAIM_ATTACK_DMG` (v1: 1) per tick at the nearest enemy unit it can see within `CLAIM_ATTACK_RANGE` (v1: 2), enough to see off a lone scout at full claim hp but not two, and out-ranged by Frigates and Artillery; deployed by a Drone onto a tile within `CLAIM_DEPLOY_RANGE` (v1: 2) of itself, never on a resource node and at least `CLAIM_MIN_SPACING` (v1: 6) from its side's other claims, so Drones must travel to stake ground, and built over `BUILD_TICKS` while a Drone stays by it (§5 Phase 4); cracked by firepower (esp. Artillery splash) |
 
 **Resources (2 types, v1):**
 - **Energy** — gates combat ships (spent at Factory).

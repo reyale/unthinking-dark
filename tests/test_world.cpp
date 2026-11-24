@@ -500,6 +500,82 @@ TEST(Economy, PlacementOnAsteroidRejected) {
   }
 }
 
+TEST(Economy, PlacementOnResourceNodeRejected) {
+  for (const auto& pc : kPlaceCases) {
+    auto w = make_world();
+    w.map.set_terrain({4, 3}, game::Terrain::ResourceNode, 100);
+    game::UnitId builder = w.spawn_unit({0}, game::UnitType::Drone, {3, 3}).id;
+    fund(w, {0});
+    game::ValidatedCommands cmds, empty;
+    cmds.emplace(builder, place_cmd(builder, pc.kind, {4, 3}));
+    game::run_economy(w, cmds, empty);
+    EXPECT_EQ(count_structures(w, pc.made), 0);
+    EXPECT_EQ(w.res({0}).alloy, kFunds);
+  }
+}
+
+TEST(Economy, PlacementOnResourceNodeRejectedAtValidation) {
+  for (const auto& pc : kPlaceCases) {
+    auto w = make_world();
+    w.map.set_terrain({4, 3}, game::Terrain::ResourceNode, 100);
+    game::UnitId builder = w.spawn_unit({0}, game::UnitType::Drone, {3, 3}).id;
+    auto v = game::validate_commands(w, 0, {place_cmd(builder, pc.kind, {4, 3})});
+    EXPECT_TRUE(v.empty());
+  }
+}
+
+TEST(Economy, ClaimTooCloseToOwnClaimRejected) {
+  auto w = make_world();
+  const game::Vec2 first{2, 3};
+  w.spawn_structure({0}, game::StructureType::ClaimNode, first); // finished or not, it counts
+  const game::Vec2 near{first.x + game::cfg::CLAIM_MIN_SPACING - 1, first.y};
+  game::UnitId d = w.spawn_unit({0}, game::UnitType::Drone, {near.x + 1, near.y}).id;
+  fund(w, {0});
+  game::ValidatedCommands cmds, empty;
+  cmds.emplace(d, place_cmd(d, game::CommandKind::DeployClaim, near));
+  game::run_economy(w, cmds, empty);
+  EXPECT_EQ(count_structures(w, game::StructureType::ClaimNode), 1);
+  EXPECT_EQ(w.res({0}).alloy, kFunds);
+}
+
+TEST(Economy, ClaimAtMinSpacingAccepted) {
+  auto w = make_world();
+  const game::Vec2 first{2, 3};
+  w.spawn_structure({0}, game::StructureType::ClaimNode, first);
+  const game::Vec2 at{first.x + game::cfg::CLAIM_MIN_SPACING, first.y};
+  game::UnitId d = w.spawn_unit({0}, game::UnitType::Drone, {at.x + 1, at.y}).id;
+  fund(w, {0});
+  game::ValidatedCommands cmds, empty;
+  cmds.emplace(d, place_cmd(d, game::CommandKind::DeployClaim, at));
+  game::run_economy(w, cmds, empty);
+  EXPECT_EQ(count_structures(w, game::StructureType::ClaimNode), 2);
+}
+
+TEST(Economy, ClaimNextToEnemyClaimAccepted) {
+  auto w = make_world();
+  w.spawn_structure({1}, game::StructureType::ClaimNode, {4, 3});
+  game::UnitId d = w.spawn_unit({0}, game::UnitType::Drone, {3, 3}).id;
+  fund(w, {0});
+  game::ValidatedCommands cmds, empty;
+  cmds.emplace(d, place_cmd(d, game::CommandKind::DeployClaim, {3, 4}));
+  game::run_economy(w, cmds, empty);
+  EXPECT_EQ(count_structures(w, game::StructureType::ClaimNode), 2);
+}
+
+TEST(Economy, TwoClaimsTooCloseSameTickLowerIdWins) {
+  auto w = make_world();
+  game::UnitId first  = w.spawn_unit({0}, game::UnitType::Drone, {3, 3}).id;
+  game::UnitId second = w.spawn_unit({0}, game::UnitType::Drone, {6, 3}).id;
+  fund(w, {0});
+  game::ValidatedCommands cmds, empty;
+  cmds.emplace(first,  place_cmd(first,  game::CommandKind::DeployClaim, {4, 3}));
+  cmds.emplace(second, place_cmd(second, game::CommandKind::DeployClaim, {6, 4}));
+  game::run_economy(w, cmds, empty);
+  ASSERT_EQ(count_structures(w, game::StructureType::ClaimNode), 1);
+  EXPECT_EQ(w.structure_by_pos.count({4, 3}), 1u);
+  EXPECT_EQ(w.res({0}).alloy, kFunds - game::cfg::CLAIM_COST_A);
+}
+
 TEST(Economy, TwoPlacementsOnOneTileLowerIdWins) {
   for (const auto& pc : kPlaceCases) {
     auto w = make_world();

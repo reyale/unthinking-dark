@@ -101,6 +101,14 @@ static int32_t structure_count(const World& world, FactionId f) {
   return n;
 }
 
+static bool near_own_claim(const World& world, FactionId f, Vec2 pos) {
+  for (const auto& [sid, s] : world.structures)
+    if (s.alive() && s.faction == f && s.type == StructureType::ClaimNode &&
+        manhattan(s.pos, pos) < cfg::CLAIM_MIN_SPACING)
+      return true;
+  return false;
+}
+
 static void start_construction(Structure& s) {
   s.hp = cfg::BUILD_START_HP;
   s.build_ticks_left = cfg::BUILD_TICKS;
@@ -181,7 +189,7 @@ static void spend(World& world, const ValidatedCommands& cmds_a, const Validated
       // Checked here, after movement, rather than in validation: a tile vacated this
       // tick is buildable, and one just moved onto is not. Commands run in unit-id
       // order, so of two builds on one tile the lower id wins.
-      if (!world.tile_free({cmd.ax, cmd.ay}))
+      if (!world.map.buildable({cmd.ax, cmd.ay}) || !world.tile_free({cmd.ax, cmd.ay}))
         continue;
       auto& res = world.res(builder->faction);
       if (res.energy < cost_e || res.alloy < cost_a)
@@ -200,11 +208,16 @@ static void spend(World& world, const ValidatedCommands& cmds_a, const Validated
       // from where it stood when the bot decided.
       if (manhattan(builder->pos, {cmd.ax, cmd.ay}) > cfg::CLAIM_DEPLOY_RANGE)
         continue;
-      if (!world.tile_free({cmd.ax, cmd.ay}))
+      if (!world.map.buildable({cmd.ax, cmd.ay}) || !world.tile_free({cmd.ax, cmd.ay}))
+        continue;
+      // Claims placed earlier this tick are already in world.structures, so two Drones can't
+      // deploy side by side in one tick either.
+      if (near_own_claim(world, builder->faction, {cmd.ax, cmd.ay}))
         continue;
       auto& res = world.res(builder->faction);
-      if (res.alloy < cfg::CLAIM_COST_A)
+      if (res.energy < cfg::CLAIM_COST_E || res.alloy < cfg::CLAIM_COST_A)
         continue;
+      res.energy -= cfg::CLAIM_COST_E;
       res.alloy -= cfg::CLAIM_COST_A;
       start_construction(
           world.spawn_structure(builder->faction, StructureType::ClaimNode, {cmd.ax, cmd.ay}));

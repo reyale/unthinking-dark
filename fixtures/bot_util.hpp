@@ -743,7 +743,7 @@ public:
     for (int32_t y = 0; y < map.height; ++y)
       for (int32_t x = 0; x < map.width; ++x)
         if ((x - home.x) % spacing == 0 && (y - home.y) % spacing == 0 &&
-            map.passable({x, y}) && Vec2{x, y} != home)
+            map.buildable({x, y}) && Vec2{x, y} != home)
           sites_.push_back({x, y});
     std::stable_sort(sites_.begin(), sites_.end(), [&](Vec2 a, Vec2 b) {
       return manhattan(a, home) < manhattan(b, home);

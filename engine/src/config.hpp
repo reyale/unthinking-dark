@@ -159,6 +159,10 @@ inline constexpr int32_t CLAIM_COST_E = 0,        CLAIM_COST_A = 20;
 // A Drone deploys a Claim Node onto a tile within this Manhattan distance of itself.
 // v1 placeholder.
 inline constexpr int32_t CLAIM_DEPLOY_RANGE = 2;
+// A new claim must be at least this far (Manhattan) from every living claim of its own side,
+// finished or not, so claims can't be stacked to multiply Drone and Factory slots and drop-offs.
+// An enemy claim doesn't count: contesting ground means deploying next to theirs. v1 placeholder.
+inline constexpr int32_t CLAIM_MIN_SPACING = CLAIM_INFLUENCE / 2;
 // A Drone builds a Factory on a tile within this Manhattan distance of itself. v1 placeholder.
 inline constexpr int32_t BUILD_RANGE = 1;
 inline constexpr int32_t PRODUCTION_TICKS = 3; // Factory build time, every ship type (v1 placeholder)

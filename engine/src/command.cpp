@@ -78,7 +78,7 @@ ValidatedCommands validate_commands(const World& world, uint32_t faction_id,
       if (unit->type != UnitType::Drone)
         continue; // only Drones build (DESIGN §6)
       Vec2 target{cmd.ax, cmd.ay};
-      if (!world.map.passable(target))
+      if (!world.map.buildable(target))
         continue;
       break;
     }

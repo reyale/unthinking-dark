@@ -17,8 +17,9 @@ of engine interfaces that tests need to instantiate without caring about bot log
   spare) capped at six plus one per claim, spread out guarding claims; never attacks. Beats
   the turtle and the expander on territory and holds off the rush.
 - `turtle_bot.hpp` — `TurtleBot`: one Claim Node beside its base, combat units guard home.
-- `expander_bot.hpp` — `ExpanderBot`: grows to a few Drones and walks the
-  spare ones out to claim sites spreading from home; never attacks, so it can only win on
+- `expander_bot.hpp` — `ExpanderBot`: grows to a Drone per 1600 tiles of map (at
+  least four) and walks the spare ones out to claim sites spreading from home, on a lattice
+  that widens on big maps so the structure cap still covers half the map; never attacks, so it can only win on
   territory. Its opponent in `tests/test_turtle.cpp`.
 - `adaptive_bot.hpp` — `AdaptiveBot`: the combat fixture. Expands, builds Factories,
   counter-picks ships, scouts, ambushes from nebulae and pushes in waves at enemy claims and
