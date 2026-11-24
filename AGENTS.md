@@ -168,17 +168,46 @@ forfeit.
 ### viz/ — replay renderers
 
 `ud_viz` (terminal), `ud_viz_nc` (ncurses, optional), `ud_viz_imgui` (Dear ImGui, isometric,
-optional; Z toggles claim zones via `territory_owners()`), `ud_shape_editor` (edits `.udshapes`).
-`Makefile.em` builds `ud_viz_imgui` for the browser → `viz/web/`, run by the `web_viewer` target
+optional: needs GLFW), `ud_shape_editor` (edits `.udshapes`).
+
+`ud_viz_imgui` is the viewer people watch, on the desktop and (built by `Makefile.em`) in the
+browser. All of it is display only: it draws from `replay_frames()` and changes nothing.
+
+- **Look:** a board in space, lit additively (`begin_lights`/`glow`: lights, shots, blasts and
+  zone borders brighten what is under them). Cyan against orange (`kFactionA`/`kFactionB`,
+  `shape_model.hpp`): keep the two far apart, since the armies must never be mixed up; a ring in
+  the team's colour lies under every ship.
+- **Hulls:** each team has its own shape for every unit and structure (`ShapeSet`, team 0
+  angular, team 1 rounded), in `shapes.udshapes` (version 2: `team=`, `emit=` for lights,
+  `engine` points; a version 1 file is both teams' shape). The built-in ones are
+  `make_default_shape()`; `ud_viz_imgui --dump-shapes <file>` writes them out. Same stats, same
+  roles: a unit must read as the same thing in both.
+- **Motion:** units glide and turn between frames (`set_frame`, `build_draw_units`), shots leave
+  from where the ship is drawn, and effects are wall-clock, not extra frames. Everything reads
+  the one clock `g_now`.
+- **Camera:** drag pans, scroll zooms; the auto camera fits the map, and on one too big to read
+  (tiles under `kAutoMinCs`) goes to the hottest fight (`update_focus`, which looks ahead in
+  the replay). Below `kLodShapes` units are drawn as markers.
+- **HUD:** scoreboard (the territory race against the winning mark), timeline (fighting,
+  territory, losses; click to seek), controls, kill feed, result. Drawn in the viewer, not by
+  ImGui widgets.
+- **Checking a change:** `ud_viz_imgui replay.ud --screenshot out.ppm --frame N [--play SECS]
+  [--zoom PX] [--center X,Y] [--select X,Y] [--view V] [--size WxH] [--no-hud]` renders one
+  moment in a hidden window on a stepped clock, so it comes out the same every time. Look at
+  the picture: this code can't be tested any other way.
+
+`Makefile.em` builds it for the browser → `viz/web/`, run by the `web_viewer` target
 (`UD_WEB_VIEWER`, on for Release, part of `all` and the install; `cmake/WebViewer.cmake`: fetches
-a pinned emsdk, ImGui and a Python ≥ 3.10).
-The tournament site's watch page loads a replay by writing `/replay.ud` to the module's FS and calling `_load_replay_from_fs()`.
-A page embedding it reads `_viewer_status()` (JSON: frame, tick, play state, view, each side's
-territory, resources, units, claims; the result) and drives `_viewer_control(op, value)` (play,
-seek, view, fps, zones, and op 5 hides the ImGui toolbars); browser build only. The site depends
-on both: keep their names and JSON keys, and add rather than change.
+a pinned emsdk, ImGui and a Python ≥ 3.10). `index.html?replay=<url>&play=1` opens a replay.
+The tournament site's watch page loads one by writing `/replay.ud` to the module's FS and
+calling `_load_replay_from_fs()`. A page embedding it reads `_viewer_status()` (JSON: frame,
+tick, play state, view, each side's territory, resources, units, claims; the result; `autocam`,
+`hud`) and drives `_viewer_control(op, value)` (play, seek, view, fps, zones, op 5 the HUD
+on/off, op 6 the auto camera); browser build only. The site depends on both: keep their names
+and JSON keys, and add rather than change.
 Both ImGui apps default to the repo's `shapes.udshapes` (`--shapes <file>` overrides;
-`ud_viz_imgui` hot-reloads it); the browser build embeds it, so rebuild it after editing shapes.
+`ud_viz_imgui` hot-reloads it); the browser build embeds it and the HUD's font (Dear ImGui's
+Roboto), so rebuild it after editing shapes.
 Dear ImGui v1.91.6 comes from FetchContent. Emscripten is pinned (`UD_EMSDK_VERSION`); recent
 versions link the C++ runtime only through `em++`, which the Makefile uses.
 

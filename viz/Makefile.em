@@ -55,6 +55,7 @@ ENGINE_SRCS := \
 # The same isometric viewer as ud_viz_imgui, with the repo's shapes built in.
 VIZ_SRCS := imgui_main.cpp web_version.cpp
 SHAPES   := ../shapes.udshapes
+FONT     := $(IMGUI_DIR)/misc/fonts/Roboto-Medium.ttf
 VERSION  := $(shell git describe --tags --always --dirty 2>/dev/null || echo unknown)
 # The version is baked in, so a new commit must rebuild even when no source changed: the stamp
 # is rewritten only when the version differs, and index.html depends on it.
@@ -84,6 +85,7 @@ CXXFLAGS := \
   -DXXH_INLINE_ALL               \
   '-DImDrawIdx=unsigned int'     \
   -DUD_DEFAULT_SHAPES_PATH=\"/shapes.udshapes\" \
+  -DUD_FONT_PATH=\"/font.ttf\"  \
   -DUD_WEB_VERSION=\"$(VERSION)\" \
   -fexceptions                   \
   -ffp-contract=off -fno-fast-math \
@@ -97,6 +99,7 @@ LDFLAGS := \
   -s EXPORTED_RUNTIME_METHODS=FS,UTF8ToString                \
   -fexceptions                                               \
   --embed-file $(SHAPES)@/shapes.udshapes                    \
+  --embed-file $(FONT)@/font.ttf                             \
   --shell-file shell.html
 
 # ---- Targets ----------------------------------------------------------------
@@ -105,7 +108,7 @@ LDFLAGS := \
 
 all: check-deps $(OUTDIR)/index.html
 
-$(OUTDIR)/index.html: $(ALL_SRCS) $(wildcard *.hpp) $(SHAPES) shell.html Makefile.em \
+$(OUTDIR)/index.html: $(ALL_SRCS) $(wildcard *.hpp) $(SHAPES) $(FONT) shell.html Makefile.em \
                       $(VERSION_STAMP) | $(OUTDIR)
 	$(EMCC) $(CXXFLAGS) $(LDFLAGS) $(ALL_SRCS) -o $@
 	@echo ""

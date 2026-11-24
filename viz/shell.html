@@ -6,7 +6,7 @@
   <title>Unthinking Dark Replay</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
-    html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #0a0a0e; overflow: hidden; }
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #05060d; overflow: hidden; }
     canvas#canvas { display: block; width: 100vw; height: 100vh; }
 
     #boot-hint {
@@ -64,6 +64,7 @@
           Module.FS.writeFile('/replay.ud', data);
           Module._load_replay_from_fs();
           bootHint.classList.add('hidden');
+          if (window._autoplay) { Module._viewer_control(0, 1); window._autoplay = false; }
         } catch(e) {
           bootMsg.innerHTML = '<span style="color:#f66">Error: ' + e.message + '</span>';
         }
@@ -78,7 +79,7 @@
         spinner.textContent = '';
         bootMsg.innerHTML = 'Drop a <code>.ud</code> replay file here<br>'
           + '<label id="open-btn" for="file-input">Open replay…</label><br>'
-          + '<small style="color:#555">Space=play/pause &nbsp; ←/→=step &nbsp; U/G/0/1=view &nbsp; Scroll=zoom</small>';
+          + '<small style="color:#555">Space=play/pause &nbsp; ←/→=step &nbsp; drag=pan &nbsp; scroll=zoom &nbsp; C=auto camera</small>';
         if (window._pendingReplay) {
           _doLoad(window._pendingReplay);
           window._pendingReplay = null;
@@ -109,6 +110,23 @@
       _loadFile(e.target.files[0]);
       e.target.value = '';  // allow re-selecting the same file
     });
+
+    // index.html?replay=<url>[&play=1] opens a replay straight away: a link to one match.
+    (function() {
+      var params = new URLSearchParams(location.search);
+      var url = params.get('replay');
+      if (!url) return;
+      fetch(url).then(function(r) {
+        if (!r.ok) throw new Error(url + ': ' + r.status);
+        return r.arrayBuffer();
+      }).then(function(buf) {
+        var data = new Uint8Array(buf);
+        window._autoplay = params.get('play') === '1';
+        if (runtimeReady) _doLoad(data); else window._pendingReplay = data;
+      }).catch(function(e) {
+        bootMsg.innerHTML = '<span style="color:#f66">Error: ' + e.message + '</span>';
+      });
+    })();
 
     document.addEventListener('dragenter', function()  { document.body.classList.add('dragging'); });
     document.addEventListener('dragleave', function(e) {

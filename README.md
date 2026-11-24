@@ -90,6 +90,8 @@ cd build && ctest --output-on-failure
 
 # Watch the replay (Dear ImGui — isometric, requires GLFW)
 ./build/viz/ud_viz_imgui match.ud
+# Space play/pause, ←/→ step, drag to pan, scroll to zoom, F fit, C auto camera, Z zones,
+# U/G/0/1 whose sight to show, H hide the HUD; click the timeline to jump, a ship to inspect
 ```
 
 ## Browser replay viewer
@@ -108,8 +110,10 @@ Build a self-contained `web/index.html` that runs in any browser — no install 
 cd viz/web && python3 -m http.server 8080
 ```
 
-Drop any `.ud` replay file onto the page to load it. It is the desktop viewer (`ud_viz_imgui`)
-compiled for the browser, with the repo's `shapes.udshapes` built in: rebuild after editing shapes.
+Drop any `.ud` replay file onto the page to load it, or link straight to one:
+`index.html?replay=<url>&play=1`. It is the desktop viewer (`ud_viz_imgui`) compiled for the
+browser, with the repo's `shapes.udshapes` built in: rebuild after editing shapes. Each team
+has its own hulls there (`ud_shape_editor` edits both sets).
 To reuse an emsdk you already have (with Emscripten 7.0.1 installed and activated), add
 `-DUD_EMSDK=~/emsdk`; `-DUD_PYTHON=<python>` picks the Python. `viz/Makefile.em` still runs by
 hand with `EMSDK_DIR=`, `PYTHON310=` and `IMGUI_DIR=`. Details: `cmake/WebViewer.cmake`.

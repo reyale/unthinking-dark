@@ -34,16 +34,43 @@ static void draw_muzzle_marker(ImDrawList* dl, const UnitShapeDef& def, ImVec2 c
   dl->AddLine({m.x, m.y - r * 1.6f}, {m.x, m.y + r * 1.6f}, kMuzzleCol, 1.0f);
 }
 
-static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, int& facing,
+// Small rings where the exhausts are, so they can be placed against the hull.
+static void draw_engine_markers(ImDrawList* dl, const UnitShapeDef& def, ImVec2 ctr, float cw2,
+                                float ch2, int facing, float r) {
+  static const ImU32 kEngineCol = IM_COL32(120, 220, 255, 230);
+  for (const ShapePoint& e : def.engines) {
+    const ImVec2 v = rotate_facing(facing, {e.x, e.y});
+    dl->AddCircle(iso_project(ctr, cw2, ch2, v.x, v.y, e.z), r, kEngineCol, 0, 1.5f);
+  }
+}
+
+static const char* kTeamLabels[kTeamCount] = {"Team A (cyan)", "Team B (orange)"};
+
+// Painted as the viewer paints it, less the glow: a bright rim, and lights that shine.
+static ShapePaint team_paint(int team) {
+  const ImVec4 c = team_color(team);
+  ShapePaint paint;
+  paint.edge  = ImGui::ColorConvertFloat4ToU32({c.x + (1 - c.x) * 0.55f, c.y + (1 - c.y) * 0.55f,
+                                                c.z + (1 - c.z) * 0.55f, 0.75f});
+  paint.light = ImGui::ColorConvertFloat4ToU32({c.x + (1 - c.x) * 0.62f, c.y + (1 - c.y) * 0.62f,
+                                                c.z + (1 - c.z) * 0.62f, 1.0f});
+  return paint;
+}
+
+static void draw_shape_editor(const ImGuiIO& io, ShapeSet& set, int& team, int& sel, int& facing,
                                int& sel_prim, float& game_cs, char* save_path,
                                std::string& status) {
+  UnitShapeDef* defs = set.d[team];
   ImGui::SetNextWindowPos({0, 0});
   ImGui::SetNextWindowSize(io.DisplaySize);
   ImGui::Begin("##se", nullptr,
     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove |
     ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoBringToFrontOnFocus);
 
-  // Header bar
+  // Header bar: each team has its own shape for every unit and structure.
+  ImGui::SetNextItemWidth(150.f);
+  ImGui::Combo("##team", &team, kTeamLabels, kTeamCount);
+  ImGui::SameLine();
   ImGui::SetNextItemWidth(140.f);
   ImGui::Combo("##unit", &sel, [](void*, int i) { return shape_name(i); }, nullptr, kShapeCount);
   ImGui::SameLine();
@@ -51,15 +78,19 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
   ImGui::InputText("##sp", save_path, 512);
   ImGui::SameLine();
   if (ImGui::Button("Save"))
-    status = save_shapes(defs, save_path) ? "Saved." : "Save failed.";
+    status = save_shapes(set, save_path) ? "Saved." : "Save failed.";
   ImGui::SameLine();
   if (ImGui::Button("Load"))
-    status = load_shapes(defs, save_path) ? "Loaded." : "Load failed.";
+    status = load_shapes(set, save_path) ? "Loaded." : "Load failed.";
   ImGui::SameLine();
   if (ImGui::Button("Defaults")) {
-    for (int i = 0; i < kShapeCount; ++i)
-      defs[i] = make_default_shape(i);
+    make_default_shapes(set);
     status = "Reset to defaults.";
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Copy from other team")) {
+    defs[sel] = set.d[1 - team][sel];
+    status = "Copied this shape from the other team.";
   }
   if (!status.empty()) {
     ImGui::SameLine();
@@ -77,7 +108,8 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
   ImDrawList* dl = ImGui::GetWindowDrawList();
 
   static const ImU32 kPBg   = IM_COL32(18,  18,  26,  255);
-  const ImU32 kUCol = ImGui::ColorConvertFloat4ToU32(kFactionA);
+  const ImU32 kUCol = ImGui::ColorConvertFloat4ToU32(team_color(team));
+  const ShapePaint paint = team_paint(team);
   static const ImU32 kTileT = IM_COL32(38,  48,  60,  255);
   static const ImU32 kTileS = IM_COL32(25,  33,  42,  255);
   static const ImU32 kTileE = IM_COL32(0,   0,   0,   100);
@@ -128,9 +160,9 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
     float h_px = big_ch2 * sp.h;
     switch (sp.kind) {
     case PrimKind::Box:
-      hs.push_back({{anch.x + rfw*big_cw2, anch.y - h_px},               DragMode::ResizeWidth,  kHwCol});
-      hs.push_back({{anch.x,               anch.y + rfd*big_ch2 - h_px}, DragMode::ResizeDepth,  kHdCol});
-      hs.push_back({{anch.x,               anch.y - rfd*big_ch2 - h_px}, DragMode::ResizeHeight, kHhCol});
+      hs.push_back({{anch.x + rfw * big_cw2, anch.y - h_px}, DragMode::ResizeWidth, kHwCol});
+      hs.push_back({{anch.x, anch.y + rfd * big_ch2 - h_px}, DragMode::ResizeDepth, kHdCol});
+      hs.push_back({{anch.x, anch.y - rfd * big_ch2 - h_px}, DragMode::ResizeHeight, kHhCol});
       break;
     case PrimKind::Cylinder:
       hs.push_back({{anch.x + sp.fw*big_cw2, anch.y - h_px}, DragMode::ResizeDiameter, kHwCol});
@@ -229,7 +261,7 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
   dl->AddLine({big_ctr.x, big_ctr.y - big_ch2}, {big_ctr.x, big_ctr.y + big_ch2},
               IM_COL32(60, 60, 80, 120), 0.5f);
 
-  draw_unit_from_def(dl, big_ctr, big_cw2, big_ch2, def, kUCol, facing);
+  draw_unit_from_def(dl, big_ctr, big_cw2, big_ch2, def, kUCol, facing, paint);
 
   if (sel_prim >= 0 && sel_prim < static_cast<int>(def.prims.size())) {
     static const ImU32 kHiCol = IM_COL32(255, 220, 60, 200);
@@ -242,6 +274,7 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
     }
   }
   draw_muzzle_marker(dl, def, big_ctr, big_cw2, big_ch2, facing, 6.f);
+  draw_engine_markers(dl, def, big_ctr, big_cw2, big_ch2, facing, 5.f);
   {
     const char* hint = "click: select  drag: move  shift+drag: pz  "
                        "[cyan]=width  [green]=depth  [purple]=height";
@@ -250,7 +283,7 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
                 IM_COL32(160, 160, 160, 180), hint);
   }
 
-  // -- Game-scale strip: every shape, both factions, at the viewer's tile size --
+  // -- Game-scale strip: every shape, each team's own, at the viewer's tile size --
   {
     const float g_cw2 = game_cs * 0.5f, g_ch2 = game_cs * 0.25f;
     const float slot_w = preview_w / kShapeCount;
@@ -277,7 +310,8 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
         dl->AddTriangleFilled(t_top, t_rt, t_lt, kTileT);
         dl->AddTriangleFilled(t_rt, t_bot, t_lt, kTileS);
         dl->AddQuad(t_top, t_rt, t_bot, t_lt, kTileE, 0.5f);
-        draw_unit_from_def(dl, c, g_cw2, g_ch2, defs[u], fcol[fct], facing);
+        draw_unit_from_def(dl, c, g_cw2, g_ch2, set.d[fct][u], fcol[fct], facing,
+                           team_paint(fct));
       }
       const char* nm = shape_name(u);
       dl->AddText({sp0.x + 4.f, sp0.y + 3.f},
@@ -305,7 +339,7 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
                   active ? IM_COL32(255,220,60,200) : IM_COL32(60,60,80,120),
                   0, 0, active ? 1.5f : 0.8f);
       ImVec2 mctr = {mp0.x + (mini_w - 2.f) * 0.5f, mp0.y + (dir_bar_h - 2.f) * 0.65f};
-      draw_unit_from_def(dl, mctr, mini_cw2, mini_ch2, def, kUCol, d);
+      draw_unit_from_def(dl, mctr, mini_cw2, mini_ch2, def, kUCol, d, paint);
       draw_muzzle_marker(dl, def, mctr, mini_cw2, mini_ch2, d, 3.f);
       ImVec2 lsz = ImGui::CalcTextSize(kFacingLabels[d]);
       dl->AddText({mp0.x + ((mini_w - 2.f) - lsz.x) * 0.5f, mp0.y + 4.f},
@@ -371,6 +405,7 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
     ImGui::SameLine(); ImGui::Checkbox("sym", &p.sym);
     ImGui::SliderFloat("pz",  &p.pz,  0.0f, 3.0f, "%.3f");
     ImGui::SliderFloat("dim", &p.dim, 0.3f,  1.0f, "%.2f");
+    ImGui::SliderFloat("light", &p.emit, 0.0f, 1.0f, "%.2f"); // above 0 it shines and glows
     ImGui::Separator();
 
     ImGui::PopID();
@@ -407,6 +442,22 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
     ImGui::PopID();
   }
 
+  ImGui::Separator();
+  ImGui::Text("Engines (glow, and trail when moving)");
+  int remove_engine = -1;
+  for (int ei = 0; ei < static_cast<int>(def.engines.size()); ++ei) {
+    ShapePoint& e = def.engines[ei];
+    ImGui::PushID(1000 + ei);
+    ImGui::SliderFloat("px", &e.x, -1.0f, 1.0f, "%.3f");
+    ImGui::SliderFloat("py", &e.y, -1.0f, 1.0f, "%.3f");
+    ImGui::SliderFloat("pz", &e.z,  0.0f, 3.0f, "%.3f");
+    if (ImGui::SmallButton("Remove engine")) remove_engine = ei;
+    ImGui::Separator();
+    ImGui::PopID();
+  }
+  if (remove_engine >= 0) def.engines.erase(def.engines.begin() + remove_engine);
+  if (ImGui::Button("+ Engine")) def.engines.push_back({0.0f, 0.35f, 0.4f});
+
   ImGui::EndChild();
   ImGui::End();
 }
@@ -414,7 +465,8 @@ static void draw_shape_editor(const ImGuiIO& io, UnitShapeDef* defs, int& sel, i
 // ---- App state ------------------------------------------------------------
 
 struct App {
-  UnitShapeDef shape_defs[kShapeCount];
+  ShapeSet     shapes;
+  int          team       = 0;
   int          sel_shape  = 0;
   int          sel_prim   = 0;
   int          facing     = 0;
@@ -430,9 +482,7 @@ int main(int argc, char** argv) {
   if (argc >= 2)
     strncpy(g.shape_path, argv[1], sizeof(g.shape_path) - 1);
 
-  if (!load_shapes(g.shape_defs, g.shape_path))
-    for (int i = 0; i < kShapeCount; ++i)
-      g.shape_defs[i] = make_default_shape(i);
+  if (!load_shapes(g.shapes, g.shape_path)) make_default_shapes(g.shapes);
 
   if (!glfwInit()) { fprintf(stderr, "glfwInit failed\n"); return 1; }
   glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
@@ -458,13 +508,14 @@ int main(int argc, char** argv) {
     ImGuiIO& io = ImGui::GetIO();
 
     // Without the WantTextInput check, typing 'q' into the path box quits and drops edits.
-    if (!io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Q)) glfwSetWindowShouldClose(win, GLFW_TRUE);
+    if (!io.WantTextInput && ImGui::IsKeyPressed(ImGuiKey_Q))
+      glfwSetWindowShouldClose(win, GLFW_TRUE);
 
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
-    draw_shape_editor(io, g.shape_defs, g.sel_shape, g.facing,
+    draw_shape_editor(io, g.shapes, g.team, g.sel_shape, g.facing,
                       g.sel_prim, g.game_cs, g.shape_path, g.shape_status);
 
     ImGui::Render();

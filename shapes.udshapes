@@ -1,21 +1,24 @@
-version 1
-unit 0 Drone
+version 2
+unit 0 Drone team=0
 circle px=0.0000 py=0.0000 pz=0.0000 r=0.2600 dim=0.2200 sym=0
 block px=0.0000 py=0.0700 pz=0.2200 fw=0.3200 fd=0.3600 h=0.3800 dim=1.0000 sym=0
 wedge px=0.0000 py=-0.2000 pz=0.2200 fw=0.3200 fd=0.2000 h=0.3800 dim=0.9000 sym=0
 cylinder px=-0.2300 py=0.0700 pz=0.2000 fw=0.1700 fd=0.0000 h=0.3600 dim=0.6500 sym=0
 cylinder px=0.2300 py=0.0700 pz=0.2000 fw=0.1700 fd=0.0000 h=0.3600 dim=0.6500 sym=0
-sphere px=0.0000 py=0.0300 pz=0.7400 r=0.0800 dim=1.0000 sym=0
-unit 1 Interceptor
+sphere px=0.0000 py=0.0300 pz=0.7400 r=0.0800 dim=1.0000 sym=0 emit=0.8000
+engine px=0.0000 py=0.2700 pz=0.4000
+unit 1 Interceptor team=0
 circle px=0.0000 py=0.0000 pz=0.0000 r=0.2400 dim=0.2200 sym=0
 wedge px=0.0000 py=-0.0200 pz=0.4000 fw=0.2400 fd=0.7800 h=0.2400 dim=1.0000 sym=0
 wedge px=-0.1700 py=0.1600 pz=0.4000 fw=0.2000 fd=0.4000 h=0.0800 dim=0.7500 sym=0
 wedge px=0.1700 py=0.1600 pz=0.4000 fw=0.2000 fd=0.4000 h=0.0800 dim=0.7500 sym=0
 cylinder px=-0.0700 py=0.3000 pz=0.3800 fw=0.1000 fd=0.0000 h=0.2400 dim=0.5500 sym=0
 cylinder px=0.0700 py=0.3000 pz=0.3800 fw=0.1000 fd=0.0000 h=0.2400 dim=0.5500 sym=0
-sphere px=0.0000 py=0.0200 pz=0.7000 r=0.0700 dim=1.0000 sym=0
+sphere px=0.0000 py=0.0200 pz=0.7000 r=0.0700 dim=1.0000 sym=0 emit=0.7000
 muzzle px=0.0000 py=-0.4000 pz=0.5000
-unit 2 Frigate
+engine px=-0.0700 py=0.3800 pz=0.5000
+engine px=0.0700 py=0.3800 pz=0.5000
+unit 2 Frigate team=0
 circle px=0.0000 py=0.0000 pz=0.0000 r=0.3600 dim=0.2200 sym=0
 block px=0.0000 py=0.1000 pz=0.2500 fw=0.4200 fd=0.5000 h=0.4200 dim=1.0000 sym=0
 wedge px=0.0000 py=-0.2900 pz=0.2500 fw=0.4200 fd=0.2800 h=0.4200 dim=0.9500 sym=0
@@ -24,15 +27,20 @@ cylinder px=0.0000 py=-0.1000 pz=0.6700 fw=0.2000 fd=0.0000 h=0.1800 dim=0.9000 
 block px=0.0000 py=-0.3000 pz=0.7600 fw=0.0500 fd=0.2600 h=0.0600 dim=0.7000 sym=0
 cylinder px=-0.1300 py=0.3800 pz=0.2800 fw=0.1300 fd=0.0000 h=0.3200 dim=0.5500 sym=0
 cylinder px=0.1300 py=0.3800 pz=0.2800 fw=0.1300 fd=0.0000 h=0.3200 dim=0.5500 sym=0
+sphere px=0.0000 py=0.2000 pz=1.1300 r=0.0500 dim=1.0000 sym=0 emit=0.8000
 muzzle px=0.0000 py=-0.4300 pz=0.7900
-unit 3 Artillery
+engine px=-0.1300 py=0.4800 pz=0.4400
+engine px=0.1300 py=0.4800 pz=0.4400
+unit 3 Artillery team=0
 circle px=0.0000 py=0.0000 pz=0.0000 r=0.3200 dim=0.2200 sym=0
 block px=0.0000 py=0.1200 pz=0.2000 fw=0.4400 fd=0.4200 h=0.3400 dim=0.9000 sym=0
 cylinder px=0.0000 py=0.1000 pz=0.5400 fw=0.3000 fd=0.0000 h=0.2400 dim=1.0000 sym=0
 block px=0.0000 py=-0.2400 pz=0.7000 fw=0.0700 fd=0.6200 h=0.0800 dim=0.7500 sym=0
 block px=0.0000 py=0.3000 pz=0.5400 fw=0.2200 fd=0.1200 h=0.2200 dim=0.6000 sym=0
+sphere px=0.0000 py=0.1000 pz=0.8400 r=0.0500 dim=1.0000 sym=0 emit=0.8000
 muzzle px=0.0000 py=-0.5500 pz=0.7400
-unit 4 Battleship
+engine px=0.0000 py=0.3600 pz=0.3600
+unit 4 Battleship team=0
 circle px=0.0000 py=0.0000 pz=0.0000 r=0.4800 dim=0.2200 sym=0
 block px=0.0000 py=0.1000 pz=0.2200 fw=0.6200 fd=0.6600 h=0.5000 dim=1.0000 sym=0
 wedge px=0.0000 py=-0.3800 pz=0.2200 fw=0.6200 fd=0.3200 h=0.5000 dim=0.9500 sym=0
@@ -43,8 +51,11 @@ block px=-0.0400 py=-0.4000 pz=0.8000 fw=0.0400 fd=0.2600 h=0.0600 dim=0.7000 sy
 block px=0.0400 py=-0.4000 pz=0.8000 fw=0.0400 fd=0.2600 h=0.0600 dim=0.7000 sym=0
 cylinder px=-0.1500 py=0.4400 pz=0.3000 fw=0.1200 fd=0.0000 h=0.3000 dim=0.5500 sym=0
 cylinder px=0.1500 py=0.4400 pz=0.3000 fw=0.1200 fd=0.0000 h=0.3000 dim=0.5500 sym=0
+sphere px=0.0000 py=0.2600 pz=1.6300 r=0.0600 dim=1.0000 sym=0 emit=0.8000
 muzzle px=0.0000 py=-0.5300 pz=0.8300
-structure 0 Command Core
+engine px=-0.1500 py=0.5300 pz=0.4500
+engine px=0.1500 py=0.5300 pz=0.4500
+structure 0 Command Core team=0
 block px=0.0000 py=0.0000 pz=0.0000 fw=0.8600 fd=0.8600 h=0.3000 dim=0.6500 sym=0
 cylinder px=-0.3100 py=-0.3100 pz=0.3000 fw=0.1100 fd=0.0000 h=0.5500 dim=0.8000 sym=0
 cylinder px=0.3100 py=-0.3100 pz=0.3000 fw=0.1100 fd=0.0000 h=0.5500 dim=0.8000 sym=0
@@ -52,18 +63,90 @@ cylinder px=-0.3100 py=0.3100 pz=0.3000 fw=0.1100 fd=0.0000 h=0.5500 dim=0.8000 
 cylinder px=0.3100 py=0.3100 pz=0.3000 fw=0.1100 fd=0.0000 h=0.5500 dim=0.8000 sym=0
 cylinder px=0.0000 py=0.0000 pz=0.3000 fw=0.6200 fd=0.0000 h=0.7000 dim=1.0000 sym=0
 cylinder px=0.0000 py=0.0000 pz=1.0000 fw=0.4400 fd=0.0000 h=0.3000 dim=0.8500 sym=0
-sphere px=0.0000 py=0.0000 pz=1.4200 r=0.1900 dim=1.0000 sym=0
+sphere px=0.0000 py=0.0000 pz=1.4200 r=0.1900 dim=1.0000 sym=0 emit=1.0000
 cylinder px=0.0000 py=0.0000 pz=1.5500 fw=0.0500 fd=0.0000 h=0.7500 dim=0.9000 sym=0
-structure 1 Factory
+structure 1 Factory team=0
 block px=0.0000 py=0.0000 pz=0.0000 fw=0.8600 fd=0.8600 h=0.1800 dim=0.6000 sym=0
 block px=-0.0800 py=0.0600 pz=0.1800 fw=0.5600 fd=0.6000 h=0.5500 dim=1.0000 sym=0
 block px=0.2700 py=0.1400 pz=0.1800 fw=0.2200 fd=0.4000 h=0.3200 dim=0.8000 sym=0
 cylinder px=0.2000 py=-0.2600 pz=0.1800 fw=0.1300 fd=0.0000 h=1.1000 dim=0.7500 sym=0
 cylinder px=0.0200 py=-0.3000 pz=0.1800 fw=0.1100 fd=0.0000 h=0.8500 dim=0.7500 sym=0
-structure 2 Claim Node
+sphere px=-0.0800 py=0.0600 pz=0.8000 r=0.0700 dim=1.0000 sym=0 emit=0.8000
+structure 2 Claim Node team=0
 cylinder px=0.0000 py=0.0000 pz=0.0000 fw=0.4600 fd=0.0000 h=0.1400 dim=0.6500 sym=0
 cylinder px=-0.1600 py=0.1000 pz=0.1400 fw=0.0700 fd=0.0000 h=0.3500 dim=0.7500 sym=0
 cylinder px=0.1600 py=0.1000 pz=0.1400 fw=0.0700 fd=0.0000 h=0.3500 dim=0.7500 sym=0
 cylinder px=0.0000 py=-0.1900 pz=0.1400 fw=0.0700 fd=0.0000 h=0.3500 dim=0.7500 sym=0
 cylinder px=0.0000 py=0.0000 pz=0.1400 fw=0.1000 fd=0.0000 h=1.2500 dim=0.9000 sym=0
-sphere px=0.0000 py=0.0000 pz=1.5200 r=0.1300 dim=1.0000 sym=0
+sphere px=0.0000 py=0.0000 pz=1.5200 r=0.1300 dim=1.0000 sym=0 emit=1.0000
+unit 0 Drone team=1
+circle px=0.0000 py=0.0000 pz=0.0000 r=0.2600 dim=0.2200 sym=0
+cylinder px=0.0000 py=0.0200 pz=0.2000 fw=0.2700 fd=0.0000 h=0.3200 dim=1.0000 sym=0
+block px=-0.1300 py=-0.2500 pz=0.2400 fw=0.0700 fd=0.1800 h=0.1000 dim=0.7000 sym=0
+block px=0.1300 py=-0.2500 pz=0.2400 fw=0.0700 fd=0.1800 h=0.1000 dim=0.7000 sym=0
+cylinder px=0.0000 py=0.2500 pz=0.2200 fw=0.1000 fd=0.0000 h=0.2000 dim=0.6000 sym=0
+sphere px=0.0000 py=0.0200 pz=0.6400 r=0.1300 dim=1.0000 sym=0 emit=0.7500
+engine px=0.0000 py=0.3200 pz=0.3400
+unit 1 Interceptor team=1
+circle px=0.0000 py=0.0000 pz=0.0000 r=0.2400 dim=0.2200 sym=0
+block px=-0.1500 py=0.0000 pz=0.3800 fw=0.1100 fd=0.6000 h=0.1600 dim=1.0000 sym=0
+block px=0.1500 py=0.0000 pz=0.3800 fw=0.1100 fd=0.6000 h=0.1600 dim=1.0000 sym=0
+block px=0.0000 py=0.0600 pz=0.4100 fw=0.3000 fd=0.1600 h=0.1000 dim=0.8000 sym=0
+sphere px=0.0000 py=0.0400 pz=0.6300 r=0.1000 dim=1.0000 sym=0 emit=0.7000
+muzzle px=0.0000 py=-0.3000 pz=0.5000
+engine px=-0.1500 py=0.3200 pz=0.4600
+engine px=0.1500 py=0.3200 pz=0.4600
+unit 2 Frigate team=1
+circle px=0.0000 py=0.0000 pz=0.0000 r=0.3600 dim=0.2200 sym=0
+block px=0.0000 py=-0.2700 pz=0.2500 fw=0.5600 fd=0.2000 h=0.3600 dim=1.0000 sym=0
+block px=0.0000 py=0.0400 pz=0.2500 fw=0.2600 fd=0.4600 h=0.3600 dim=0.9000 sym=0
+cylinder px=0.0000 py=0.3000 pz=0.2200 fw=0.2800 fd=0.0000 h=0.4400 dim=0.8500 sym=0
+cylinder px=0.0000 py=-0.0400 pz=0.6100 fw=0.1600 fd=0.0000 h=0.1800 dim=0.9500 sym=0
+block px=0.0000 py=-0.2500 pz=0.6800 fw=0.0600 fd=0.2800 h=0.0600 dim=0.7000 sym=0
+sphere px=0.0000 py=0.3000 pz=0.8000 r=0.0700 dim=1.0000 sym=0 emit=0.8000
+muzzle px=0.0000 py=-0.4000 pz=0.7100
+engine px=0.0000 py=0.5000 pz=0.4400
+unit 3 Artillery team=1
+circle px=0.0000 py=0.0000 pz=0.0000 r=0.3400 dim=0.2200 sym=0
+cylinder px=0.0000 py=0.0800 pz=0.1800 fw=0.3800 fd=0.0000 h=0.3000 dim=0.9000 sym=0
+cylinder px=0.0000 py=0.0800 pz=0.4800 fw=0.2400 fd=0.0000 h=0.2600 dim=1.0000 sym=0
+block px=0.0000 py=-0.2000 pz=0.6000 fw=0.1400 fd=0.5200 h=0.1400 dim=0.8000 sym=0
+block px=-0.2200 py=0.3000 pz=0.4800 fw=0.1000 fd=0.1400 h=0.2000 dim=0.6000 sym=0
+block px=0.2200 py=0.3000 pz=0.4800 fw=0.1000 fd=0.1400 h=0.2000 dim=0.6000 sym=0
+sphere px=0.0000 py=0.0800 pz=0.8200 r=0.0600 dim=1.0000 sym=0 emit=0.8000
+muzzle px=0.0000 py=-0.4800 pz=0.6700
+engine px=0.0000 py=0.3600 pz=0.3000
+unit 4 Battleship team=1
+circle px=0.0000 py=0.0000 pz=0.0000 r=0.5000 dim=0.2200 sym=0
+block px=0.0000 py=0.0600 pz=0.2200 fw=0.6400 fd=0.7200 h=0.4600 dim=1.0000 sym=0
+cylinder px=0.0000 py=-0.3000 pz=0.2200 fw=0.4000 fd=0.0000 h=0.4600 dim=0.9500 sym=0
+cylinder px=0.0000 py=0.1600 pz=0.6800 fw=0.2600 fd=0.0000 h=0.3000 dim=0.8500 sym=0
+cylinder px=0.0000 py=-0.2400 pz=0.6800 fw=0.1700 fd=0.0000 h=0.1600 dim=0.9000 sym=0
+block px=-0.0500 py=-0.4400 pz=0.7600 fw=0.0500 fd=0.2800 h=0.0600 dim=0.7000 sym=0
+block px=0.0500 py=-0.4400 pz=0.7600 fw=0.0500 fd=0.2800 h=0.0600 dim=0.7000 sym=0
+cylinder px=-0.2000 py=0.4400 pz=0.3000 fw=0.1100 fd=0.0000 h=0.3000 dim=0.5500 sym=0
+cylinder px=0.2000 py=0.4400 pz=0.3000 fw=0.1100 fd=0.0000 h=0.3000 dim=0.5500 sym=0
+sphere px=0.0000 py=0.1600 pz=1.1400 r=0.1300 dim=1.0000 sym=0 emit=0.8000
+muzzle px=0.0000 py=-0.5800 pz=0.7900
+engine px=-0.2000 py=0.5300 pz=0.4500
+engine px=0.2000 py=0.5300 pz=0.4500
+structure 0 Command Core team=1
+block px=0.0000 py=0.0000 pz=0.0000 fw=0.9000 fd=0.9000 h=0.2200 dim=0.6000 sym=0
+cylinder px=0.0000 py=0.0000 pz=0.2200 fw=0.5600 fd=0.0000 h=0.5000 dim=1.0000 sym=0
+sphere px=-0.3300 py=-0.3300 pz=0.4200 r=0.1300 dim=0.8500 sym=0
+sphere px=0.3300 py=-0.3300 pz=0.4200 r=0.1300 dim=0.8500 sym=0
+sphere px=-0.3300 py=0.3300 pz=0.4200 r=0.1300 dim=0.8500 sym=0
+sphere px=0.3300 py=0.3300 pz=0.4200 r=0.1300 dim=0.8500 sym=0
+cylinder px=0.0000 py=0.0000 pz=0.7200 fw=0.3600 fd=0.0000 h=0.2400 dim=0.8500 sym=0
+sphere px=0.0000 py=0.0000 pz=1.2500 r=0.3000 dim=1.0000 sym=0 emit=0.9000
+structure 1 Factory team=1
+block px=0.0000 py=0.0000 pz=0.0000 fw=0.8600 fd=0.8600 h=0.1800 dim=0.6000 sym=0
+cylinder px=-0.1600 py=0.1200 pz=0.1800 fw=0.3200 fd=0.0000 h=0.6000 dim=1.0000 sym=0
+cylinder px=0.2000 py=-0.1600 pz=0.1800 fw=0.2400 fd=0.0000 h=0.4200 dim=0.8500 sym=0
+block px=0.2000 py=0.2400 pz=0.1800 fw=0.3000 fd=0.2600 h=0.3000 dim=0.8000 sym=0
+sphere px=-0.1600 py=0.1200 pz=0.9300 r=0.0900 dim=1.0000 sym=0 emit=0.8000
+structure 2 Claim Node team=1
+cylinder px=0.0000 py=0.0000 pz=0.0000 fw=0.4000 fd=0.0000 h=0.1800 dim=0.6500 sym=0
+cylinder px=0.0000 py=0.0000 pz=0.1800 fw=0.2000 fd=0.0000 h=0.5500 dim=0.9000 sym=0
+cylinder px=0.0000 py=0.0000 pz=0.7300 fw=0.3000 fd=0.0000 h=0.1000 dim=0.7500 sym=0
+sphere px=0.0000 py=0.0000 pz=1.1000 r=0.1900 dim=1.0000 sym=0 emit=1.0000

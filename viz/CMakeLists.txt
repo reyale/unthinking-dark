@@ -76,7 +76,9 @@ if(OpenGL_FOUND AND glfw3_FOUND)
     ${CMAKE_SOURCE_DIR}/engine/src
   )
   target_link_libraries(ud_viz_imgui PRIVATE engine ud_imgui)
-  target_compile_definitions(ud_viz_imgui PRIVATE UD_DEFAULT_SHAPES_PATH="${UD_SHAPES_FILE}")
+  # The HUD's typeface ships with Dear ImGui; without the file the viewer uses ImGui's own font.
+  target_compile_definitions(ud_viz_imgui PRIVATE UD_DEFAULT_SHAPES_PATH="${UD_SHAPES_FILE}"
+      UD_FONT_PATH="${imgui_SOURCE_DIR}/misc/fonts/Roboto-Medium.ttf")
 
   add_executable(ud_shape_editor shape_editor_main.cpp)
   target_include_directories(ud_shape_editor PRIVATE
