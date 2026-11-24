@@ -61,3 +61,17 @@ endforeach()
 
 add_custom_target(fixture_bots_wasm ALL DEPENDS ${_outputs})
 install(FILES ${_outputs} DESTINATION ${UD_INSTALL_DATADIR}/bots)
+
+# The profiler gate on these bots (cmake/ValidateBots.cmake): `validate_bots` runs it, and so does
+# `cmake --install` before copying anything (UD_VALIDATE_INSTALL, top-level CMakeLists.txt), which
+# includes this generated script by path since it is declared before this directory is read.
+file(GENERATE OUTPUT ${CMAKE_BINARY_DIR}/validate_bots.cmake CONTENT
+"set(PROFILER \"$<TARGET_FILE:ud_profile>\")
+set(BOTS \"${_outputs}\")
+include(\"${CMAKE_SOURCE_DIR}/cmake/ValidateBots.cmake\")
+")
+add_custom_target(validate_bots
+    COMMAND ${CMAKE_COMMAND} -P ${CMAKE_BINARY_DIR}/validate_bots.cmake
+    COMMENT "Profiling the fixture bots"
+    USES_TERMINAL)
+add_dependencies(validate_bots fixture_bots_wasm ud_profile)

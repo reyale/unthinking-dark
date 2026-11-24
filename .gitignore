@@ -7,6 +7,7 @@ Testing/
 *.ud
 *.ud.zst
 viz/web/
+viz/.web_version
 .python-version
 # Built bots: the SDK examples compile next to their sources (tests/CMakeLists.txt)
 *.wasm

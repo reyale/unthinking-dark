@@ -19,6 +19,7 @@ class TurtleBot : public Bot {
 public:
   static constexpr int32_t kGuardRadius = 6;
   static constexpr int32_t kHomeRadius = 2;
+  static constexpr int32_t kGoalHome = 0; // Router goal kind
 
   void on_init(const Map& map, uint32_t, uint64_t) override {
     map_ = map;
@@ -61,6 +62,7 @@ public:
     }
 
     const auto builds = builders(snap);
+    const Vec2 target = intruder(snap);
     for (const auto& u : snap.my_units) {
       if (u.id == deployer) continue;
       const Vec2 pos{u.x, u.y};
@@ -74,14 +76,16 @@ public:
         if (step != pos) out.push_back(move_cmd(u.id, CommandKind::Move, step));
         continue;
       }
-      const Vec2 target = intruder(snap);
       if (target.x >= 0) {
         out.push_back(move_cmd(u.id, CommandKind::Move, target));
         continue;
       }
-      const Vec2 step =
-          router_.next_step(pos, [&](Vec2 p) { return manhattan(p, home_) <= kHomeRadius; });
-      if (step != pos) out.push_back(move_cmd(u.id, CommandKind::Move, step));
+      // A kept field, not a search per unit: once parked ships fill the few tiles near home,
+      // each search from the rest would flood the map and find nothing.
+      const auto near_home = [&](Vec2 p) { return manhattan(p, home_) <= kHomeRadius; };
+      const auto step =
+          router_.route(Router::GoalKey{kGoalHome, home_, kHomeRadius}, pos, near_home, 1);
+      if (!step.empty()) out.push_back(move_cmd(u.id, CommandKind::Move, step.front()));
     }
     return out;
   }

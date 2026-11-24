@@ -56,6 +56,10 @@ ENGINE_SRCS := \
 VIZ_SRCS := imgui_main.cpp web_version.cpp
 SHAPES   := ../shapes.udshapes
 VERSION  := $(shell git describe --tags --always --dirty 2>/dev/null || echo unknown)
+# The version is baked in, so a new commit must rebuild even when no source changed: the stamp
+# is rewritten only when the version differs, and index.html depends on it.
+VERSION_STAMP := .web_version
+$(shell echo '$(VERSION)' | cmp -s - $(VERSION_STAMP) || echo '$(VERSION)' > $(VERSION_STAMP))
 
 IMGUI_SRCS := \
   $(IMGUI_DIR)/imgui.cpp                          \
@@ -101,7 +105,8 @@ LDFLAGS := \
 
 all: check-deps $(OUTDIR)/index.html
 
-$(OUTDIR)/index.html: $(ALL_SRCS) $(wildcard *.hpp) $(SHAPES) shell.html Makefile.em | $(OUTDIR)
+$(OUTDIR)/index.html: $(ALL_SRCS) $(wildcard *.hpp) $(SHAPES) shell.html Makefile.em \
+                      $(VERSION_STAMP) | $(OUTDIR)
 	$(EMCC) $(CXXFLAGS) $(LDFLAGS) $(ALL_SRCS) -o $@
 	@echo ""
 	@echo "Built: $(OUTDIR)/index.html"
@@ -142,4 +147,4 @@ serve: $(OUTDIR)/index.html
 	cd $(OUTDIR) && python3 -m http.server 8080
 
 clean:
-	rm -rf $(OUTDIR)
+	rm -rf $(OUTDIR) $(VERSION_STAMP)

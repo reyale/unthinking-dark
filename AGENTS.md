@@ -50,7 +50,10 @@ library, so installed users get it too); a new tool calls `game::print_version_i
 `ai_game::maps`, `ai_game::runner`, and `AI_GAME_BOTS_DIR` / `AI_GAME_MAPS_DIR` / `AI_GAME_WEB_DIR`
 (the fixture bots as `.wasm`, the maps, the browser viewer the tournament site serves). A Release
 build includes the viewer (`UD_WEB_VIEWER`, below), so its first configure fetches emsdk (~1.6 GB);
-`-DUD_EMSDK=<dir>` reuses one, `-DUD_WEB_VIEWER=OFF` skips it. Headers install flat to `include/ai_game/`, included by bare name as here.
+`-DUD_EMSDK=<dir>` reuses one, `-DUD_WEB_VIEWER=OFF` skips it. Before copying anything, the
+install profiles every fixture bot it ships (`ud_profile`, all scenarios) and stops if one
+forfeits (`cmake/ValidateBots.cmake`; `--target validate_bots` runs it alone;
+`-DUD_VALIDATE_INSTALL=OFF` skips it). Headers install flat to `include/ai_game/`, included by bare name as here.
 Also installed: `ud_run`, `ud_mapgen`, `ud_mapcheck`, `ud_profile` and the viewers, and the
 bot SDK: `ai_game_add_bot(<name> SOURCES ...)` compiles a `game::Bot` to `.wasm` against the
 installed headers (`ud/bot_host.hpp` included), with the same command line as the fixtures

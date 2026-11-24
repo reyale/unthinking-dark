@@ -96,6 +96,13 @@ include(cmake/Install.cmake)
 include(cmake/Version.cmake)
 include(cmake/WasmBot.cmake)
 
+# Declared before every other install rule, so it runs first: a fixture bot that forfeits under
+# the profiler (cmake/ValidateBots.cmake) stops the install before anything is copied.
+option(UD_VALIDATE_INSTALL "Profile the fixture bots before installing; a forfeit stops it" ON)
+if(UD_VALIDATE_INSTALL AND UD_WASM_FIXTURES)
+  install(CODE "include(\"${CMAKE_BINARY_DIR}/validate_bots.cmake\")")
+endif()
+
 add_subdirectory(engine)
 add_subdirectory(maps)
 add_subdirectory(viz)
