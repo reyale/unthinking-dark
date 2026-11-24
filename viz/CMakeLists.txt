@@ -23,7 +23,15 @@ endif()
 # automatically via FetchContent for either.
 find_package(OpenGL QUIET)
 find_package(glfw3 3.3 QUIET)
-option(UD_WEB_VIEWER "Add the web_viewer target (fetches emsdk, ~1.6 GB)" OFF)
+# On by default for Release, which is what gets installed: the tournament site plays replays
+# in the installed viewer (AI_GAME_WEB_DIR).
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+  set(_ud_web_default ON)
+else()
+  set(_ud_web_default OFF)
+endif()
+option(UD_WEB_VIEWER "Build and install the browser viewer (fetches emsdk, ~1.6 GB)"
+       ${_ud_web_default})
 
 include(FetchContent)
 FetchContent_Declare(imgui

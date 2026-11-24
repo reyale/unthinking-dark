@@ -1,11 +1,12 @@
-# -DUD_WEB_VIEWER=ON adds the `web_viewer` target: the browser replay player (viz/Makefile.em)
-# built into viz/web/, with everything it needs fetched at configure time, like wasi-sdk:
+# UD_WEB_VIEWER (on by default for Release) adds the `web_viewer` target: the browser replay
+# player (viz/Makefile.em) built into viz/web/ as part of `all`, and installed to
+# share/ai_game/web/ (AI_GAME_WEB_DIR), with everything it needs fetched at configure time,
+# like wasi-sdk:
 #   - a pinned emsdk (~1.6 GB installed, once per build dir), or UD_EMSDK to reuse one that
 #     has Emscripten ${UD_EMSDK_VERSION} installed and activated;
 #   - a Python >= 3.10 for emcc (Ubuntu 20.04 ships 3.8): the system's if new enough, else
 #     uv's (`uv python install`), else UD_PYTHON;
 #   - Dear ImGui (viz/CMakeLists.txt) and xxHash (top level), as source only.
-# Not part of `all`: run `cmake --build build --target web_viewer`.
 
 set(UD_EMSDK_VERSION 7.0.1)
 set(UD_EMSDK_URL https://github.com/emscripten-core/emsdk/archive/refs/tags/${UD_EMSDK_VERSION}.tar.gz)
@@ -85,11 +86,12 @@ function(ud_add_web_viewer imgui_dir)
   _ud_web_emsdk(_emsdk ${_py})
   find_program(UD_MAKE make REQUIRED)
   message(STATUS "UD_WEB_VIEWER: emsdk ${_emsdk}, Python ${_py}")
-  add_custom_target(web_viewer
+  add_custom_target(web_viewer ALL
     COMMAND ${UD_MAKE} -f Makefile.em
             EMSDK_DIR=${_emsdk} PYTHON310=${_py}
             IMGUI_DIR=${imgui_dir} XXHASH_DIR=${xxhash_SOURCE_DIR}
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/viz
     COMMENT "Building the browser replay player into viz/web/"
     USES_TERMINAL)
+  install(DIRECTORY ${CMAKE_SOURCE_DIR}/viz/web/ DESTINATION ${UD_INSTALL_DATADIR}/web)
 endfunction()

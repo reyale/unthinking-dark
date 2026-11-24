@@ -97,10 +97,12 @@ cd build && ctest --output-on-failure
 Build a self-contained `web/index.html` that runs in any browser — no install required for the viewer:
 
 ```bash
-# Fetches everything it needs at configure time: a pinned emsdk (~1.6 GB, once per build
-# dir), Dear ImGui, xxHash, and a Python >= 3.10 for emcc (via uv if the system's is older).
-~/.local/bin/cmake -B build-web -DCMAKE_BUILD_TYPE=Release -DUD_WASM_FIXTURES=OFF -DUD_WEB_VIEWER=ON
-~/.local/bin/cmake --build build-web --target web_viewer      # → viz/web/index.html
+# A Release build includes it (UD_WEB_VIEWER, on by default for Release; -DUD_WEB_VIEWER=ON for
+# others). Configuring fetches what it needs: a pinned emsdk (~1.6 GB, once per build dir),
+# Dear ImGui, xxHash, and a Python >= 3.10 for emcc (via uv if the system's is older).
+~/.local/bin/cmake -B build-rel -DCMAKE_BUILD_TYPE=Release
+~/.local/bin/cmake --build build-rel -j$(nproc)     # → viz/web/index.html, with everything else
+~/.local/bin/cmake --install build-rel --prefix ../ai-game-install   # → share/ai_game/web/
 
 # Serve locally and open http://localhost:8080
 cd viz/web && python3 -m http.server 8080
