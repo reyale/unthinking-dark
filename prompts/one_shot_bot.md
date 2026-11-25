@@ -155,12 +155,7 @@ Read the code behind each of these and ask what it rewards. Some examples:
 - **Maps vary a lot.**
 
 ### Test against the real thing
-- **Use the validation report to find your weakest matchup, then watch that replay.** Find
-  the moment the game turned, fix that, and validate again. Repeat for the next weakest.
-- **Check every opponent and every map size.** A strategy tuned to one map or one opponent
-  will meet the rest on the ladder.
-- **Never trade safety for strength.** A bot that wins most games but faults in one loses that
-  one for nothing.
+- **You can use the validation report to find your weakest matchup, then watch that replay.** 
 
 ---
 
