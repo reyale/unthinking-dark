@@ -49,19 +49,17 @@ values, so it stays right when they change.
 one written against the same `game::Bot` interface you'll use and every one on the ladder you
 will face:
 - `rush_bot.hpp`, `econ_bot.hpp`, `turtle_bot.hpp`, `expander_bot.hpp`;
-- `adaptive_bot.hpp`, the strongest, which plays every system; `aggro_bot.hpp` and
-  `boom_bot.hpp` are the same bot with other settings;
+- `adaptive_bot.hpp`, which plays every system; `aggro_bot.hpp` and `boom_bot.hpp` are the
+  same bot with other settings;
 - `bot_util.hpp`: routing (`Router`), a Drone's harvest loop, claim placement;
 - `fixtures/README.md`: how each plays.
 
-`sdk/cpp/examples/` has small bots for the SDK. Read them to see how the interface is used in
-practice, what costs fuel, and how they route. You will play against them, so knowing how
-they play is part of your strategy. You may reuse ideas and small utilities from them (inline
-any code you take: your bot is one file), but the bot and its strategy should be your own.
+`sdk/cpp/examples/` has small bots written against the raw ABI, some of them to show what costs
+fuel. You may reuse ideas and small utilities from the fixtures and the examples (inline any
+code you take: your bot is one file), but the bot and its strategy should be your own.
 
 `ud_arena` (installed beside `ud_run`; `tools/README.md`) fights equal-value armies of each
-ship type against each other. Use it to see which compositions actually win under the current
-numbers.
+ship type, and mixes of them, against each other under the current numbers.
 
 ---
 
@@ -137,22 +135,8 @@ borrowed from another game or what you have seen previously. Work it out from th
 Spend real effort here before writing much code; a well-built bot with a poor plan still
 loses.
 
-### understand example opponents 
-- **Read every fixture bot in `fixtures/`**, the files and not just their summaries. For each,
-  Most have a blind spot by design (`rush` never defends, `econ` never attacks, `expander`
-  can't fight, `turtle` never grows). Confirm each in the code, and find the subtler gaps in
-  the ones that look complete.  `adaptive_bot.hpp` is the hardest example
-
-### Then, understand the mechanics that decide games
-Read the code behind each of these and ask what it rewards. Some examples:
-- **The economy compounds, and is capped by territory.**
-- **Resources only count when banked.**
-- **The clock favours whoever is ahead on territory.** 
-- **Structures see little.**
-- **Counters are real, and positioning matters as much as composition.**
-- **Fog is total and memoryless.** 
-- **Traffic is part of tactics.**
-- **Maps vary a lot.**
+- **Read every fixture bot in `fixtures/`**, the files and not just their summaries.
+- **Read the code behind the rules** (§1, DESIGN.md) and ask what each rewards.
 
 ### Test against the real thing
 - **You can use the validation report to find your weakest matchup, then watch that replay.** 
@@ -250,8 +234,7 @@ python3 prompts/validate_bot.py prompts/entries/<name>/bot.cpp --quick   # faste
 4. **Report:** printed, and written to `report.md` beside your `bot.cpp`. It has results by
    opponent and by map, and every game not won with how it ended.
 
-Exit status 0 means it passed: it builds and never faulted. The score is up to you: use the
-report to find what loses and fix it.
+Exit status 0 means it passed: it builds and never faulted. The score is up to you.
 
 - **Watch a game:** write a replay with `ud_run <a.wasm> <b.wasm> --map <map> --out game.ud`,
   then open it with `ud_viz game.ud` (terminal), or `ud_viz_imgui game.ud` if there is a
