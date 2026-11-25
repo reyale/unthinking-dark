@@ -54,8 +54,9 @@ practice, what costs fuel, and how they route. You will play against them, so kn
 they play is part of your strategy. You may reuse ideas and small utilities from them (inline
 any code you take: your bot is one file), but the bot and its strategy should be your own.
 
-`tools/ud_arena` (`tools/README.md`) fights equal-value armies of each ship type against each
-other. Use it to see which compositions actually win under the current numbers.
+`ud_arena` (installed beside `ud_run`; `tools/README.md`) fights equal-value armies of each
+ship type against each other. Use it to see which compositions actually win under the current
+numbers.
 
 ---
 
@@ -68,9 +69,10 @@ Read DESIGN.md for the full rules; this is the shape of it.
   lasts at most `cfg::TICK_CAP` ticks.
 - **Winning:** destroy the enemy Command Core; or hold territory at or above the win
   threshold. The threshold starts high and falls over the match toward a floor at the tick
-  cap (`game::win_threshold`, `cfg::THRESH_*`). At the tick cap, more territory wins, and a
-  margin within `cfg::DRAW_TERRITORY_MARGIN` is a draw. The snapshot gives your territory
-  and the current threshold every tick.
+  cap (`cfg::THRESH_*`; the curve is `win_threshold()` in `territory.cpp`). At the tick cap,
+  more territory wins, and a margin within `cfg::DRAW_TERRITORY_MARGIN` is a draw. The
+  snapshot gives your territory and the current threshold every tick
+  (`snap.header.territory_pct`, `snap.header.win_threshold`).
 - **Losing at once:** your bot faults, meaning it runs out of fuel, grows memory past the cap,
   or traps.
 - **The map:** 4-connected (N, E, S, W), Manhattan distance; x grows east, y grows south.
@@ -117,7 +119,7 @@ Read DESIGN.md for the full rules; this is the shape of it.
    unit with no command holds fire, so order your army every tick.
 3. **Traffic.** Units may follow into a tile vacated on the same step. Swaps and closed loops
    of movers block, along with everyone queued behind them. When two units contend for a
-   tile, the higher `collision_priority` wins (`stats.cpp`).
+   tile, the higher `collision_priority` wins (`stats.hpp`, set per type in `stats.cpp`).
 4. **Construction and claims are slow and vulnerable.** An unfinished structure does nothing
    until it is done, and only a Drone standing near it gets the work done (`economy.cpp`).
 
@@ -210,6 +212,11 @@ Each is a lost match, not a warning.
   sandboxed with no host access, and any attempt traps.
 - **No undefined behaviour:** bounds-check every map and vector access.
 - **One file:** `bot.cpp`, using only the engine headers above and the C++ standard library.
+- **Only some engine code links:** the bot is built with `grid.cpp`, `rng.cpp` and `stats.cpp`
+  (the bot SDK) and nothing else of the engine. Anything defined in a header, or in those
+  three, you can call; any other engine function (`win_threshold()`, anything in
+  `territory.cpp`, `movement.cpp`, `combat.cpp`, ...) compiles but fails to link. Read those
+  to learn the rules, and write your own version where you need one.
 
 ---
 

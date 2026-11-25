@@ -111,7 +111,7 @@ add_subdirectory(runner)
 add_subdirectory(profiler)
 add_subdirectory(fixtures)
 
-ud_install_package(ud_run ud_mapgen ud_mapcheck ud_profile ud_viz ud_viz_nc ud_viz_imgui)
+ud_install_package(ud_run ud_mapgen ud_mapcheck ud_profile ud_arena ud_viz ud_viz_nc ud_viz_imgui)
 
 # ---------------------------------------------------------------------------
 # Tests
