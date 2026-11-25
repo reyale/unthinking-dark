@@ -1,4 +1,5 @@
 #include "map_io.hpp"
+#include "config.hpp"
 #include <nlohmann/json.hpp>
 #include <xxhash.h>
 #include <cstdio>
@@ -65,6 +66,8 @@ MapData load_map(const std::string& path) {
   MapData data;
   data.name            = j.value("name", std::string{});
   data.resource_amount = j.value("resource_amount", 500);
+  if (data.resource_amount < 0)
+    throw std::runtime_error("negative resource_amount in map: " + path);
 
   if (!j.contains("grid") || !j["grid"].is_array())
     throw std::runtime_error("map file missing 'grid' array: " + path);
@@ -72,6 +75,8 @@ MapData load_map(const std::string& path) {
   const auto& grid = j["grid"];
   if (grid.empty())
     throw std::runtime_error("grid is empty: " + path);
+  if (grid.size() > static_cast<size_t>(game::cfg::MAP_MAX_H))
+    throw std::runtime_error("map height exceeds maximum in: " + path);
 
   int32_t h = static_cast<int32_t>(grid.size());
   int32_t w = -1;
@@ -79,13 +84,14 @@ MapData load_map(const std::string& path) {
   bool spawn0_set = false;
   bool spawn1_set = false;
 
-  std::vector<std::pair<game::Vec2, game::Terrain>> deferred;
-
   for (int32_t y = 0; y < h; ++y) {
     if (!grid[static_cast<size_t>(y)].is_string())
       throw std::runtime_error("grid row is not a string at row " + std::to_string(y));
     std::string row = grid[static_cast<size_t>(y)].get<std::string>();
 
+    if (row.empty() || row.size() > static_cast<size_t>(game::cfg::MAP_MAX_W))
+      throw std::runtime_error("map width out of bounds at row " + std::to_string(y) + " in: " +
+                               path);
     int32_t row_w = static_cast<int32_t>(row.size());
     if (w == -1) {
       w = row_w;
@@ -135,7 +141,18 @@ MapData load_map(const std::string& path) {
   data.hash = compute_map_hash(data);
 
   if (j.contains("hash")) {
-    uint64_t stored = std::stoull(j["hash"].get<std::string>(), nullptr, 16);
+    if (!j["hash"].is_string())
+      throw std::runtime_error("map 'hash' must be a hex string: " + path);
+    const std::string hs = j["hash"].get<std::string>();
+    size_t parsed = 0;
+    uint64_t stored = 0;
+    try {
+      stored = std::stoull(hs, &parsed, 16);
+    } catch (const std::exception&) {
+      throw std::runtime_error("invalid map 'hash' format: " + path);
+    }
+    if (hs.empty() || parsed != hs.size())
+      throw std::runtime_error("invalid map 'hash' format: " + path);
     if (stored != data.hash)
       throw std::runtime_error("map hash mismatch (file may be corrupted): " + path);
   }

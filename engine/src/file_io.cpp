@@ -16,9 +16,21 @@ public:
       throw std::runtime_error("cannot open for writing: " + path);
   }
   void write(const void* data, size_t size) override {
+    if (size == 0)
+      return;
     out_.write(static_cast<const char*>(data), static_cast<std::streamsize>(size));
+    if (!out_)
+      throw std::runtime_error("failed to write to output file");
   }
-  void close() override { out_.close(); }
+  void close() override {
+    if (!out_.is_open())
+      return;
+    out_.flush();
+    const bool bad = !out_;
+    out_.close();
+    if (bad || out_.fail())
+      throw std::runtime_error("failed to close output file");
+  }
 
 private:
   std::ofstream out_;
@@ -78,26 +90,41 @@ public:
       ZSTD_outBuffer out{out_buf_.data(), out_buf_.size(), 0};
       if (ZSTD_isError(ZSTD_compressStream(cstream_, &out, &in)))
         throw std::runtime_error("ZSTD_compressStream failed");
-      if (out.pos > 0)
+      if (out.pos > 0) {
         out_.write(reinterpret_cast<const char*>(out_buf_.data()),
                    static_cast<std::streamsize>(out.pos));
+        if (!out_)
+          throw std::runtime_error("failed to write compressed output");
+      }
     }
   }
 
   void close() override {
     if (!out_.is_open())
       return;
-    size_t remaining;
-    do {
-      ZSTD_outBuffer out{out_buf_.data(), out_buf_.size(), 0};
-      remaining = ZSTD_endStream(cstream_, &out);
-      if (ZSTD_isError(remaining))
-        throw std::runtime_error("ZSTD_endStream failed");
-      if (out.pos > 0)
-        out_.write(reinterpret_cast<const char*>(out_buf_.data()),
-                   static_cast<std::streamsize>(out.pos));
-    } while (remaining > 0);
+    try {
+      size_t remaining;
+      do {
+        ZSTD_outBuffer out{out_buf_.data(), out_buf_.size(), 0};
+        remaining = ZSTD_endStream(cstream_, &out);
+        if (ZSTD_isError(remaining))
+          throw std::runtime_error("ZSTD_endStream failed");
+        if (out.pos > 0) {
+          out_.write(reinterpret_cast<const char*>(out_buf_.data()),
+                     static_cast<std::streamsize>(out.pos));
+          if (!out_)
+            throw std::runtime_error("failed to write compressed output");
+        }
+      } while (remaining > 0);
+    } catch (...) {
+      out_.close();
+      throw;
+    }
+    out_.flush();
+    const bool bad = !out_;
     out_.close();
+    if (bad || out_.fail())
+      throw std::runtime_error("failed to close compressed output file");
   }
 
 private:
@@ -160,6 +187,7 @@ public:
       }
 
       // Decompress a chunk.
+      const size_t prev_in_pos = in_pos_;
       ZSTD_inBuffer in{in_buf_.data(), in_size_, in_pos_};
       ZSTD_outBuffer out{out_buf_.data(), out_buf_.size(), 0};
       size_t ret = ZSTD_decompressStream(dstream_, &out, &in);
@@ -169,7 +197,8 @@ public:
       decoded_size_ = out.pos;
       decoded_pos_ = 0;
 
-      if (decoded_size_ == 0 && in_pos_ >= in_size_) {
+      // Only bail if zstd made zero progress without emptying in_buf_; otherwise loop to refill.
+      if (decoded_size_ == 0 && in_pos_ == prev_in_pos) {
         eof_ = true;
         return false;
       }

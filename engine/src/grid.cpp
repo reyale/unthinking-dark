@@ -2,7 +2,11 @@
 
 namespace game {
 
+// Dimensions from outside (replay and map files) are checked where they are read
+// (replay_io.cpp, replay.cpp, map_io.cpp). This file is also built into every bot, which has no
+// exceptions, so it can only assert.
 Map Map::make(int32_t w, int32_t h, Terrain fill) {
+  assert(w > 0 && h > 0);
   Map m;
   m.width = w;
   m.height = h;

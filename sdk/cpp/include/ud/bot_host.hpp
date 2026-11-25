@@ -57,7 +57,7 @@ extern "C" void __wasm_call_ctors(void);
 #define UD_WASM_BOT(BotType)                                                                  \
   extern "C" {                                                                                \
   alignas(8) unsigned char SNAPSHOT_ADDR[ud::SNAPSHOT_BUFFER_SIZE];                           \
-  alignas(8) game::Command COMMAND_ADDR[game::cfg::UNIT_HARD_CAP];                            \
+  alignas(8) game::Command COMMAND_ADDR[game::cfg::COMMAND_HARD_CAP];                         \
   }                                                                                           \
   static BotType* ud_hosted_bot = nullptr;                                                    \
   extern "C" void init(int32_t faction_id, int64_t seed) {                                    \
@@ -69,7 +69,7 @@ extern "C" void __wasm_call_ctors(void);
   extern "C" int32_t on_tick() {                                                              \
     const std::vector<game::Command> cmds =                                                   \
         ud_hosted_bot->on_tick(ud::host::read_snapshot(SNAPSHOT_ADDR));                        \
-    const size_t n = std::min(cmds.size(), static_cast<size_t>(game::cfg::UNIT_HARD_CAP));    \
+    const size_t n = std::min(cmds.size(), static_cast<size_t>(game::cfg::COMMAND_HARD_CAP)); \
     if (n) std::memcpy(COMMAND_ADDR, cmds.data(), n * sizeof(game::Command));                 \
     return static_cast<int32_t>(n);                                                           \
   }

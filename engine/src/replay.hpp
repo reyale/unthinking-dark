@@ -70,6 +70,12 @@ struct ReplayLog {
   MatchResult outcome;
 };
 
+// Rebuild and validate the map and initial world from a replay log.
+// Throws std::runtime_error on invalid dimensions, tile count, factions, types, or bounds.
+Map replay_map(const ReplayLog& log);
+struct World;
+World replay_world(const ReplayLog& log);
+
 // Re-simulate a replay log from stored commands (no bots needed).
 // Returns the final hash. Caller asserts it equals log.expected_hash.
 uint64_t replay(const ReplayLog& log);

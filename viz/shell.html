@@ -56,6 +56,15 @@
       spinner.textContent = spinChars[spinIdx++ % spinChars.length];
     }, 120);
 
+    function _showError(err) {
+      var msg = err && err.message ? err.message : String(err);
+      bootMsg.textContent = '';
+      var span = document.createElement('span');
+      span.style.color = '#f66';
+      span.textContent = 'Error: ' + msg;
+      bootMsg.appendChild(span);
+    }
+
     function _doLoad(data) {
       bootMsg.innerHTML = 'Re-simulating… (may take a few seconds)';
       // yield to the browser so the message renders before the blocking C++ call
@@ -66,7 +75,7 @@
           bootHint.classList.add('hidden');
           if (window._autoplay) { Module._viewer_control(0, 1); window._autoplay = false; }
         } catch(e) {
-          bootMsg.innerHTML = '<span style="color:#f66">Error: ' + e.message + '</span>';
+          _showError(e);
         }
       }, 0);
     }
@@ -124,7 +133,7 @@
         window._autoplay = params.get('play') === '1';
         if (runtimeReady) _doLoad(data); else window._pendingReplay = data;
       }).catch(function(e) {
-        bootMsg.innerHTML = '<span style="color:#f66">Error: ' + e.message + '</span>';
+        _showError(e);
       });
     })();
 

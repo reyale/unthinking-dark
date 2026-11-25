@@ -68,20 +68,6 @@ static std::string pick_file() {
   return {};
 }
 
-// ---- Map reconstruction ---------------------------------------------------
-
-static game::Map map_from_log(const game::ReplayLog& log) {
-  game::Map map = game::Map::make(log.map_w, log.map_h);
-  for (int32_t y = 0; y < log.map_h; ++y)
-    for (int32_t x = 0; x < log.map_w; ++x) {
-      const auto& t = log.map_tiles[static_cast<size_t>(y * log.map_w + x)];
-      if (t.terrain != game::Terrain::Open || t.resource_amount != 0)
-        map.set_terrain({x, y}, t.terrain, t.resource_amount);
-    }
-  map.recount_passable();
-  return map;
-}
-
 // ---- Clock ------------------------------------------------------------------
 //
 // Everything animated reads this, set once per UI frame: wall time, or a stepped clock when
@@ -471,7 +457,7 @@ static void try_load(const char* path) {
   try {
     auto log = game::read_replay_file(path);
     uint64_t fingerprint = 0;
-    g.map    = map_from_log(log);
+    g.map    = game::replay_map(log);
     g.frames = game::replay_frames(log, &fingerprint);
     if (fingerprint != log.expected_hash)
       fprintf(stderr, "warning: hash mismatch — replay may not reproduce original match\n");

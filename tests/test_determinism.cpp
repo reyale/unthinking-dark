@@ -1,4 +1,5 @@
 #include <gtest/gtest.h>
+#include <cstring>
 #include "config.hpp"
 #include "file_io.hpp"
 #include "frame.hpp"
@@ -273,4 +274,55 @@ TEST(ReplayFrames, InitialFrameHasAllUnits) {
   EXPECT_EQ(frames[0].tick, 0u);
   EXPECT_EQ(frames[0].units.size(), 4u);
   EXPECT_EQ(frames[0].structures.size(), 2u);
+}
+
+TEST(ReplayIO, CorruptHeaderOrCountsThrow) {
+  game::World w = make_test_world(1);
+  game::IdleBot a, b;
+  auto rec = game::run_match(w, a, 0, b, 1, 5);
+  game::MemoryWriter mw;
+  game::write_replay(rec.replay, mw);
+
+  // Offset of map_w: 8 (magic) + 4 (abi_version) + 8 (seed) = 20.
+  {
+    auto bad = mw.data;
+    int32_t neg_w = -5;
+    std::memcpy(bad.data() + 20, &neg_w, sizeof(neg_w));
+    game::MemoryReader mr(bad);
+    EXPECT_THROW(game::read_replay(mr), std::runtime_error);
+  }
+  // Offset of tile_count: 20 + 4 (map_w) + 4 (map_h) = 28.
+  {
+    auto bad = mw.data;
+    uint32_t wrong_tiles = 999999999u;
+    std::memcpy(bad.data() + 28, &wrong_tiles, sizeof(wrong_tiles));
+    game::MemoryReader mr(bad);
+    EXPECT_THROW(game::read_replay(mr), std::runtime_error);
+  }
+  // Offset of entity_count: 28 + 4 + (400 * 5) = 2032.
+  {
+    auto bad = mw.data;
+    uint32_t huge_entities = 0xFFFFFFFFu;
+    std::memcpy(bad.data() + 2032, &huge_entities, sizeof(huge_entities));
+    game::MemoryReader mr(bad);
+    EXPECT_THROW(game::read_replay(mr), std::runtime_error);
+  }
+}
+
+TEST(Replay, InvalidInMemoryLogThrows) {
+  game::ReplayLog log;
+  log.abi_version = game::cfg::ABI_VERSION;
+  log.map_w = 10;
+  log.map_h = 10;
+  log.faction_a = 0;
+  log.faction_b = 1;
+  // Empty map_tiles mismatch:
+  EXPECT_THROW(game::replay(log), std::runtime_error);
+  EXPECT_THROW(game::replay_frames(log), std::runtime_error);
+
+  // Out-of-bounds entity & invalid unit type:
+  log.map_tiles.resize(100);
+  log.initial_entities.push_back({0, 99, false, 0, 0});
+  EXPECT_THROW(game::replay(log), std::runtime_error);
+  EXPECT_THROW(game::replay_frames(log), std::runtime_error);
 }

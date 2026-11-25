@@ -27,6 +27,10 @@ inline constexpr int32_t UNIT_HARD_CAP = unit_cap(MAP_MAX_W, MAP_MAX_H);
 // Per side, all structure types, on every map. Bounds the snapshot like UNIT_HARD_CAP; Build and
 // DeployClaim are refused at the cap.
 inline constexpr int32_t STRUCTURE_HARD_CAP = 128; // v1 placeholder
+// Units + structures (each unit and each producer can issue one command per tick): the most
+// commands the runner reads in a tick. Bots built before it reserve room for UNIT_HARD_CAP; the
+// runner reads only what fits their memory, so they still load (runner/wasm_bot.cpp).
+inline constexpr int32_t COMMAND_HARD_CAP = UNIT_HARD_CAP + STRUCTURE_HARD_CAP;
 // Every structure sees this far (Manhattan), so a base isn't blind without units nearby. The
 // Command Core sees further: CORE_SIGHT, below the ship stats.
 inline constexpr int32_t STRUCTURE_SIGHT = 2; // v1 placeholder

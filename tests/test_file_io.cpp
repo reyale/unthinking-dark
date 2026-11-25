@@ -5,6 +5,7 @@
 #include "grid.hpp"
 #include "wincheck.hpp"
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -171,6 +172,55 @@ TEST(FileIo, ZstdEofAfterPayload) {
   }
 
   std::remove(path.c_str());
+}
+
+TEST(FileIo, ZstdSkippableFrameBoundaryDoesNotTriggerPrematureEof) {
+  // A skippable frame matching ZSTD_DStreamInSize() (128 KiB) causes the first
+  // decompress call to consume in_buf_ with 0 output bytes; read() must refill
+  // instead of reporting premature EOF.
+  const std::string payload_path = "/tmp/ud_test_skip_payload.zst";
+  const std::string full_path    = "/tmp/ud_test_skip_full.zst";
+  const std::vector<uint8_t> payload = {11, 22, 33, 44, 55};
+
+  {
+    auto w = game::make_file_writer(payload_path, game::FileIoType::Zstd);
+    w->write(payload.data(), payload.size());
+    w->close();
+  }
+
+  // ZSTD skippable frame: magic 0x184D2A50 (LE) + 4-byte LE size + N zero bytes.
+  {
+    auto r_in = game::make_file_reader(payload_path, game::FileIoType::Raw);
+    std::vector<uint8_t> compressed;
+    uint8_t b;
+    while (r_in->read(&b, 1))
+      compressed.push_back(b);
+    r_in->close();
+
+    constexpr uint32_t kSkipPayload = 128 * 1024 - 8;
+    std::vector<uint8_t> skip_frame(8 + kSkipPayload, 0);
+    const uint32_t magic = 0x184D2A50u;
+    const uint32_t sz    = kSkipPayload;
+    std::memcpy(skip_frame.data(), &magic, 4);
+    std::memcpy(skip_frame.data() + 4, &sz, 4);
+
+    auto w = game::make_file_writer(full_path, game::FileIoType::Raw);
+    w->write(skip_frame.data(), skip_frame.size());
+    w->write(compressed.data(), compressed.size());
+    w->close();
+  }
+
+  std::vector<uint8_t> got(payload.size());
+  {
+    auto r = game::make_file_reader(full_path, game::FileIoType::Zstd);
+    EXPECT_TRUE(r->read(got.data(), got.size()));
+    EXPECT_FALSE(r->eof());
+    r->close();
+  }
+  EXPECT_EQ(got, payload);
+
+  std::remove(payload_path.c_str());
+  std::remove(full_path.c_str());
 }
 
 // ---- Replay log file round-trip (Raw + Zstd) --------------------------------

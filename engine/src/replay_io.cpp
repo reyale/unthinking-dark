@@ -1,7 +1,11 @@
 #include "replay_io.hpp"
 #include "config.hpp"
+#include "entity.hpp"
 #include "grid.hpp"
+#include "world.hpp"
+#include <algorithm>
 #include <array>
+#include <stdexcept>
 #include <string>
 
 // Binary format (little-endian, all integers native-endian on x86-64). The magic is
@@ -146,18 +150,31 @@ ReplayLog read_replay(FileReader& in) {
   log.seed  = in.read_val<uint64_t>();
   log.map_w = in.read_val<int32_t>();
   log.map_h = in.read_val<int32_t>();
+  if (log.map_w < 1 || log.map_w > cfg::MAP_MAX_W || log.map_h < 1 || log.map_h > cfg::MAP_MAX_H)
+    throw std::runtime_error("replay file corrupt (invalid map dimensions)");
 
+  const uint64_t expected_tiles =
+      static_cast<uint64_t>(log.map_w) * static_cast<uint64_t>(log.map_h);
   auto tile_count = in.read_val<uint32_t>();
+  if (tile_count != expected_tiles)
+    throw std::runtime_error("replay file corrupt (tile count mismatch)");
   log.map_tiles.reserve(tile_count);
   for (uint32_t i = 0; i < tile_count; ++i) {
     Tile t;
-    t.terrain         = static_cast<Terrain>(in.read_val<uint8_t>());
+    const uint8_t raw_terrain = in.read_val<uint8_t>();
+    if (raw_terrain > static_cast<uint8_t>(Terrain::ResourceNode))
+      throw std::runtime_error("replay file corrupt (invalid terrain)");
+    t.terrain         = static_cast<Terrain>(raw_terrain);
     t.resource_amount = in.read_val<int32_t>();
     log.map_tiles.push_back(t);
   }
 
+  constexpr uint32_t kMaxInitialEntities =
+      static_cast<uint32_t>((cfg::UNIT_HARD_CAP + cfg::STRUCTURE_HARD_CAP) * MAX_FACTIONS * 4);
   auto entity_count = in.read_val<uint32_t>();
-  log.initial_entities.reserve(entity_count);
+  if (entity_count > kMaxInitialEntities)
+    throw std::runtime_error("replay file corrupt (excessive initial entity count)");
+  log.initial_entities.reserve(std::min<uint32_t>(entity_count, 1024));
   for (uint32_t i = 0; i < entity_count; ++i) {
     EntityInit e;
     e.faction_id   = in.read_val<uint32_t>();
@@ -165,11 +182,21 @@ ReplayLog read_replay(FileReader& in) {
     e.is_structure = (in.read_val<uint8_t>() != 0);
     e.x            = in.read_val<int32_t>();
     e.y            = in.read_val<int32_t>();
+    if (e.faction_id >= MAX_FACTIONS)
+      throw std::runtime_error("replay file corrupt (invalid entity faction)");
+    if (e.is_structure ? e.type > static_cast<uint8_t>(StructureType::ClaimNode)
+                       : e.type > static_cast<uint8_t>(UnitType::Battleship))
+      throw std::runtime_error("replay file corrupt (invalid entity type)");
+    if (e.x < 0 || e.x >= log.map_w || e.y < 0 || e.y >= log.map_h)
+      throw std::runtime_error("replay file corrupt (entity out of bounds)");
     log.initial_entities.push_back(e);
   }
 
   log.faction_a = in.read_val<uint32_t>();
   log.faction_b = in.read_val<uint32_t>();
+  if (log.faction_a >= MAX_FACTIONS || log.faction_b >= MAX_FACTIONS ||
+      log.faction_a == log.faction_b)
+    throw std::runtime_error("replay file corrupt (invalid faction ids)");
   auto read_name = [&]() {
     auto len = in.read_val<uint8_t>();
     std::string name(len, '\0');
@@ -185,6 +212,7 @@ ReplayLog read_replay(FileReader& in) {
   log.init_mem_bytes_a = in.read_val<uint64_t>();
   log.init_mem_bytes_b = in.read_val<uint64_t>();
 
+  constexpr uint32_t kMaxCommandsPerTick = 65536;
   while (true) {
     auto tag = in.read_val<uint8_t>();
     if (tag == TAG_END) break;
@@ -193,25 +221,37 @@ ReplayLog read_replay(FileReader& in) {
     TickEntry entry;
     entry.tick = in.read_val<uint32_t>();
     auto ca = in.read_val<uint32_t>();
-    entry.raw_a.reserve(ca);
+    if (ca > kMaxCommandsPerTick)
+      throw std::runtime_error("replay file corrupt (excessive command count)");
+    entry.raw_a.reserve(std::min<uint32_t>(ca, 1024));
     for (uint32_t j = 0; j < ca; ++j)
       entry.raw_a.push_back(in.read_val<Command>());
     auto cb = in.read_val<uint32_t>();
-    entry.raw_b.reserve(cb);
+    if (cb > kMaxCommandsPerTick)
+      throw std::runtime_error("replay file corrupt (excessive command count)");
+    entry.raw_b.reserve(std::min<uint32_t>(cb, 1024));
     for (uint32_t j = 0; j < cb; ++j)
       entry.raw_b.push_back(in.read_val<Command>());
     entry.fuel_a      = in.read_val<uint64_t>();
     entry.fuel_b      = in.read_val<uint64_t>();
     entry.mem_bytes_a = in.read_val<uint64_t>();
     entry.mem_bytes_b = in.read_val<uint64_t>();
-    entry.fault_a     = static_cast<TickFault>(in.read_val<uint8_t>());
-    entry.fault_b     = static_cast<TickFault>(in.read_val<uint8_t>());
+    const uint8_t raw_fa = in.read_val<uint8_t>();
+    const uint8_t raw_fb = in.read_val<uint8_t>();
+    if (raw_fa > static_cast<uint8_t>(TickFault::Trap) ||
+        raw_fb > static_cast<uint8_t>(TickFault::Trap))
+      throw std::runtime_error("replay file corrupt (invalid tick fault)");
+    entry.fault_a     = static_cast<TickFault>(raw_fa);
+    entry.fault_b     = static_cast<TickFault>(raw_fb);
     log.ticks.push_back(std::move(entry));
   }
 
   log.expected_hash        = in.read_val<uint64_t>();
   log.outcome.winner.value = in.read_val<uint32_t>();
-  log.outcome.reason       = static_cast<WinReason>(in.read_val<uint8_t>());
+  const uint8_t raw_reason = in.read_val<uint8_t>();
+  if (raw_reason > static_cast<uint8_t>(WinReason::Forfeit))
+    throw std::runtime_error("replay file corrupt (invalid win reason)");
+  log.outcome.reason       = static_cast<WinReason>(raw_reason);
 
   return log;
 }

@@ -35,7 +35,7 @@ and reads commands from `[COMMAND_ADDR, COMMAND_ADDR + count * 24)` after `on_ti
 returns. The bot must reserve enough linear memory to cover both regions for
 worst-case v1 caps (`UNIT_HARD_CAP` units, the cap on the largest map; `STRUCTURE_HARD_CAP`
 structures, 2× units of visible enemies, `STRUCTURE_HARD_CAP` visible enemy structures, the
-whole largest map of tiles: ≈ 318 KiB snapshot + 15 KiB commands; 6 WASM pages suffices). Array counts are clamped to those caps when the snapshot is copied in, so the
+whole largest map of tiles: ≈ 318 KiB snapshot + ≈ 18 KiB (`COMMAND_HARD_CAP`) commands; 6 WASM pages suffices). A bot built before the buffer grew to `COMMAND_HARD_CAP` reserves only `UNIT_HARD_CAP` commands: it still loads (that is the minimum checked), and each tick reads only the commands that fit its memory. Array counts are clamped to those caps when the snapshot is copied in, so the
 copy can never run past the buffer the bot was validated to have.
 
 The snapshot holds, in order: header, my units, my structures (all of them, fog or not),

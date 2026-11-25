@@ -361,3 +361,29 @@ TEST(MapGen, SameSeedSameOutput) {
       EXPECT_EQ(a.map.tile_at({x, y}).terrain, b.map.tile_at({x, y}).terrain)
           << "mismatch at (" << x << "," << y << ")";
 }
+
+TEST(MapIO, LoadEmptyRowThrows) {
+  write_tmp("/tmp/ud_emptyrow.json", R"({"name":"t","resource_amount":500,"grid":[""]})");
+  EXPECT_THROW(maps::load_map("/tmp/ud_emptyrow.json"), std::runtime_error);
+}
+
+TEST(MapIO, LoadOversizedMapThrows) {
+  std::string big_row(129, '.');
+  big_row[1] = '1';
+  big_row[2] = '2';
+  write_tmp("/tmp/ud_bigrow.json",
+            std::string(R"({"name":"t","resource_amount":500,"grid":[")") + big_row + R"("]})");
+  EXPECT_THROW(maps::load_map("/tmp/ud_bigrow.json"), std::runtime_error);
+}
+
+TEST(MapIO, LoadNegativeResourceThrows) {
+  write_tmp("/tmp/ud_negres.json",
+            R"({"name":"t","resource_amount":-5,"grid":["####","#1.#","#.2#","####"]})");
+  EXPECT_THROW(maps::load_map("/tmp/ud_negres.json"), std::runtime_error);
+}
+
+TEST(MapIO, LoadMalformedHashThrows) {
+  write_tmp("/tmp/ud_badhash.json",
+            R"({"name":"t","resource_amount":500,"hash":"1234zzzz","grid":["####","#1.#","#.2#","####"]})");
+  EXPECT_THROW(maps::load_map("/tmp/ud_badhash.json"), std::runtime_error);
+}

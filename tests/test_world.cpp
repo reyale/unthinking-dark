@@ -233,6 +233,47 @@ TEST(Command, ProduceOnNonFactoryRejected) {
   EXPECT_TRUE(game::validate_commands(w, 0, {c}).empty());
 }
 
+TEST(Command, UnknownKindRejectedAndDoesNotBlockValidCommand) {
+  auto w = make_world();
+  auto& u = w.spawn_unit({0}, game::UnitType::Interceptor, {1, 1});
+  game::Command bad{};
+  bad.entity_id = u.id.value;
+  bad.kind      = 999; // invalid CommandKind
+
+  EXPECT_TRUE(game::validate_commands(w, 0, {bad}).empty());
+
+  game::Command good = make_cmd(u.id.value, game::CommandKind::Move);
+  good.ax = 2;
+  good.ay = 1;
+  auto vc = game::validate_commands(w, 0, {bad, good});
+  ASSERT_EQ(vc.size(), 1u);
+  EXPECT_EQ(vc.begin()->second.kind, static_cast<uint16_t>(game::CommandKind::Move));
+}
+
+TEST(Command, ProduceTruncatedAuxRejected) {
+  auto w = make_world();
+  auto& core = w.spawn_structure({0}, game::StructureType::CommandCore, {2, 2});
+  auto& fac  = w.spawn_structure({0}, game::StructureType::Factory, {3, 2});
+
+  game::Command c_core = make_cmd(core.id.value, game::CommandKind::Produce);
+  c_core.aux = 256u + static_cast<uint16_t>(game::UnitType::Drone);
+  EXPECT_TRUE(game::validate_commands(w, 0, {c_core}).empty());
+
+  game::Command c_fac = make_cmd(fac.id.value, game::CommandKind::Produce);
+  c_fac.aux = 256u + static_cast<uint16_t>(game::UnitType::Interceptor);
+  EXPECT_TRUE(game::validate_commands(w, 0, {c_fac}).empty());
+}
+
+TEST(Command, BuildWithNonFactoryAuxRejected) {
+  auto w = make_world();
+  auto& u = w.spawn_unit({0}, game::UnitType::Drone, {1, 1});
+  game::Command c = make_cmd(u.id.value, game::CommandKind::Build);
+  c.ax = 2;
+  c.ay = 2;
+  c.aux = static_cast<uint16_t>(game::StructureType::ClaimNode);
+  EXPECT_TRUE(game::validate_commands(w, 0, {c}).empty());
+}
+
 // ---- Fixed-point math ---------------------------------------------------
 
 TEST(Fixed, IsqrtNonPositiveReturnsZero) {
@@ -1119,6 +1160,10 @@ TEST(Command, OnlyDronesBuildOrDeploy) {
     by_drone.ax = 4; by_drone.ay = 3;
     game::Command by_frigate = make_cmd(frigate.id.value, kind);
     by_frigate.ax = 6; by_frigate.ay = 7;
+    if (kind == game::CommandKind::Build) {
+      by_drone.aux   = static_cast<uint16_t>(game::StructureType::Factory);
+      by_frigate.aux = static_cast<uint16_t>(game::StructureType::Factory);
+    }
     auto vc = game::validate_commands(w, 0, {by_drone, by_frigate});
     EXPECT_TRUE(vc.contains(drone.id));
     EXPECT_FALSE(vc.contains(frigate.id)) << "kind " << static_cast<int>(kind);

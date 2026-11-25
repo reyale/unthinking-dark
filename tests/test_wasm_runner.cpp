@@ -1020,3 +1020,44 @@ TEST(Sandbox, BufferAddressesOutsideTheBotsMemoryAreRefused) {
     EXPECT_FALSE(bot.healthy()) << global;
   }
 }
+
+TEST(WasmBot, CommandBufferAllowsUnitsPlusStructureProduce) {
+  // 7 pages (448 KiB) gives room at COMMAND_ADDR=327680 for > UNIT_HARD_CAP commands.
+  // Write a Produce command at slot index UNIT_HARD_CAP and return UNIT_HARD_CAP + 1.
+  const uint32_t total = static_cast<uint32_t>(game::cfg::UNIT_HARD_CAP) + 1u;
+  const uint32_t last_off = 327680u + static_cast<uint32_t>(game::cfg::UNIT_HARD_CAP) * 24u;
+  const std::string body =
+      "(i32.store (i32.const " + std::to_string(last_off) + ") (i32.const 9001)) "
+      "(i32.store16 (i32.const " + std::to_string(last_off + 4) + ") (i32.const " +
+      std::to_string(static_cast<uint16_t>(game::CommandKind::Produce)) + ")) "
+      "(i32.const " + std::to_string(total) + ")";
+  runner::WasmBot bot(to_wasm(sandbox_wat("", "", body, R"((memory (export "memory") 7))")));
+  ASSERT_TRUE(bot.healthy()) << bot.last_error();
+
+  auto cmds = bot.on_tick(game::Snapshot{});
+  ASSERT_EQ(cmds.size(), static_cast<size_t>(total));
+  EXPECT_EQ(cmds.back().entity_id, 9001u);
+  EXPECT_EQ(cmds.back().kind, static_cast<uint16_t>(game::CommandKind::Produce));
+}
+
+// A bot built before the buffer grew to COMMAND_HARD_CAP has room for UNIT_HARD_CAP commands
+// only. It must still load, and a count past what its memory holds must not read beyond it.
+TEST(WasmBot, OldSizedCommandBufferLoadsAndIsNotOverread) {
+  constexpr uint32_t kPage = 65536, kPages = 6;
+  const uint32_t addr = kPages * kPage -
+                        static_cast<uint32_t>(game::cfg::UNIT_HARD_CAP) * sizeof(game::Command);
+  std::string wat = sandbox_wat("", "", "i32.const " + std::to_string(game::cfg::COMMAND_HARD_CAP));
+  const std::string old_addr = "(i32.const 327680)";
+  wat.replace(wat.find(old_addr), old_addr.size(), "(i32.const " + std::to_string(addr) + ")");
+  runner::WasmBot bot(to_wasm(wat));
+  ASSERT_TRUE(bot.healthy()) << bot.last_error();
+  auto cmds = bot.on_tick(game::Snapshot{});
+  EXPECT_EQ(cmds.size(), static_cast<size_t>(game::cfg::UNIT_HARD_CAP));
+}
+
+TEST(WasmBot, NegativeCommandCountReturnsEmpty) {
+  runner::WasmBot bot(to_wasm(sandbox_wat("", "", "i32.const -1")));
+  ASSERT_TRUE(bot.healthy()) << bot.last_error();
+  auto cmds = bot.on_tick(game::Snapshot{});
+  EXPECT_TRUE(cmds.empty());
+}

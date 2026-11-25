@@ -333,6 +333,31 @@ TEST(Territory, DestroyedClaimNodeLosesTerritory) {
   EXPECT_GE(ts_after.pct_faction[0], ts_before.pct_faction[0]);
 }
 
+TEST(Territory, RebuiltClaimNodeAtSamePositionRecomputesTerritory) {
+  game::World world;
+  world.map = game::Map::make(20, 20);
+  world.rng = game::Rng{0};
+  world.tick = 0;
+  constexpr uint32_t tick_cap = 1000;
+
+  auto& claim1 = world.spawn_structure({0}, game::StructureType::ClaimNode, {5, 10});
+  auto ts1 = game::run_territory(world, tick_cap);
+  world.last_territory = ts1;
+  ASSERT_GT(ts1.pct_faction[0], 0u);
+
+  // Destroy the only finished ClaimNode on the map, then advance territory state.
+  claim1.hp = 0;
+  world.purge_dead();
+  auto ts2 = game::run_territory(world, tick_cap);
+  world.last_territory = ts2;
+  ASSERT_EQ(ts2.pct_faction[0], 0u);
+
+  // Rebuild a finished ClaimNode at the exact same position.
+  world.spawn_structure({0}, game::StructureType::ClaimNode, {5, 10});
+  auto ts3 = game::run_territory(world, tick_cap);
+  EXPECT_EQ(ts3.pct_faction[0], ts1.pct_faction[0]);
+}
+
 // ---- Integration: determinism hash unchanged by ClaimNodes ------------------
 
 TEST(Territory, DeterminismHashStableWithClaimNodes) {

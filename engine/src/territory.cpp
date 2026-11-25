@@ -98,8 +98,10 @@ TerritoryState run_territory(World& world, uint32_t tick_cap) {
   for (const auto& [sid, s] : world.structures)
     if (s.type == StructureType::ClaimNode && s.alive() && s.complete())
       claims.push_back({s.pos, s.faction.value});
-  if (claims.empty())
+  if (claims.empty()) {
+    world.territory_claims.clear();
     return {};
+  }
   if (claims == world.territory_claims)
     return world.last_territory;
   world.territory_claims = std::move(claims);

@@ -53,7 +53,10 @@ static constexpr size_t MAX_SNAPSHOT_BYTES =
     game::cfg::STRUCTURE_HARD_CAP * sizeof(game::EnemyStructureView) +
     game::cfg::MAP_MAX_W * game::cfg::MAP_MAX_H * sizeof(game::TileView);
 
-static constexpr size_t MAX_COMMAND_BYTES =
+// A bot's command buffer holds up to COMMAND_HARD_CAP commands (every unit and every producer).
+// Bots built before that size reserved UNIT_HARD_CAP, and still load: this is all a bot must
+// have room for, and each tick reads only as many commands as fit its memory.
+static constexpr size_t MIN_COMMAND_BYTES =
     game::cfg::UNIT_HARD_CAP * sizeof(game::Command);
 
 // Serialize a snapshot into the bot's snapshot buffer. The engine enforces the caps these counts
@@ -327,7 +330,7 @@ WasmBot::WasmBot(const std::vector<uint8_t>& wasm)
     last_error_ = "SNAPSHOT_ADDR buffer too small for worst-case snapshot";
     return;
   }
-  if (impl_->command_addr + MAX_COMMAND_BYTES > mem_bytes) {
+  if (impl_->command_addr + MIN_COMMAND_BYTES > mem_bytes) {
     last_error_ = "COMMAND_ADDR buffer too small for max commands";
     return;
   }
@@ -421,8 +424,17 @@ std::vector<game::Command> WasmBot::on_tick(const game::Snapshot& snap) {
     return {};
   }
 
-  auto cmd_count = static_cast<uint32_t>(result.of.i32);
-  cmd_count = std::min(cmd_count, static_cast<uint32_t>(game::cfg::UNIT_HARD_CAP));
+  if (result.of.i32 <= 0)
+    return {};
+  // Read again after the call: the bot may have grown its memory. What fits there bounds the
+  // count, so an older bot's smaller buffer is never read past.
+  mem = wasmtime_memory_data(ctx, &impl_->memory);
+  const size_t mem_size = last_metrics_.memory_bytes;
+  const size_t fits =
+      mem_size > impl_->command_addr ? (mem_size - impl_->command_addr) / sizeof(game::Command) : 0;
+  const uint32_t cmd_count = static_cast<uint32_t>(
+      std::min({static_cast<size_t>(result.of.i32),
+                static_cast<size_t>(game::cfg::COMMAND_HARD_CAP), fits}));
 
   std::vector<game::Command> cmds(cmd_count);
   if (cmd_count > 0)

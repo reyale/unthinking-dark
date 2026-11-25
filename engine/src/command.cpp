@@ -36,6 +36,8 @@ ValidatedCommands validate_commands(const World& world, uint32_t faction_id,
       const Structure* s = world.find_structure(eid.structure());
       if (!s || !s->alive() || s->faction != my_faction)
         continue;
+      if (cmd.aux > static_cast<uint16_t>(UnitType::Battleship))
+        continue;
       if (!can_produce(s->type, static_cast<UnitType>(cmd.aux)))
         continue;
       out.emplace(eid, cmd);
@@ -74,6 +76,9 @@ ValidatedCommands validate_commands(const World& world, uint32_t faction_id,
     case CommandKind::Gather:
       continue; // reserved: harvesting is automatic for a Drone beside a node
     case CommandKind::Build:
+      if (cmd.aux != static_cast<uint16_t>(StructureType::Factory))
+        continue;
+      [[fallthrough]];
     case CommandKind::DeployClaim: {
       if (unit->type != UnitType::Drone)
         continue; // only Drones build (DESIGN §6)
@@ -84,6 +89,8 @@ ValidatedCommands validate_commands(const World& world, uint32_t faction_id,
     }
     case CommandKind::Produce:
       continue; // a unit can't produce
+    default:
+      continue; // unknown CommandKind
     }
 
     out.emplace(eid, cmd);
