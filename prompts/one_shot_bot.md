@@ -14,7 +14,7 @@ engine's own bots.
 - DO NOT ASSUME THIS DOCUMENT IS 100% ACCURATE ALWAYS READ THE DOCS AND CODE
 - NO I/O, NO NETWORKING, ETC
 - OTHERWISE YOU CAN DO ANYTHING YOU WANT IN TERMS OF SOFTWARE AS LONG AS IT COMPILES AND RUNS WITHIN THE CONSTRAINTS as WebAssembly
-- ITERATE AS MUCH AS YOU WANT TO
+- ITERATE AS MUCH AS YOUR BUDGET ALLOWS (§7)
 - YOU DO NOT KNOW THE OPPONENTS YOU WILL FACE - SOME MIGHT BE QUITE SOPHISTICATED
 - COME UP WITH NOVEL STRATEGIES, AS LONG AS YOU DO NOT HACK THE ABI/ENGINE IT IS LEGAL - INCLUDING EXPLOITING ENGINE BUGS
 
@@ -230,9 +230,10 @@ Each is a lost match, not a warning.
 - Put your bot in `prompts/entries/<name>/bot.cpp`, where `<name>` is your bot's name (lowercase,
   hyphens allowed). Change nothing else in the repository: not the engine, the fixtures, the
   maps, the build, or this prompt. Don't commit.
-- Iterate as much as you like within this session: read, write, build, validate, fix, and
-  validate again. Nobody else touches the code.
-- What counts is the final `bot.cpp`. It must pass the validation pipeline.
+- Iterate as much as your budget (§7) allows: read, write, build, validate, fix, and validate
+  again. Nobody else touches the code.
+- What counts is the `bot.cpp` in your entry directory when the run ends. It must pass the
+  validation pipeline.
 
 ---
 
@@ -265,7 +266,29 @@ report to find what loses and fix it.
 
 ---
 
-## 7. What to deliver
+## 7. Budget
+
+This run has a fixed budget. The note at the end of this prompt says what it is measured in
+(for example steps, minutes, tokens or dollars) and how large it is. The file `USED_BUDGET` in
+your working directory shows how much of it you have used so far, and is updated as you
+work: check it often.
+
+When the budget runs out, the run is stopped. Whatever `bot.cpp` is then in your entry
+directory is validated and, if it passes, entered as your bot. Work that isn't in that file,
+or doesn't pass, counts for nothing.
+
+So plan for it:
+- Get a simple, valid entry in place early
+- Keep that `bot.cpp` valid from then on. Develop changes in another file (outside the
+  repository, or beside `bot.cpp` in your entry directory), and copy them into `bot.cpp` only
+  once they pass.
+- Keep the last part your budget for a final full validation and your reply (§8).
+- Spend the rest improving your bot however you judge best, and stop when the budget is used,
+  even if you have more ideas.
+
+---
+
+## 8. What to deliver
 
 When you're done, reply with:
 1. **The bot's name** and the path of its `bot.cpp`.
