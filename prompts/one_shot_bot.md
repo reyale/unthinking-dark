@@ -22,6 +22,11 @@ engine's own bots.
 
 ## 0. Sources of truth: read the code
 
+Every path below is relative to the repository's root. If you have only an installed engine
+(`bin/ud_run`, `share/ai_game/...`), the same files are under its `share/ai_game/source/`, in
+the same layout, except `prompts/` (this prompt, `validate_bot.py`), which is
+`share/ai_game/prompts/`; the tools are in its `bin/`.
+
 **This document describes the game, but the code defines it, and the code changes often:
 numbers are tuned, rules are refined, and units, structures and maps are added.** Don't trust
 any number you remember about this game, from this document or from training. Read it from
@@ -37,7 +42,7 @@ values, so it stays right when they change.
 | The bot interface | `engine/src/bot_iface.hpp` |
 | Movement, combat, economy, territory, the win check | `engine/src/movement.cpp`, `combat.cpp`, `economy.cpp`, `territory.cpp`, `wincheck.cpp` |
 | What each side starts with | `maps/match_setup.cpp` |
-| The maps | `maps/data/*.json`; `tools/ud_mapgen` makes more |
+| The maps | `maps/data/*.json`; `ud_mapgen` (installed beside `ud_run`) makes more |
 | How a bot is built and run as WebAssembly | `sdk/cpp/include/ud/bot_host.hpp`, `cmake/WasmBot.cmake`, `runner/wasm_bot.cpp` |
 
 **Learn from the bots that already exist.** `fixtures/` holds the engine's sample bots, every
